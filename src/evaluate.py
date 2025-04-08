@@ -12,7 +12,7 @@ ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_cap_datasets/FoodX-
 dataset = FoodX251(ds_path)
 prompt = '<image>\nPlease classify the food item in this image. Answer with a single item if possible.'
 
-test_set = dataset.test_set()
+test_set = dataset.val_set()
 # only has class names
 
 accuracy = 0
