@@ -17,7 +17,7 @@ test_set = dataset.val_set()
 
 accuracy = 0
 for i, row in test_set.iterrows():
-    response = model.infer(f"{ds_path}/test/test_set/{row['fname']}", prompt)
+    response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
     # TODO: pattern match on label from row['class'] to compute accuracy
     print(f"Item: {row['class']}")
     print(response)
