@@ -93,9 +93,6 @@ class InternVLM():
 
     def infer(self, img_path: str, prompt: str) -> str:
         pixel_values = self.load_image(img_path, max_num=12).to(torch.bfloat16).cuda()
-        return self.model.chat(self.tokenizer, pixel_values, question, self.generation_config)
+        return self.model.chat(self.tokenizer, pixel_values, prompt, self.generation_config)
         
 
-# question = '<image>\nPlease describe food items present in this image.'
-question = '<image>\nPlease classify each food item in this image. Answer with a single word for each item if possible.'
-print(f'User: {question}\nAssistant: {response}')
