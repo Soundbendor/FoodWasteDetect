@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 
 
@@ -9,15 +11,15 @@ class FoodX251():
     def __init__(self, root: str) -> None:
         self.root = root
         self.cmap = self.get_classmap()
-        self.train_path = "annot/train_info.csv"
-        self.test_path = "annot/test_info.csv"
-        self.val_path = "annot/val_info.csv"
+        self.train_path = os.path.join(root, "annot/train_info.csv")
+        self.test_path = os.path.join(root, "annot/test_info.csv")
+        self.val_path = os.path.join(root, "annot/val_info.csv")
 
     def _naturalize_class_labels(self, row: str) -> str:
         return row.capitalize().replace('_', ' ')
 
     def get_classmap(self) -> pd.DataFrame:
-        cmap = pd.read_csv("annot/class_list.txt", delim_whitespace=True, index_col=0, names=['id', 'label'])
+        cmap = pd.read_csv(os.path.join(self.root, "annot/class_list.txt"), delim_whitespace=True, index_col=0, names=['id', 'label'])
         cmap['label'] = cmap['label'].apply(self._naturalize_class_labels)
         return cmap
 
