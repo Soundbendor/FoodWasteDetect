@@ -1,5 +1,5 @@
-from .datasets.foodx251 import FoodX251
-from .intern import InternVLM
+from datasets.foodx251 import FoodX251
+from intern import InternVLM
 
 ds_path = 'compost3.jpg'
 
@@ -7,7 +7,7 @@ ds_path = 'compost3.jpg'
 # for every image in foodx-251
 # read class label, image 
 
-model = InternVLM("InternVL2_5-8B-MPO")
+model = InternVLM("../../intern_fw_test/InternVL2_5-8B-MPO")
 ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_cap_datasets/FoodX-251"
 dataset = FoodX251(ds_path)
 prompt = '<image>\nPlease classify the food item in this image. Answer with a single item if possible.'
