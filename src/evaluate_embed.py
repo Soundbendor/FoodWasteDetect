@@ -21,13 +21,14 @@ test_set = dataset.val_set()
 cos_mean = 0
 for i, row in test_set.iterrows():
     response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
+    response = response.replace('.', '')
     # TODO: pattern match on label from row['class'] to compute accuracy
     print(f"Item: {row['class']}")
     print(response)
     embeddings = embed_model.encode([row['class'], response])
     sim = embed_model.similarity(embeddings, embeddings)
     print(sim)
-    cos_mean += sim[0, 1] 
+    cos_mean += sim[0, 1]
 
 cos_mean = cos_mean / len(test_set)
 
