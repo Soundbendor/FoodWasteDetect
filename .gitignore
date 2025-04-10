@@ -1,3 +1,4 @@
 deps/
 assets/
+db/
 *__pycache__*
