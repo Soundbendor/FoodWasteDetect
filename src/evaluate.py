@@ -3,9 +3,9 @@ from intern import InternVLM
 
 ds_path = 'compost3.jpg'
 
-# goal: 
+# goal:
 # for every image in foodx-251
-# read class label, image 
+# read class label, image
 
 model = InternVLM("../../intern_fw_test/InternVL2_5-8B-MPO")
 ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_cap_datasets/FoodX-251"
@@ -18,6 +18,7 @@ test_set = dataset.val_set()
 accuracy = 0
 for i, row in test_set.iterrows():
     response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
+    response = response.replace('.', '')
     # TODO: pattern match on label from row['class'] to compute accuracy
     print(f"Item: {row['class']}")
     print(response)

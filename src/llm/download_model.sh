@@ -1,3 +1,3 @@
 #!/bin/bash
 
-./bin/ollama run deepseek-r1:32b
+../../deps/ollama/bin/ollama run deepseek-r1:32b

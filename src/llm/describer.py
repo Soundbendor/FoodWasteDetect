@@ -22,12 +22,17 @@ class DescriberLLM:
             )
         except ConnectionError:
             # Run online script
-            subprocess.call("start_deepseek.sh", shell=True)
+            print("Error handler!")
+            process = subprocess.Popen("src/llm/start_deepseek.sh", stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            out, err = process.communicate()
+            print(err)
+            print(out)
+            # subprocess.call("bash llm/start_deepseek.sh", shell=True)
 
     def generate_descriptors(self, ds: Dataset) -> str:
         """Given a dataset, provides a list of descriptions of each class of that dataset"""
         ds_descriptors = defaultdict(list)
-        for item in self._load_dataset(ds):
+        for item in self._load_dataset(ds)[:3]:
             response: ChatResponse = chat(
                 model="deepseek-r1:32b",
                 messages=[
@@ -43,7 +48,7 @@ class DescriberLLM:
                         descriptor = line.partition(" ")[2]
                         ds_descriptors[item].append(descriptor)
 
-        with open("descriptor_dictionary.json", "w", encoding="utf-8") as f:
+        with open("assets/descriptor_dictionary.json", "w", encoding="utf-8") as f:
             json.dump(ds_descriptors, f, ensure_ascii=False, indent=4)
 
-        return "descriptor_dictionary.json"
+        return "assets/descriptor_dictionary.json"
