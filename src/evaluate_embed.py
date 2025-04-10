@@ -17,13 +17,16 @@ db = VectorDB("db/qdrant")
 test_set = dataset.val_set()
 # only has class names
 
-cos_mean = 0
+acc = 0
 for i, row in test_set.iterrows():
     response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
     category, confidence = db.query(response)
     print(f"Item: {category}, Confidence: {confidence}")
     print(f"Description: {response}")
+    print(f"True label: {row['class']}")
+    if row["class"] == category:
+        acc += 1
 
-cos_mean = cos_mean / len(test_set)
+acc = acc / len(test_set)
 
-print(f"Final Score: {cos_mean}")
+print(f"Final Score: {acc}")
