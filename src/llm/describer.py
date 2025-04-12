@@ -46,7 +46,7 @@ class DescriberLLM:
         for item in self._load_dataset(ds)[:5]:
             for _ in range(5):
                 response: ChatResponse = chat(
-                    model="deepseek-r1:32b",
+                    model=self.model,
                     messages=[
                         {
                             "role": "user",
