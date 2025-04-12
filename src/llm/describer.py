@@ -58,6 +58,8 @@ class DescriberLLM:
                 output = FoodDescriptor.model_validate_json(response.message.content)
                 # Make sure the food class always matches our class label
                 output.food_class = item
+                # Remove emphasis
+                output.description = output.description.replace("*", "")
                 print(output)
                 # ds_descriptors[item].append(response.message.content)
                 # for line in response.message.content.splitlines():
