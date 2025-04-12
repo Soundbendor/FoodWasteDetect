@@ -15,7 +15,7 @@ class FoodDescriptor(BaseModel):
 
 class DescriberLLM:
     def __init__(self):
-        self.model = "deepseek-r1:32b"
+        self.model = "gemma3:27b"
 
     def _load_dataset(self, ds: Dataset):
         return ds.get_class_list()
@@ -50,12 +50,14 @@ class DescriberLLM:
                     messages=[
                         {
                             "role": "user",
-                            "content": f"Can you provide a sentence describing the food {item}? Please be as descriptive as possible, focusing on the visual characteristics of the food.",
+                            "content": f"Can you provide a sentence describing the food {item}? Please be as descriptive as possible, focusing on the visual characteristics of the {item} and explicitly mention {item} in your description.",
                         },
                     ],
                     format=FoodDescriptor.model_json_schema(),
                 )
                 output = FoodDescriptor.model_validate_json(response.message.content)
+                # Make sure the food class always matches our class label
+                output.food_class = item
                 print(output)
                 # ds_descriptors[item].append(response.message.content)
                 # for line in response.message.content.splitlines():
