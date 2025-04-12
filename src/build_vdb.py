@@ -10,9 +10,9 @@ ds = FoodX251("/nfs/stak/users/beerya/soundbendor/food_cap_datasets/FoodX-251")
 llm.start_server()
 # dict_path = llm.generate_descriptors(ds)
 dict_path = "assets/descriptor_dictionary.json"
-db.add(dict_path)
+# db.add(dict_path)
 
 # Test database with a query
 query = "They are delicate, pastel-pink macarons featuring crisp almond-flour meringue shells sandwiched around a sweet, creamy filling."
-category, confidence = db.query(query)
+category, confidence, q_vecs = db.query(query, "voting")
 print(f"Food Class: {category}")

@@ -32,21 +32,24 @@ class DescriberLLM:
     def generate_descriptors(self, ds: Dataset) -> str:
         """Given a dataset, provides a list of descriptions of each class of that dataset"""
         ds_descriptors = defaultdict(list)
-        for item in self._load_dataset(ds)[:3]:
-            response: ChatResponse = chat(
-                model="deepseek-r1:32b",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Can you provide 10 sentences describing the visual characteristics of the food {item}?",
-                    },
-                ],
-            )
-            for line in response.message.content.splitlines():
-                if len(line) > 3:
-                    if line[0].isdigit():
-                        descriptor = line.partition(" ")[2]
-                        ds_descriptors[item].append(descriptor)
+        for item in self._load_dataset(ds)[:5]:
+            for _ in range(5)
+                response: ChatResponse = chat(
+                    model="deepseek-r1:32b",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"Can you provide a sentence describing the food {item}? Please be as descriptive as possible, focusing on the visual characteristics of the food."
+                        },
+                    ],
+                )
+                print(response.message.content)
+                ds_descriptors[item].append(response.message.content)
+                # for line in response.message.content.splitlines():
+                    # if len(line) > 3:
+                        # if line[0].isdigit():
+                            # descriptor = line.partition(" ")[2]
+                            # ds_descriptors[item].append(descriptor)
 
         with open("assets/descriptor_dictionary.json", "w", encoding="utf-8") as f:
             json.dump(ds_descriptors, f, ensure_ascii=False, indent=4)
