@@ -61,12 +61,7 @@ class DescriberLLM:
                 # Remove emphasis
                 output.description = output.description.replace("*", "")
                 print(output)
-                # ds_descriptors[item].append(response.message.content)
-                # for line in response.message.content.splitlines():
-                # if len(line) > 3:
-                # if line[0].isdigit():
-                # descriptor = line.partition(" ")[2]
-                # ds_descriptors[item].append(descriptor)
+                ds_descriptors[item].append(output.description)
 
         with open("assets/descriptor_dictionary.json", "w", encoding="utf-8") as f:
             json.dump(ds_descriptors, f, ensure_ascii=False, indent=4)
