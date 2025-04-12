@@ -2,6 +2,7 @@ import json
 import subprocess
 from collections import defaultdict
 
+import ollama
 from ollama import ChatResponse, chat
 from pydantic import BaseModel
 
@@ -44,24 +45,33 @@ class DescriberLLM:
         """Given a dataset, provides a list of descriptions of each class of that dataset"""
         ds_descriptors = defaultdict(list)
         for item in self._load_dataset(ds):
+            # remove "food" from item, make as new prompt
+            cleaned_item = item.replace("food", "")
             for _ in range(5):
-                response: ChatResponse = chat(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"Can you provide a sentence describing the food {item}? Please be as descriptive as possible, focusing on the visual characteristics of the {item} and explicitly mention {item} in your description.",
-                        },
-                    ],
-                    format=FoodDescriptor.model_json_schema(),
-                )
-                output = FoodDescriptor.model_validate_json(response.message.content)
-                # Make sure the food class always matches our class label
-                output.food_class = item
-                # Remove emphasis
-                output.description = output.description.replace("*", "")
-                print(output)
-                ds_descriptors[item].append(output.description)
+                try:
+                    response: ChatResponse = chat(
+                        model=self.model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": f"Can you provide a sentence describing the food {cleaned_item}? Please be as descriptive as possible, focusing on the visual characteristics of the {cleaned_item} and explicitly mention {cleaned_item} in your description.",
+                            },
+                        ],
+                        format=FoodDescriptor.model_json_schema(),
+                    )
+                    output = FoodDescriptor.model_validate_json(
+                        response.message.content
+                    )
+                    # Make sure the food class always matches our class label
+                    output.food_class = item
+                    # Remove emphasis
+                    output.description = output.description.replace("*", "")
+                    print(output)
+                    ds_descriptors[item].append(output.description)
+                # ollama server failure
+                except ollama._types.ResponseError as e:
+                    print("Warning! Server error {e}")
+                    continue
 
         with open("assets/descriptor_dictionary.json", "w", encoding="utf-8") as f:
             json.dump(ds_descriptors, f, ensure_ascii=False, indent=4)
