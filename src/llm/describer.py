@@ -43,7 +43,7 @@ class DescriberLLM:
     def generate_descriptors(self, ds: Dataset) -> str:
         """Given a dataset, provides a list of descriptions of each class of that dataset"""
         ds_descriptors = defaultdict(list)
-        for item in self._load_dataset(ds)[:5]:
+        for item in self._load_dataset(ds):
             for _ in range(5):
                 response: ChatResponse = chat(
                     model=self.model,
