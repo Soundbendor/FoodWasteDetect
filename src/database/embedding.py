@@ -72,8 +72,7 @@ class EmbeddingModel:
             bf16=False,  # Set to True if you have a GPU that supports BF16
             batch_sampler=BatchSamplers.NO_DUPLICATES,  # losses that use "in-batch negatives" benefit from no duplicates
             # Optional tracking/debugging parameters:
-            eval_strategy="steps",
-            eval_steps=100,
+            eval_strategy="no",
             save_strategy="steps",
             save_steps=100,
             save_total_limit=2,
