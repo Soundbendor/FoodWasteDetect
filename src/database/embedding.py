@@ -17,9 +17,9 @@ from sentence_transformers.losses import BatchAllTripletLoss
 
 class EmbeddingModel:
 
-    def __init__(self, path: str):
-        self.ds = self._load_dataset(path)
-        self.model = SentenceTransformer("all-mpnet-base-v2")
+    def __init__(self, ds_path: str, model_path: str):
+        self.ds = self._load_dataset(ds_path)
+        self.model = SentenceTransformer(model_path)
         self.loss = BatchAllTripletLoss(self.model)
 
     def _load_dataset(self, path: str):
