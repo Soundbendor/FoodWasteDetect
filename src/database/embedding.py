@@ -1,4 +1,6 @@
-from datasets import load_dataset
+import json
+
+from datasets import Dataset
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
 from sentence_transformers.training_args import (
     SentenceTransformerTrainingArguments,
@@ -23,9 +25,19 @@ class EmbeddingModel:
         self.loss = BatchAllTripletLoss(self.model)
 
     def _load_dataset(self, path: str):
-        ds = load_dataset("json", data_files=path)
-        # change column
-        ds = ds.rename_column("food_class", "label")
+        # WARN: this doesn't work!
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        class_names = []
+        descriptors = []
+        for k, v in data.items():
+            for description in v:
+                descriptors.append(description)
+                class_names.append(k)
+
+        ds = {"label": class_names, "descriptions": descriptors}
+        ds = Dataset.from_dict(ds)
         return ds
 
     def evaluator(self):
