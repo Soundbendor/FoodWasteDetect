@@ -4,7 +4,7 @@ from typing import Tuple
 from .embedding import EmbeddingModel
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct
+from qdrant_client.models import PointStruct, VectorParams, Distance
 
 
 class VectorDB:
@@ -31,6 +31,12 @@ class VectorDB:
                         payload={"class": k},
                     )
                 )
+
+        if not self.client.collection_exists(self.db_name):
+            self.client.create_collection(
+                collection_name=self.db_name,
+                vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+            )
         self.client.upsert(collection_name=self.db_name, points=points)
 
     # Given a food image descriptor, return the most probable class and similarity score
