@@ -31,10 +31,10 @@ class EmbeddingModel:
 
         class_names = []
         descriptors = []
-        for k, v in data.items():
+        for idx, (k, v) in enumerate(data.items()):
             for description in v:
                 descriptors.append(description)
-                class_names.append(k)
+                class_names.append(idx)
 
         ds = {"label": class_names, "descriptions": descriptors}
         ds = Dataset.from_dict(ds)
@@ -72,6 +72,10 @@ class EmbeddingModel:
             bf16=False,  # Set to True if you have a GPU that supports BF16
             batch_sampler=BatchSamplers.NO_DUPLICATES,  # losses that use "in-batch negatives" benefit from no duplicates
             # Optional tracking/debugging parameters:
+            # WARN: eventually, we want to define an evaluation function using a test dataset
+            # We will want to generate Internv2.5 captions from foodx251 training data and form triplets from this data
+            # Then, use triplet loss evaluation
+            # Unsure whether to do this before or after InternV2.5 finetuning
             eval_strategy="no",
             save_strategy="steps",
             save_steps=100,
