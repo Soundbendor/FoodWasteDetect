@@ -1,7 +1,7 @@
 import json
 from collections import Counter
 from typing import Tuple
-from embedding import EmbeddingModel
+from .embedding import EmbeddingModel
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
