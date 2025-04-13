@@ -1,5 +1,5 @@
-from db.vecdb import VectorDB
-from db.embedding import EmbeddingModel
+from database.vecdb import VectorDB
+from database.embedding import EmbeddingModel
 from datasets.foodx251 import FoodX251
 from llm.describer import DescriberLLM
 
@@ -7,7 +7,7 @@ embedding_model = "all-mpnet-base-v2"
 dict_path = "assets/descriptor_dictionary.json"
 db = VectorDB("db/qdrant")
 llm = DescriberLLM()
-encoder = EmbeddingModel(dict_path)
+encoder = EmbeddingModel(dict_path, model_path)
 ds = FoodX251("/nfs/stak/users/beerya/soundbendor/food_cap_datasets/FoodX-251")
 
 # Make sure our LLM is online
