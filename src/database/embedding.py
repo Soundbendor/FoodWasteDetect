@@ -33,7 +33,7 @@ class EmbeddingModel:
         # We need a subset of our dataset that's formatted as triplets?
         pass
 
-    def get_embeddings(self, txt: str):
+    def get_embedding(self, txt: str):
         return self.model.encode(txt)
 
     def train(self):
