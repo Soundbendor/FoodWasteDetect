@@ -18,14 +18,12 @@ test_set = dataset.val_set()
 acc = 0
 for i, row in test_set.iterrows():
     response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
-    category, confidence, q_response = db.query(response, "voting")
-    print(f"\nItem: {category}")
+    q_vecs = db.query(response)
+    prediction, score = db.score(q_vecs, row["class"], "voting")
+    print(f"Predicted Label: {prediction}")
     print(f"Description: {response}")
     print(f"True label: {row['class']}")
-    print(f"DEBUG: {q_response}")
-    if row["class"] == category:
-        acc += 1
+    acc += score
 
 acc = acc / len(test_set)
-
 print(f"Final Score: {acc}")
