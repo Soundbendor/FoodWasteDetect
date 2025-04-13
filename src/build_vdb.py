@@ -5,9 +5,9 @@ from llm.describer import DescriberLLM
 
 embedding_model = "all-mpnet-base-v2"
 dict_path = "assets/descriptor_dictionary.json"
-db = VectorDB("db/qdrant")
-llm = DescriberLLM()
 encoder = EmbeddingModel(dict_path, model_path)
+db = VectorDB("db/qdrant", encoder)
+llm = DescriberLLM()
 ds = FoodX251("/nfs/stak/users/beerya/soundbendor/food_cap_datasets/FoodX-251")
 
 # Make sure our LLM is online

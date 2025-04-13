@@ -8,10 +8,10 @@ from qdrant_client.models import PointStruct
 
 
 class VectorDB:
-    def __init__(self, path: str):
+    def __init__(self, path: str, model):
         self.client = QdrantClient(path=path)
         self.db_name = "foods_finetune"
-        self.model = EmbeddingModel("assets/embed_models/mpnet-base-food/final")
+        self.model = model
         # self.client.set_model("BAAI/bge-large-en-v1.5", providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
 
     def add(self, dict_path: str):

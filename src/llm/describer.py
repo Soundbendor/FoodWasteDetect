@@ -6,7 +6,7 @@ import ollama
 from ollama import ChatResponse, chat
 from pydantic import BaseModel
 
-from datasets.dataset import Dataset
+from ds.dataset import Dataset
 
 
 class FoodDescriptor(BaseModel):
