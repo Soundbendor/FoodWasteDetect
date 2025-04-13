@@ -1,6 +1,6 @@
 from database.vecdb import VectorDB
 from database.embedding import EmbeddingModel
-from datasets.foodx251 import FoodX251
+from ds.foodx251 import FoodX251
 from llm.describer import DescriberLLM
 
 embedding_model = "all-mpnet-base-v2"
