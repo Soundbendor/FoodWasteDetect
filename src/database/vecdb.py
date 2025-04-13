@@ -41,8 +41,9 @@ class VectorDB:
 
     # Given a food image descriptor, return the most probable class and similarity score
     def query(self, query_text: str, strategy: str) -> Tuple[str, float]:
-        search_result = self.client.query(
-            collection_name=self.db_name, query_text=query_text
+        query_vector = self.model.get_embedding(query_text)
+        search_result = self.client.search(
+            collection_name=self.db_name, query_vector=query_vector, limit=10
         )
         # Take top-1 result
         if strategy == "top1":
