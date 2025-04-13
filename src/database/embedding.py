@@ -33,6 +33,9 @@ class EmbeddingModel:
         # We need a subset of our dataset that's formatted as triplets?
         pass
 
+    def get_embeddings(self, txt: str):
+        return self.model.encode(txt)
+
     def train(self):
         trainer = SentenceTransformerTrainer(
             model=self.model,
@@ -41,7 +44,7 @@ class EmbeddingModel:
             loss=self.loss,
         )
         trainer.train()
-        self.model.save_pretrained("models/mpnet-base-food/final")
+        self.model.save_pretrained("assets/embed_models/mpnet-base-food/final")
 
     def set_config(self):
         return SentenceTransformerTrainingArguments(

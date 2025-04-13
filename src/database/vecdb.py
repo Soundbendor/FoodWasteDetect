@@ -1,50 +1,48 @@
 import json
 from collections import Counter
 from typing import Tuple
+from embedding import EmbeddingModel
 
 from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
 
 
 class VectorDB:
     def __init__(self, path: str):
         self.client = QdrantClient(path=path)
-        self.db_name = 'foods'
-        self.client.set_model("BAAI/bge-large-en-v1.5", providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+        self.db_name = "foods_finetune"
+        self.model = EmbeddingModel("assets/embed_models/mpnet-base-food/final")
+        # self.client.set_model("BAAI/bge-large-en-v1.5", providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
 
     def add(self, dict_path: str):
         # Expecting a descriptor dictionary as
         # { 'food_item': ['description 1', 'description 2'], ... }
 
-        with open(dict_path, 'r', encoding='utf-8') as f:
+        with open(dict_path, "r", encoding="utf-8") as f:
             descriptors = json.load(f)
 
-        metadata = []
-        docs = []
-        for k, v in descriptors.items():
+        points = []
+        for idx, (k, v) in enumerate(descriptors.items()):
             for descriptor in v:
-                metadata.append({"class": k})
-                docs.append(descriptor)
-        ids = range(len(docs))
-        self.client.add(
-            collection_name=self.db_name,
-            documents=docs,
-            metadata=metadata,
-            ids=ids
-        )
+                points.append(
+                    PointStruct(
+                        id=idx,
+                        vector=self.model.get_embedding(descriptor),
+                        payload={"class": k},
+                    )
+                )
+        self.client.upsert(collection_name=self.db_name, points=points)
 
     # Given a food image descriptor, return the most probable class and similarity score
     def query(self, query_text: str, strategy: str) -> Tuple[str, float]:
         search_result = self.client.query(
-            collection_name=self.db_name,
-            query_text=query_text
+            collection_name=self.db_name, query_text=query_text
         )
         # Take top-1 result
-        if strategy == 'top1':
-            category = search_result[0].metadata['class']
+        if strategy == "top1":
+            category = search_result[0].metadata["class"]
             confidence = search_result[0].score
             return category, confidence, search_result[0]
-        if strategy == 'voting':
-            votes = Counter([x.metadata['class'] for x in search_result])
+        if strategy == "voting":
+            votes = Counter([x.metadata["class"] for x in search_result])
             return votes.most_common(1)[0][0], None, None
-
-

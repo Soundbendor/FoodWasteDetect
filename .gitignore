@@ -1,4 +1,4 @@
 deps/
 assets/
-db/
+/db/
 *__pycache__*
