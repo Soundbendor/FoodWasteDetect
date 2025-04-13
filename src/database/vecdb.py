@@ -47,9 +47,9 @@ class VectorDB:
         )
         # Take top-1 result
         if strategy == "top1":
-            category = search_result[0].metadata["class"]
+            category = search_result[0].payload["class"]
             confidence = search_result[0].score
             return category, confidence, search_result[0]
         if strategy == "voting":
-            votes = Counter([x.metadata["class"] for x in search_result])
+            votes = Counter([x.payload["class"] for x in search_result])
             return votes.most_common(1)[0][0], None, None
