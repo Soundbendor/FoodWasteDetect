@@ -21,9 +21,13 @@ class VectorDB:
 
     def connect(self, addr: str):
         '''Check for qdrant server running on host. If connection fails, starts a Qdrant instance.'''
+        connection_status = 0
         for i in range(5):
-            response = requests.get(addr)
-            if response.status_code != 200:
+            try: 
+                response = requests.get(addr)
+            except ConnectionError:
+               connection_status = -1
+            if response.status_code != 200 or connection_status < 0:
                 # call qdrant startup script on first retry
                 if i == 0:
                     subprocess.run(["sbatch" "start_qdrant.sbatch"], shell=True)
