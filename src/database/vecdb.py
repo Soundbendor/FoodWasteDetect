@@ -1,6 +1,7 @@
 import json
 import subprocess
 import requests
+import time
 from collections import Counter
 from typing import Tuple, List
 from .embedding import EmbeddingModel
@@ -19,11 +20,19 @@ class VectorDB:
         self.model = model
 
     def connect(self, addr: str):
-        # Check if server is alive
-        response = requests.get(addr)
-        if response.status_code != 200:
-            # call qdrant startup script
-            subprocess.run(["sbatch" "start_qdrant.sbatch"], shell=True)
+        '''Check for qdrant server running on host. If connection fails, starts a Qdrant instance.'''
+        for i in range(5):
+            response = requests.get(addr)
+            if response.status_code != 200:
+                # call qdrant startup script on first retry
+                if i == 0:
+                    subprocess.run(["sbatch" "start_qdrant.sbatch"], shell=True)
+                print("DEBUG: Waiting 60s, contacting Qdrant server...")
+                time.sleep(60)
+            else:
+                break
+        else:
+            raise ConnectionError("Failure to contact Qdrant server, likely due to excess queue times on cn-m-1.")
         return QdrantClient(addr)
         
 
@@ -46,6 +55,8 @@ class VectorDB:
                 )
 
         if not self.client.collection_exists(self.db_name):
+            # WARN: this is only configured for MPnet
+            # Other embedding models will fail
             self.client.create_collection(
                 collection_name=self.db_name,
                 vectors_config=VectorParams(size=768, distance=Distance.COSINE),
