@@ -1,5 +1,5 @@
 import configparser
-import argparser
+import argparse
 
 import pandas as pd
 from qdrant_client.models import ScoredPoint
@@ -27,8 +27,8 @@ class EvalMetric:
     def compute_accuracies(self):
         return self.scores / self.len
 
-def parse_args() -> argparser.Namespace:
-    parser = argparser.ArgumentParser(description="Intern-FW Experiment Pipeline")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
     parser.add_argument('config_file', help='Path to experiment config')
     return parser.parse_args()
 
