@@ -25,7 +25,7 @@ class VectorDB:
         for i in range(5):
             try: 
                 response = requests.get(addr)
-            except ConnectionError:
+            except requests.exceptions.ConnectionError:
                connection_status = -1
                continue
             if response.status_code != 200 or connection_status < 0:
