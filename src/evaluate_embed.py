@@ -1,4 +1,5 @@
 import configparser
+import argparser
 
 import pandas as pd
 from qdrant_client.models import ScoredPoint
@@ -26,12 +27,17 @@ class EvalMetric:
     def compute_accuracies(self):
         return self.scores / self.len
 
-def main(*args):
+def parse_args() -> argparser.Namespace:
+    parser = argparser.ArgumentParser(description="Intern-FW Experiment Pipeline")
+    parser.add_argument('config_file', help='Path to experiment config')
+    return parser.parse_args()
+
+def main():
 # Step 1: parse model config
 # Step 2: set up model, ds, db, etc.
-    config_file = args[0]
+    args = parse_args()
     cfg = configparser.ConfigParser()
-    cfg.read(config_file)
+    cfg.read(args.config_file)
     ds_path = cfg.get('Models', 'ds_path')
     model = InternVLM(cfg.get('Models', 'intern_path'))
     dataset = FoodX251(ds_path)
