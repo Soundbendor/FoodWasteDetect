@@ -26,9 +26,10 @@ class EvalMetric:
     def compute_accuracies(self):
         return self.scores / self.len
 
-def main(config_file: str):
+def main(*args):
 # Step 1: parse model config
 # Step 2: set up model, ds, db, etc.
+    config_file = args[0]
     cfg = configparser.ConfigParser()
     cfg.read(config_file)
     ds_path = cfg.get('Models', 'ds_path')
