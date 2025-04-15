@@ -1,4 +1,6 @@
 import json
+import subprocess
+import requests
 from collections import Counter
 from typing import Tuple, List
 from .embedding import EmbeddingModel
@@ -9,10 +11,21 @@ from qdrant_client.models import PointStruct, VectorParams, Distance, ScoredPoin
 
 class VectorDB:
     def __init__(self, path: str, model: EmbeddingModel):
-        self.client = QdrantClient(path=path)
+        # TODO: server startup
+        # check if cn-m-1.hpc.engr.oregonstate.edu:6443 is open
+        # if not, run startup script?
+        self.client = self.connect(addr = path)
         self.db_name = "foods_finetune"
         self.model = model
-        # self.client.set_model("BAAI/bge-large-en-v1.5", providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+
+    def connect(self, addr: str):
+        # Check if server is alive
+        response = requests.get(addr)
+        if response.status_code != 200:
+            # call qdrant startup script
+            subprocess.run(["sbatch" "start_qdrant.sbatch"], shell=True)
+        return QdrantClient(addr)
+        
 
     def add(self, dict_path: str):
         # Expecting a descriptor dictionary as
