@@ -30,7 +30,7 @@ class VectorDB:
             if connection_status < 0 or response.status_code != 200:
                 # call qdrant startup script on first retry
                 if i == 0:
-                    out = subprocess.run(["sbatch" "start_qdrant.sbatch"], shell=True, capture_output=True)
+                    out = subprocess.run(["sbatch", "start_qdrant.sbatch"], shell=True, capture_output=True)
                     print(out)
                 print("DEBUG: Waiting 60s, contacting Qdrant server...")
                 time.sleep(60)
