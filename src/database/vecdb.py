@@ -27,7 +27,7 @@ class VectorDB:
                 response = requests.get(addr)
             except requests.exceptions.ConnectionError:
                connection_status = -1
-            if response.status_code != 200 or connection_status < 0:
+            if connection_status < 0 or response.status_code != 200:
                 # call qdrant startup script on first retry
                 if i == 0:
                     subprocess.run(["sbatch" "start_qdrant.sbatch"], shell=True)
