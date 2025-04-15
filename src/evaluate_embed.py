@@ -1,39 +1,55 @@
+import configparser
+
+import pandas as pd
+from qdrant_client.models import ScoredPoint
+
+from database.embedding import EmbeddingModel
+from database.vecdb import VectorDB
 from ds.foodx251 import FoodX251
 from intern import InternVLM
-from database.vecdb import VectorDB
 
 # goal:
 # for every image in foodx-251
 # read class label, image
 
-model = InternVLM("../intern_fw_test/InternVL2_5-8B-MPO")
-ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_cap_datasets/FoodX-251"
-dataset = FoodX251(ds_path)
 prompt = "<image>\nPlease describe the food item in this image in a single sentence, focusing on the visual characteristics of the food."
-db = VectorDB("db/qdrant", "assets/embed_models/mpnet-base-food/final")
+class EvalMetric:
+    def __init__(self):
+        self.metrics = ['top1', 'top5', 'voting']
+        self.scores = pd.Series([0, 0, 0], index=self.metrics)
+        self.len = 0
 
-test_set = dataset.val_set()
-# only has class names
+    def update_scores(self, q_vecs: list[ScoredPoint], db: VectorDB, label: str):
+        self.scores.add([db.score(q_vecs, label, strat)[1] for strat in self.metrics])
+        self.len += 1
 
-top1_acc = 0
-top5_acc = 0
-top1_vote_acc = 0
-for i, row in test_set.iterrows():
-    response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
-    q_vecs = db.query(response)
-    prediction, vote_score = db.score(q_vecs, row["class"], "voting")
-    top1_prediction, top1_score = db.score(q_vecs, row["class"], "top1")
-    top5_prediction, top5_score = db.score(q_vecs, row["class"], "top5")
-    print(f"Predicted Label: {prediction}")
-    print(f"Description: {response}")
-    print(f"True label: {row['class']}")
-    top1_acc += top1_score
-    top5_acc += top5_score
-    top1_vote_acc += vote_score
+    def compute_accuracies(self):
+        return self.scores / self.len
 
-top1_acc = top1_acc / len(test_set)
-lop5_acc = top5_acc / len(test_set)
-top1_vote_acc = top1_vote_acc / len(test_set)
-print(f"Final Score (Top 1): {top1_acc}")
-print(f"Final Score (Top 5): {top5_acc}")
-print(f"Final Score (Voting Top 1): {top1_vote_acc}")
+def main(config_file: str):
+# Step 1: parse model config
+# Step 2: set up model, ds, db, etc.
+    cfg = configparser.ConfigParser()
+    cfg.read(config_file)
+    ds_path = cfg.get('Models', 'ds_path')
+    model = InternVLM(cfg.get('Models', 'intern_path'))
+    dataset = FoodX251(ds_path)
+    embedder = EmbeddingModel(cfg.get('Models', 'dictionary'), cfg.get('Models', 'embed_model'))
+    db = VectorDB(cfg.get('Models', 'db_path'), embedder)
+
+    val_set = dataset.val_set()
+    metric = EvalMetric()
+
+    # TODO: Turn this into a .apply() function
+    for i, row in val_set.iterrows():
+        response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
+        q_vecs = db.query(response)
+        # INFO: We use voting here as default
+        prediction, _ = db.score(q_vecs, row["class"], "voting")
+        metric.update_scores(q_vecs, db, row['class'])
+        print(f"Predicted Label: {prediction}")
+        print(f"Description: {response}")
+        print(f"True label: {row['class']}")
+    
+    scores = metric.compute_accuracies()
+    print(scores)

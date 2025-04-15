@@ -8,7 +8,7 @@ from qdrant_client.models import PointStruct, VectorParams, Distance, ScoredPoin
 
 
 class VectorDB:
-    def __init__(self, path: str, model):
+    def __init__(self, path: str, model: EmbeddingModel):
         self.client = QdrantClient(path=path)
         self.db_name = "foods_finetune"
         self.model = model

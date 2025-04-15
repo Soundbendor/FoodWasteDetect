@@ -1,26 +1,33 @@
-from database.vecdb import VectorDB
+import configparser
+
 from database.embedding import EmbeddingModel
+from database.vecdb import VectorDB
 from ds.foodx251 import FoodX251
-from llm.describer import DescriberLLM
 
-embedding_model = "all-mpnet-base-v2"
-dict_path = "assets/descriptor_dictionary.json"
-encoder = EmbeddingModel(dict_path, embedding_model)
-db = VectorDB("db/qdrant_new", encoder)
-llm = DescriberLLM()
-ds = FoodX251("/nfs/stak/users/beerya/soundbendor/food_cap_datasets/FoodX-251")
-
+# TODO: take this shit, move it to a new module (or two)
 # Make sure our LLM is online
 # llm.start_server()
 # dict_path = llm.generate_descriptors(ds)
 
 # Fine-tune embedding model
-encoder.train()
-
-# Update vector database using new embedding model
-db.add(dict_path)
+# encoder.train()
 
 # Test database with a query
 query = "They are delicate, pastel-pink macarons featuring crisp almond-flour meringue shells sandwiched around a sweet, creamy filling."
-category, confidence, q_vecs = db.query(query, "voting")
 print(f"Food Class: {category}")
+
+def main(config_file: str):
+    cfg = configparser.ConfigParser()
+    cfg.read(config_file)
+    dict_path = cfg.get('Models', 'dictionary')
+    embedder = EmbeddingModel(dict_path, cfg.get('Models', 'embed_model'))
+    db = VectorDB(cfg.get('Models', 'db_path'), embedder)
+    # Goal, from dictionary, build vector database
+    print("INFO: Building Database...")
+    db.add(dict_path)
+    print("Database Built!")
+    print(f"Test Query: {query}")
+    q_vecs = db.query(query)
+    prediction, _ = db.score(q_vecs, "Macaron", "voting")
+    print(f"Prediction: {prediction}")
+

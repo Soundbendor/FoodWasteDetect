@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Intern-FW"
+version = "0.0.1"
+
+[project.scripts]
+eval_embed = "evaluate_embed:main"
+generate_descriptions: "llm:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
