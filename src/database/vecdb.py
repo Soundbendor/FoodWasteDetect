@@ -1,13 +1,15 @@
 import json
 import subprocess
-import requests
 import time
 from collections import Counter
-from typing import Tuple, List
-from .embedding import EmbeddingModel
+from typing import List, Tuple
 
+import requests
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance, ScoredPoint
+from qdrant_client.models import (Distance, PointStruct, ScoredPoint,
+                                  VectorParams)
+
+from .embedding import EmbeddingModel
 
 
 class VectorDB:
@@ -30,8 +32,11 @@ class VectorDB:
             if connection_status < 0 or response.status_code != 200:
                 # call qdrant startup script on first retry
                 if i == 0:
-                    out = subprocess.run(["sbatch", "start_qdrant.sbatch"], shell=True, capture_output=True)
+                    proc = subprocess.Popen("sbatch start_qdrant.sbatch", shell=True, stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE)
+                    out, error = proc.communicate()
                     print(out)
+                    print(error)
                 print("DEBUG: Waiting 60s, contacting Qdrant server...")
                 time.sleep(60)
             else:
