@@ -1,5 +1,6 @@
 import json
 import subprocess
+import time
 from collections import defaultdict
 
 import ollama
@@ -29,7 +30,6 @@ class DescriberLLM:
             )
         except ConnectionError:
             # Run online script
-            print("Error handler!")
             process = subprocess.Popen(
                 "src/llm/start_deepseek.sh",
                 stdout=subprocess.PIPE,
@@ -37,8 +37,10 @@ class DescriberLLM:
                 shell=True,
             )
             out, err = process.communicate()
-            print(err)
-            print(out)
+            print(f"OLLAMA WARN: {err}")
+            print(f"OLLAMA ALERT: {out}")
+            print("Waiting 10 seconds...")
+            time.sleep(10)
             # subprocess.call("bash llm/start_deepseek.sh", shell=True)
 
     def generate_descriptors(self, ds: Dataset, save_path: str) -> str:
