@@ -8,8 +8,8 @@ version = "0.0.1"
 
 [project.scripts]
 eval_embed = "evaluate_embed:main"
-build_descriptions: "build_descriptor:main"
-build_vdb: "build_vdb:main"
+build_descriptions = "build_descriptor:main"
+build_vdb = "build_vdb:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
