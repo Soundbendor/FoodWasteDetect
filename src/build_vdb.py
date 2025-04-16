@@ -37,5 +37,6 @@ def main():
     print("Database Built!")
     print(f"Test Query: {query}")
     q_vecs = db.query(query)
-    prediction, _ = db.score(q_vecs, "Macaron", "voting")
+    accuracy, _ = db.score(q_vecs, "Macaron", "voting")
+    prediction = q_vecs[0].payload["class"]
     print(f"Prediction: {prediction}")
