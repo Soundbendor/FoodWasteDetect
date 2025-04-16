@@ -26,7 +26,7 @@ class VectorDB:
         connection_status = 0
         for i in range(5):
             try: 
-                response = requests.get(addr)
+                response = requests.get(f"http://{addr}")
             except requests.exceptions.ConnectionError:
                connection_status = -1
             if connection_status < 0 or response.status_code != 200:
@@ -37,6 +37,8 @@ class VectorDB:
                     out, error = proc.communicate()
                     print(f"QDRANT ALERT: {out}")
                     print(f"QDRANT ERROR: {error}")
+                # clearly, server is starting, but we're still unable to connect
+                # TODO: print request errors here 
                 print("DEBUG: Waiting 60s, contacting Qdrant server...")
                 time.sleep(60)
             else:
