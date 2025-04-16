@@ -13,40 +13,45 @@ from .embedding import EmbeddingModel
 
 
 class VectorDB:
-    def __init__(self, path: str, model: EmbeddingModel):
+    def __init__(self, path: str, model: EmbeddingModel, db_name: str):
         # TODO: server startup
         # check if cn-m-1.hpc.engr.oregonstate.edu:6443 is open
         # if not, run startup script?
-        self.client = self.connect(addr = path)
-        self.db_name = "foods_finetune"
+        self.client = self.connect(addr=path)
+        self.db_name = self.db_name
         self.model = model
 
     def connect(self, addr: str):
-        '''Check for qdrant server running on host. If connection fails, starts a Qdrant instance.'''
+        """Check for qdrant server running on host. If connection fails, starts a Qdrant instance."""
         connection_status = 0
         for i in range(5):
-            try: 
+            try:
                 response = requests.get(f"http://{addr}")
             except requests.exceptions.ConnectionError:
-               connection_status = -1
+                connection_status = -1
             if connection_status < 0 or response.status_code != 200:
                 # call qdrant startup script on first retry
                 if i == 0:
-                    proc = subprocess.Popen("sbatch src/database/start_qdrant.sbatch", shell=True, stdout=subprocess.PIPE,
-                                            stderr=subprocess.PIPE)
+                    proc = subprocess.Popen(
+                        "sbatch src/database/start_qdrant.sbatch",
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
                     out, error = proc.communicate()
                     print(f"QDRANT ALERT: {out}")
                     print(f"QDRANT ERROR: {error}")
                 # clearly, server is starting, but we're still unable to connect
-                # TODO: print request errors here 
+                # TODO: print request errors here
                 print("DEBUG: Waiting 60s, contacting Qdrant server...")
                 time.sleep(60)
             else:
                 break
         else:
-            raise ConnectionError("Failure to contact Qdrant server, likely due to excess queue times on cn-m-1.")
+            raise ConnectionError(
+                "Failure to contact Qdrant server, likely due to excess queue times on cn-m-1."
+            )
         return QdrantClient(addr)
-        
 
     def add(self, dict_path: str):
         # Expecting a descriptor dictionary as

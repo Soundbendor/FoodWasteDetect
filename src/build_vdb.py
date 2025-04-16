@@ -28,7 +28,9 @@ def main():
     cfg.read(args.config_file)
     dict_path = cfg.get("Models", "dictionary")
     embedder = EmbeddingModel(dict_path, cfg.get("Models", "embed_model"))
-    db = VectorDB(cfg.get("Models", "db_path"), embedder)
+    db = VectorDB(
+        cfg.get("Models", "db_path"), embedder, cfg.get("Models", "collection_name")
+    )
     # Goal, from dictionary, build vector database
     print("INFO: Building Database...")
     db.add(dict_path)
