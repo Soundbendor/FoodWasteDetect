@@ -35,8 +35,8 @@ class VectorDB:
                     proc = subprocess.Popen("sbatch src/database/start_qdrant.sbatch", shell=True, stdout=subprocess.PIPE,
                                             stderr=subprocess.PIPE)
                     out, error = proc.communicate()
-                    print(out)
-                    print(error)
+                    print(f"QDRANT ALERT: {out}")
+                    print(f"QDRANT ERROR: {error}")
                 print("DEBUG: Waiting 60s, contacting Qdrant server...")
                 time.sleep(60)
             else:
