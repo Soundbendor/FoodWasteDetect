@@ -4,11 +4,6 @@ import configparser
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
 
-# TODO: take this shit, move it to a new module (or two)
-# Make sure our LLM is online
-# llm.start_server()
-# dict_path = llm.generate_descriptors(ds)
-
 # Fine-tune embedding model
 # encoder.train()
 

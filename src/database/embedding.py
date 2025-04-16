@@ -1,13 +1,11 @@
 import json
 
 from datasets import Dataset
-from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
-from sentence_transformers.training_args import (
-    SentenceTransformerTrainingArguments,
-    BatchSamplers,
-)
+from sentence_transformers import (SentenceTransformer,
+                                   SentenceTransformerTrainer)
 from sentence_transformers.losses import BatchAllTripletLoss
-
+from sentence_transformers.training_args import (
+    BatchSamplers, SentenceTransformerTrainingArguments)
 
 # goal:
 # load dataset from JSON file, dictionary
@@ -48,7 +46,7 @@ class EmbeddingModel:
     def get_embedding(self, txt: str):
         return self.model.encode(txt)
 
-    def train(self):
+    def train(self, save_path: str):
         trainer = SentenceTransformerTrainer(
             model=self.model,
             args=self.set_config(),
@@ -56,7 +54,7 @@ class EmbeddingModel:
             loss=self.loss,
         )
         trainer.train()
-        self.model.save_pretrained("assets/embed_models/mpnet-base-food/final")
+        self.model.save_pretrained(save_path)
 
     def set_config(self):
         return SentenceTransformerTrainingArguments(

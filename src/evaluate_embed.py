@@ -1,5 +1,5 @@
-import configparser
 import argparse
+import configparser
 
 import pandas as pd
 from qdrant_client.models import ScoredPoint
@@ -7,16 +7,18 @@ from qdrant_client.models import ScoredPoint
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
 from ds.foodx251 import FoodX251
-from intern import InternVLM
+from vlm.intern import InternVLM
 
 # goal:
 # for every image in foodx-251
 # read class label, image
 
 prompt = "<image>\nPlease describe the food item in this image in a single sentence, focusing on the visual characteristics of the food."
+
+
 class EvalMetric:
     def __init__(self):
-        self.metrics = ['top1', 'top5', 'voting']
+        self.metrics = ["top1", "top5", "voting"]
         self.scores = pd.Series([0, 0, 0], index=self.metrics)
         self.len = 0
 
@@ -27,22 +29,26 @@ class EvalMetric:
     def compute_accuracies(self):
         return self.scores / self.len
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
-    parser.add_argument('config_file', help='Path to experiment config')
+    parser.add_argument("config_file", help="Path to experiment config")
     return parser.parse_args()
 
+
 def main():
-# Step 1: parse model config
-# Step 2: set up model, ds, db, etc.
+    # Step 1: parse model config
+    # Step 2: set up model, ds, db, etc.
     args = parse_args()
     cfg = configparser.ConfigParser()
     cfg.read(args.config_file)
-    ds_path = cfg.get('Models', 'ds_path')
-    model = InternVLM(cfg.get('Models', 'intern_path'))
+    ds_path = cfg.get("Models", "ds_path")
+    model = InternVLM(cfg.get("Models", "intern_path"))
     dataset = FoodX251(ds_path)
-    embedder = EmbeddingModel(cfg.get('Models', 'dictionary'), cfg.get('Models', 'embed_model'))
-    db = VectorDB(cfg.get('Models', 'db_path'), embedder)
+    embedder = EmbeddingModel(
+        cfg.get("Models", "dictionary"), cfg.get("Models", "embed_model_save_path")
+    )
+    db = VectorDB(cfg.get("Models", "db_path"), embedder)
 
     val_set = dataset.val_set()
     metric = EvalMetric()
@@ -53,10 +59,10 @@ def main():
         q_vecs = db.query(response)
         # INFO: We use voting here as default
         prediction, _ = db.score(q_vecs, row["class"], "voting")
-        metric.update_scores(q_vecs, db, row['class'])
+        metric.update_scores(q_vecs, db, row["class"])
         print(f"Predicted Label: {prediction}")
         print(f"Description: {response}")
         print(f"True label: {row['class']}")
-    
+
     scores = metric.compute_accuracies()
     print(scores)
