@@ -48,7 +48,9 @@ def main():
     embedder = EmbeddingModel(
         cfg.get("Models", "dictionary"), cfg.get("Models", "embed_model_save_path")
     )
-    db = VectorDB(cfg.get("Models", "db_path"), embedder)
+    db = VectorDB(
+        cfg.get("Models", "db_path"), embedder, cfg.get("Models", "collection_name")
+    )
 
     val_set = dataset.val_set()
     metric = EvalMetric()
