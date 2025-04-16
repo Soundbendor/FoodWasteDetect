@@ -1,8 +1,8 @@
+import argparse
 import configparser
 
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
-from ds.foodx251 import FoodX251
 
 # TODO: take this shit, move it to a new module (or two)
 # Make sure our LLM is online
@@ -14,11 +14,17 @@ from ds.foodx251 import FoodX251
 
 # Test database with a query
 query = "They are delicate, pastel-pink macarons featuring crisp almond-flour meringue shells sandwiched around a sweet, creamy filling."
-print(f"Food Class: {category}")
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
+    parser.add_argument('config_file', help='Path to experiment config')
+    return parser.parse_args()
+
 
 def main(config_file: str):
+    args = parse_args()
     cfg = configparser.ConfigParser()
-    cfg.read(config_file)
+    cfg.read(args.config_file)
     dict_path = cfg.get('Models', 'dictionary')
     embedder = EmbeddingModel(dict_path, cfg.get('Models', 'embed_model'))
     db = VectorDB(cfg.get('Models', 'db_path'), embedder)

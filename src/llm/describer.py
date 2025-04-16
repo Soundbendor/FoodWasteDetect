@@ -15,8 +15,8 @@ class FoodDescriptor(BaseModel):
 
 
 class DescriberLLM:
-    def __init__(self):
-        self.model = "gemma3:27b"
+    def __init__(self, model: str):
+        self.model = model
 
     def _load_dataset(self, ds: Dataset):
         return ds.get_class_list()
@@ -34,14 +34,14 @@ class DescriberLLM:
                 "src/llm/start_deepseek.sh",
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
+                shell=True,
             )
             out, err = process.communicate()
             print(err)
             print(out)
             # subprocess.call("bash llm/start_deepseek.sh", shell=True)
 
-    def generate_descriptors(self, ds: Dataset) -> str:
+    def generate_descriptors(self, ds: Dataset, save_path: str) -> str:
         """Given a dataset, provides a list of descriptions of each class of that dataset"""
         ds_descriptors = defaultdict(list)
         for item in self._load_dataset(ds):
@@ -70,10 +70,10 @@ class DescriberLLM:
                     ds_descriptors[item].append(output.description)
                 # ollama server failure
                 except ollama._types.ResponseError as e:
-                    print("Warning! Server error {e}")
+                    print(f"Warning! Server error {e}")
                     continue
 
-        with open("assets/descriptor_dictionary.json", "w", encoding="utf-8") as f:
+        with open(save_path, "w", encoding="utf-8") as f:
             json.dump(ds_descriptors, f, ensure_ascii=False, indent=4)
 
-        return "assets/descriptor_dictionary.json"
+        return save_path
