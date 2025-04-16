@@ -10,4 +10,4 @@
 #SBATCH --export=ALL
 
 module load gcc
-bash deps/qdrant/qdrant
+./deps/qdrant/qdrant
