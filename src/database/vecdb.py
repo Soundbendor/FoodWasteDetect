@@ -18,7 +18,7 @@ class VectorDB:
         # check if cn-m-1.hpc.engr.oregonstate.edu:6443 is open
         # if not, run startup script?
         self.client = self.connect(addr=path)
-        self.db_name = self.db_name
+        self.db_name = db_name
         self.model = model
 
     def connect(self, addr: str):
