@@ -90,7 +90,7 @@ class VectorDB:
     # Returns (Accuracy, Similarity) where acc is binary 1-0
     def score(
         self, search_result: List[ScoredPoint], label: str, strategy: str
-    ) -> Tuple[int, float]:
+    ) -> Tuple[int, float, str]:
         if strategy == "top1":
             category = search_result[0].payload["class"]  # type: ignore
             confidence = search_result[0].score
@@ -104,4 +104,5 @@ class VectorDB:
         if strategy == "top5":
             score = 1 if label.strip in [x.payload["class"].strip() for x in search_result] else 0  # type: ignore
             confidence = 0
-        return score, confidence
+            category = None
+        return score, confidence, category

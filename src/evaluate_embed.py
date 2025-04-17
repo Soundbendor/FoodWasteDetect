@@ -60,9 +60,11 @@ def main():
         response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
         q_vecs = db.query(response)
         # INFO: We use voting here as default
-        prediction, _ = db.score(q_vecs, row["class"], "voting")
+        score, confidence, prediction = db.score(q_vecs, row["class"], "voting")
+        top5_score, _, _ = db.score(q_vecs, row["class"], "top5")
         metric.update_scores(q_vecs, db, row["class"])
         print(f"Predicted Label: {prediction}")
+        print(f"Top 5 Score: {top5_score}")
         print(f"Description: {response}")
         print(f"True label: {row['class']}")
 
