@@ -57,8 +57,12 @@ def main():
     val_set = dataset.val_set()
     metric = EvalMetric()
 
+    n_samples = int(cfg.get("Settings", "n_samples"))
+    if n_samples != 0:
+        val_set = val_set.sample(n=n_samples, random_state=42)
+
     # TODO: Turn this into a .apply() function
-    for i, row in val_set[:100].iterrows():
+    for i, row in val_set.iterrows():
         response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
         q_vecs = db.query(response)
         # INFO: We use voting here as default
