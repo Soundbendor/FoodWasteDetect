@@ -26,7 +26,7 @@ def main():
     if os.path.isfile(save_path):
         df = pd.read_csv(save_path)
     else:
-        df = pd.DataFrame(columns = ['class', 'caption'])
+        df = pd.DataFrame(columns = ['class', 'caption', 'idx'])
 
     buffer = []
     for i, row in train_set.iterrows():
