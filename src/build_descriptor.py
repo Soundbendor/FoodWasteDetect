@@ -15,4 +15,3 @@ def main():
     dataset = FoodX251(cfg.get("Models", "ds_path"))
 
     llm.generate_descriptors(dataset, cfg.get("Models", "dictionary"))
-    print("Building description dictionary")

@@ -1,4 +1,5 @@
 import json
+import logging
 import subprocess
 import time
 from collections import defaultdict
@@ -37,9 +38,9 @@ class DescriberLLM:
                 shell=True,
             )
             out, err = process.communicate()
-            print(f"OLLAMA WARN: {err}")
-            print(f"OLLAMA ALERT: {out}")
-            print("Waiting 10 seconds...")
+            logging.error(f"OLLAMA WARN: {err}")
+            logging.info(f"OLLAMA ALERT: {out}")
+            logging.info("Waiting 10 seconds...")
             time.sleep(10)
             # subprocess.call("bash llm/start_deepseek.sh", shell=True)
 
@@ -68,11 +69,11 @@ class DescriberLLM:
                     output.food_class = item
                     # Remove emphasis
                     output.description = output.description.replace("*", "")
-                    print(output)
+                    logging.info(output)
                     ds_descriptors[item].append(output.description)
                 # ollama server failure
                 except ollama._types.ResponseError as e:
-                    print(f"Warning! Server error {e}")
+                    logging.error(f"Warning! Server error {e}")
                     continue
 
         with open(save_path, "w", encoding="utf-8") as f:

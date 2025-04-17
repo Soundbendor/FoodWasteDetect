@@ -1,12 +1,10 @@
+import logging
+
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
 from ds.foodx251 import FoodX251
 from util import EvalMetric, parse_args, parse_cfg
 from vlm.intern import InternVLM
-
-# goal:
-# for every image in foodx-251
-# read class label, image
 
 prompt = "<image>\nPlease describe the food item in this image in a single sentence, focusing on the visual characteristics of the food."
 
@@ -41,11 +39,11 @@ def main():
         score, confidence, prediction = db.score(q_vecs, row["class"], "voting")
         top5_score, _, _ = db.score(q_vecs, row["class"], "top5")
         metric.update_scores(q_vecs, db, row["class"])
-        print(f"Predicted Label: {prediction}")
-        print(f"Top 5 Score: {top5_score}")
-        print(f"Description: {response}")
-        print(f"True label: {row['class']}")
-        print(f"Current Accuracies: {metric.compute_accuracies()}")
+        logging.info(f"Predicted Label: {prediction}")
+        logging.info(f"True label: {row['class']}")
+        logging.info(f"In Top 5? {top5_score}")
+        logging.info(f"Description: {response}")
+        logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
 
     scores = metric.compute_accuracies()
     print(scores)

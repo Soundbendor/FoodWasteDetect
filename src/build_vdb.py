@@ -1,7 +1,8 @@
-from utils import parse_args, parse_cfg
+import logging
 
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
+from util import parse_args, parse_cfg
 
 # Test database with a query
 query = "They are delicate, pastel-pink macarons featuring crisp almond-flour meringue shells sandwiched around a sweet, creamy filling."
@@ -15,11 +16,11 @@ def main():
         cfg.get("Models", "db_path"), embedder, cfg.get("Models", "collection_name")
     )
     # Goal, from dictionary, build vector database
-    print("INFO: Building Database...")
+    logging.info("Building Database...")
     db.add(dict_path)
-    print("Database Built!")
-    print(f"Test Query: {query}")
+    logging.info("Database Built!")
+    logging.info(f"Test Query: {query}")
     q_vecs = db.query(query)
     accuracy, _ = db.score(q_vecs, "Macaron", "voting")
     prediction = q_vecs[0].payload["class"]
-    print(f"Prediction: {prediction}")
+    logging.info(f"Prediction: {prediction}")

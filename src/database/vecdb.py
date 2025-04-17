@@ -1,4 +1,5 @@
 import json
+import logging
 import subprocess
 import time
 from collections import Counter
@@ -6,8 +7,7 @@ from typing import List, Tuple
 
 import requests
 from qdrant_client import QdrantClient
-from qdrant_client.models import (Distance, PointStruct, ScoredPoint,
-                                  VectorParams)
+from qdrant_client.models import Distance, PointStruct, ScoredPoint, VectorParams
 
 from .embedding import EmbeddingModel
 
@@ -39,11 +39,9 @@ class VectorDB:
                         stderr=subprocess.PIPE,
                     )
                     out, error = proc.communicate()
-                    print(f"QDRANT ALERT: {out}")
-                    print(f"QDRANT ERROR: {error}")
-                # clearly, server is starting, but we're still unable to connect
-                # TODO: print request errors here
-                print("DEBUG: Waiting 60s, contacting Qdrant server...")
+                    logging.info(f"QDRANT ALERT: {out}")
+                    logging.error(f"QDRANT ERROR: {error}")
+                logging.info("Waiting 60s, contacting Qdrant server...")
                 time.sleep(60)
             else:
                 break
@@ -104,7 +102,7 @@ class VectorDB:
         if strategy == "top5":
             score = 1 if label.strip() in [x.payload["class"].strip() for x in search_result[:5]] else 0  # type: ignore
             class_list = [x.payload["class"].strip() for x in search_result[:5]]
-            print(f"DEBUG:{class_list}")
+            logging.debug(f"{class_list}")
             confidence = 0
             category = None
         return score, confidence, category
