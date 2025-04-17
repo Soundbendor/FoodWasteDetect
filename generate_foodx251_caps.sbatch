@@ -2,7 +2,7 @@
 #SBATCH -p dgx2
 #SBATCH -A eecs
 #SBATCH --job-name=intern-fw
-#SBATCH -t 1-00:00:00
+#SBATCH -t 2-00:00:00
 #SBATCH -c 2
 #SBATCH --mem=40G
 #SBATCH --gres=gpu:1
