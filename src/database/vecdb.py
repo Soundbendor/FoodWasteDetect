@@ -105,7 +105,6 @@ class VectorDB:
             score = 1 if label.strip() in [x.payload["class"].strip() for x in search_result[:5]] else 0  # type: ignore
             class_list = [x.payload["class"].strip() for x in search_result[:5]]
             print(f"DEBUG:{class_list}")
-            print(f"DEBUG: {search_result}")
             confidence = 0
             category = None
         return score, confidence, category

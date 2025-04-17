@@ -67,6 +67,7 @@ def main():
         print(f"Top 5 Score: {top5_score}")
         print(f"Description: {response}")
         print(f"True label: {row['class']}")
+        print(f"Current Accuracies: {metric.compute_accuracies()}")
 
     scores = metric.compute_accuracies()
     print(scores)
