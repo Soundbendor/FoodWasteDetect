@@ -2,6 +2,7 @@ import os
 from typing import List
 
 import pandas as pd
+
 from .dataset import Dataset
 
 # root
@@ -44,3 +45,6 @@ class FoodX251(Dataset):
 
     def val_set(self) -> pd.DataFrame:
         return self._get_dataset(self.val_path)
+
+    def train_set(self) -> pd.DataFrame:
+        return self._get_dataset(self.train_path)
