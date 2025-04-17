@@ -56,7 +56,7 @@ def main():
     metric = EvalMetric()
 
     # TODO: Turn this into a .apply() function
-    for i, row in val_set.iterrows():
+    for i, row in val_set[:100].iterrows():
         response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
         q_vecs = db.query(response)
         # INFO: We use voting here as default
