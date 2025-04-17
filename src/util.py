@@ -4,6 +4,8 @@ import configparser
 import pandas as pd
 from qdrant_client.models import ScoredPoint
 
+from database.vecdb import VectorDB
+
 
 class EvalMetric:
     def __init__(self):

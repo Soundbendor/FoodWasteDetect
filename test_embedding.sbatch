@@ -8,6 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --export=ALL
 #SBATCH --output=/nfs/guille/eecs_research/soundbendor/beerya/intern-fw/logs/%j.out
+#SBATCH --error=/nfs/guille/eecs_research/soundbendor/beerya/intern-fw/logs/%j.err
 
 module load cuda/12.4
 source /nfs/guille/eecs_research/soundbendor/beerya/miniforge3/bin/activate
