@@ -23,7 +23,7 @@ class EvalMetric:
         self.len = 0
 
     def update_scores(self, q_vecs: list[ScoredPoint], db: VectorDB, label: str):
-        self.scores.add([db.score(q_vecs, label, strat)[1] for strat in self.metrics])
+        self.scores.add([db.score(q_vecs, label, strat)[0] for strat in self.metrics])
         self.len += 1
 
     def compute_accuracies(self):
