@@ -30,7 +30,7 @@ def main():
         # If we have already made a generation for this image, skip it.
         if i in df.index:
             continue
-        response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", prompt)
+        response = model.infer(f"{ds_path}/train/train_set/{row['fname']}", prompt)
         out = {'idx': i, 'class': row['class'], 'caption': response}
         buffer.append(out)
         # save to disk every 20 iters
