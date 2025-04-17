@@ -1,3 +1,4 @@
+import logging
 import os
 
 import pandas as pd
@@ -31,6 +32,7 @@ def main():
         if i in df.index:
             continue
         response = model.infer(f"{ds_path}/train/train_set/{row['fname']}", prompt)
+        logging.info(response)
         out = {'idx': i, 'class': row['class'], 'caption': response}
         buffer.append(out)
         # save to disk every 20 iters
@@ -38,4 +40,5 @@ def main():
             df_update = pd.DataFrame.from_records(buffer)
             df = pd.concat([df, df_update])
             df.to_csv(save_path)
+            buffer = []
 
