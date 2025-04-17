@@ -27,6 +27,7 @@ class EvalMetric:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
     parser.add_argument("config_file", help="Path to experiment config")
+    parser.add_argument("partition", type=int)
     return parser.parse_args()
 
 def parse_cfg(cfg_file: str) -> configparser.ConfigParser:

@@ -16,8 +16,11 @@ def main():
     model = InternVLM(cfg.get("Models", "intern_path"))
     dataset = FoodX251(ds_path)
    
-    save_path ="assets/foodx251_captions.txt" 
+    save_path = f"assets/foodx251_captions_{args.partition}.txt"
     train_set = dataset.train_set()
+
+    # partition training dataset
+    train_set = train_set[(1 - args.partition) * len(train_set) : args.partition * len(train_set)]
 
     # Check for a cache file
     if os.path.isfile(save_path):
@@ -25,11 +28,11 @@ def main():
     else:
         df = pd.DataFrame(columns = ['class', 'caption'])
 
-
     buffer = []
     for i, row in train_set.iterrows():
         # If we have already made a generation for this image, skip it.
-        if i in df.index:
+        if i in df['idx']:
+            logging.info("Skipping image...")
             continue
         response = model.infer(f"{ds_path}/train/train_set/{row['fname']}", prompt)
         logging.info(response)
