@@ -102,7 +102,9 @@ class VectorDB:
             confidence = candidate[1] / 10
             score = 1 if category.strip() == label.strip() else 0
         if strategy == "top5":
-            score = 1 if label.strip() == [x.payload["class"].strip() for x in search_result[:5]] else 0  # type: ignore
+            score = 1 if label.strip() in [x.payload["class"].strip() for x in search_result[:5]] else 0  # type: ignore
+            class_list = [x.payload["class"].strip() for x in search_result[:5]]
+            print(f"DEBUG:{class_list}")
             print(f"DEBUG: {search_result}")
             confidence = 0
             category = None
