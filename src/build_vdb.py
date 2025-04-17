@@ -1,26 +1,14 @@
-import argparse
-import configparser
+from utils import parse_args, parse_cfg
 
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
 
-# Fine-tune embedding model
-# encoder.train()
-
 # Test database with a query
 query = "They are delicate, pastel-pink macarons featuring crisp almond-flour meringue shells sandwiched around a sweet, creamy filling."
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
-    parser.add_argument("config_file", help="Path to experiment config")
-    return parser.parse_args()
-
-
 def main():
     args = parse_args()
-    cfg = configparser.ConfigParser()
-    cfg.read(args.config_file)
+    cfg = parse_cfg(args.config_file)
     dict_path = cfg.get("Models", "dictionary")
     embedder = EmbeddingModel(dict_path, cfg.get("Models", "embed_model"))
     db = VectorDB(

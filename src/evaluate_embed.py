@@ -1,12 +1,7 @@
-import argparse
-import configparser
-
-import pandas as pd
-from qdrant_client.models import ScoredPoint
-
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
 from ds.foodx251 import FoodX251
+from util import EvalMetric, parse_args, parse_cfg
 from vlm.intern import InternVLM
 
 # goal:
@@ -16,34 +11,11 @@ from vlm.intern import InternVLM
 prompt = "<image>\nPlease describe the food item in this image in a single sentence, focusing on the visual characteristics of the food."
 
 
-class EvalMetric:
-    def __init__(self):
-        self.metrics = ["top1", "top5", "voting"]
-        self.scores = pd.Series([0, 0, 0], index=self.metrics)
-        self.len = 0
-
-    def update_scores(self, q_vecs: list[ScoredPoint], db: VectorDB, label: str):
-        self.scores = self.scores.add(
-            [db.score(q_vecs, label, strat)[0] for strat in self.metrics]
-        )
-        self.len += 1
-
-    def compute_accuracies(self):
-        return self.scores / self.len
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
-    parser.add_argument("config_file", help="Path to experiment config")
-    return parser.parse_args()
-
-
 def main():
     # Step 1: parse model config
     # Step 2: set up model, ds, db, etc.
     args = parse_args()
-    cfg = configparser.ConfigParser()
-    cfg.read(args.config_file)
+    cfg = parse_cfg(args.config_file)
     ds_path = cfg.get("Models", "ds_path")
     model = InternVLM(cfg.get("Models", "intern_path"))
     dataset = FoodX251(ds_path)
