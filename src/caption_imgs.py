@@ -20,7 +20,8 @@ def main():
     train_set = dataset.train_set()
 
     # partition training dataset
-    train_set = train_set[(1 - args.partition) * len(train_set) : args.partition * len(train_set)]
+    train_set = train_set[(args.partition - 1) * len(train_set) : args.partition * len(train_set)]
+    print(len(train_set))
 
     # Check for a cache file
     if os.path.isfile(save_path):
