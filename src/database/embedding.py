@@ -1,11 +1,13 @@
 import json
+import logging
 
 from datasets import Dataset
-from sentence_transformers import (SentenceTransformer,
-                                   SentenceTransformerTrainer)
+from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
 from sentence_transformers.losses import BatchAllTripletLoss
 from sentence_transformers.training_args import (
-    BatchSamplers, SentenceTransformerTrainingArguments)
+    BatchSamplers,
+    SentenceTransformerTrainingArguments,
+)
 
 # goal:
 # load dataset from JSON file, dictionary
@@ -34,8 +36,11 @@ class EmbeddingModel:
                 descriptors.append(description)
                 class_names.append(idx)
 
+        # where image captions from InternV2.5 are anchors
+        # positive/negatives sourced from gemma
         ds = {"label": class_names, "descriptions": descriptors}
         ds = Dataset.from_dict(ds)
+        logging.info(f"Dataset: {ds}")
         return ds
 
     def evaluator(self):

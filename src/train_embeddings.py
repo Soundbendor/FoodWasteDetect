@@ -1,13 +1,13 @@
-import argparse
-import configparser
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
-    parser.add_argument('config_file', help='Path to experiment config')
-    return parser.parse_args()
+from database.embedding import EmbeddingModel
+from util import parse_args, parse_cfg
 
 
 def main(config_file: str):
-    pass
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    dict_path = cfg.get("Models", "dictionary")
+    embedder = EmbeddingModel(dict_path, cfg.get("Models", "embed_model"))
+    # train embedding model
+    embedder.train(save_path=cfg.get("Models", "embed_model_save_path"))
+    
 
