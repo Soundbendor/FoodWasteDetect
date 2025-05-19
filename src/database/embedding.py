@@ -26,7 +26,7 @@ class EmbeddingModel:
         self.eval_ds = self._load_triplet_dataset(anchor_path)
         self.model = SentenceTransformer(model_path)
         self.loss = BatchAllTripletLoss(self.model)
-        self.eval_func = self.evaluator()
+        self.evaluator = self.evaluator()
 
     def _load_dataset(self, path: str):
         with open(path, "r", encoding="utf-8") as f:
@@ -72,9 +72,10 @@ class EmbeddingModel:
                                                                                 replace=True).reset_index(drop=True)
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors),
                                                                                 replace=False).reset_index(drop=True)
-            dfs.append(pd.DataFrame({'anchors': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']}))
+            dfs.append(pd.DataFrame({'anchor': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']}))
         triplets = pd.concat(dfs, ignore_index = True)
-        print(triplets)
+        dataset = Dataset.from_pandas(triplets)
+        return dataset
 
 
     def evaluator(self):
@@ -85,7 +86,7 @@ class EmbeddingModel:
             positives=self.eval_ds["positive"],
             negatives=self.eval_ds["negative"],
             main_distance_function=SimilarityFunction.COSINE,
-            name="all-nli-dev",
+            name="food-desc-triplet-eval",
         )
 
     def get_embedding(self, txt: str):
@@ -97,6 +98,8 @@ class EmbeddingModel:
             args=self.set_config(),
             train_dataset=self.ds,
             loss=self.loss,
+            eval_dataset = self.eval_ds,
+            evaluator=self.evaluator
         )
         trainer.train()
         self.model.save_pretrained(save_path)
@@ -106,7 +109,7 @@ class EmbeddingModel:
             # Required parameter:
             output_dir="models/all-mpnet-base-v2",
             # Optional training parameters:
-            num_train_epochs=1,
+            num_train_epochs=2,
             per_device_train_batch_size=16,
             per_device_eval_batch_size=16,
             learning_rate=2e-5,
