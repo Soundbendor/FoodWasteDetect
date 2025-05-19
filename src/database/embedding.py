@@ -44,7 +44,7 @@ class EmbeddingModel:
         # positive/negatives sourced from gemma
         ds = {"label": class_names, "descriptions": descriptors}
         ds = Dataset.from_dict(ds)
-        logging.info(f"Dataset: {ds}")
+        # logging.info(f"Dataset: {ds}")
         return ds
 
 
@@ -64,6 +64,7 @@ class EmbeddingModel:
         # randomly select positive and negative? 
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
+            print(len(anchors))
             positives = descriptions[descriptions['label'] == label].sample(n=len(anchors), replace=True)
             negatives = descriptions[descriptions['label'] != label].sample(n=len(anchors), replace=False)
             logging.info(positives)
