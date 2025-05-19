@@ -22,7 +22,7 @@ from sentence_transformers.training_args import (
 class EmbeddingModel:
 
     def __init__(self, dictionary_path: str, anchor_path: str,  model_path: str):
-        self.ds = self._load_dataset(dictionary_path)
+        self.ds, self.class_map = self._load_dataset(dictionary_path)
         self.eval_ds = self._load_triplet_dataset(anchor_path)
         self.model = SentenceTransformer(model_path)
         self.loss = BatchAllTripletLoss(self.model)
@@ -35,7 +35,9 @@ class EmbeddingModel:
         logging.info(data)
         class_names = []
         descriptors = []
+        class_map = {}
         for idx, (k, v) in enumerate(data.items()):
+            class_map[k] = idx
             for description in v:
                 descriptors.append(description)
                 class_names.append(idx)
@@ -45,7 +47,7 @@ class EmbeddingModel:
         ds = {"label": class_names, "descriptions": descriptors}
         ds = Dataset.from_dict(ds)
         # logging.info(f"Dataset: {ds}")
-        return ds
+        return ds, class_map
 
 
     # goal: load dataset in (anchor, positive, negative) pairs
@@ -68,9 +70,9 @@ class EmbeddingModel:
             print(label)
             print(descriptions)
             print(descriptions['label'].unique())
-            print(descriptions[descriptions['label'] == label])
-            positives = descriptions[descriptions['label'] == label].sample(n=len(anchors), replace=True)
-            negatives = descriptions[descriptions['label'] != label].sample(n=len(anchors), replace=False)
+            print(descriptions[self.class_map[descriptions['label']] == label])
+            positives = descriptions[self.class_map[descriptions['label']] == label].sample(n=len(anchors), replace=True)
+            negatives = descriptions[self.class_map[descriptions['label']] != label].sample(n=len(anchors), replace=False)
             logging.info(positives)
             logging.info(negatives)
             logging.info(anchors)
