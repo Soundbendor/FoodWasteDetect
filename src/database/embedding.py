@@ -64,17 +64,17 @@ class EmbeddingModel:
         
         # for each anchor
         # randomly select positive and negative?
+        dfs = []
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
             class_idx = self.class_map[label[0]]
-            print(len(anchors))
-            print(descriptions)
-            print(descriptions[descriptions['label'] == class_idx])
-            positives = descriptions[descriptions['label'] == label].sample(n=len(anchors), replace=True)
-            negatives = descriptions[descriptions['label'] != label].sample(n=len(anchors), replace=False)
-            logging.info(positives)
-            logging.info(negatives)
-            logging.info(anchors)
+            positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors), replace=True)
+            negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors), replace=False)
+            print(len(positives))
+            # merge all 3 of these?
+            triplets = pd.concat(anchors, positives, negatives, axis=1)
+            print(triplets)
+
 
     def evaluator(self):
         # Our goal is to define some system to make sure descriptors of food categories are pushed away from one another
