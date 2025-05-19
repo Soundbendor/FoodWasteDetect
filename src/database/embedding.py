@@ -74,6 +74,9 @@ class EmbeddingModel:
             # merge all 3 of these?
             # WARN: are we not extracting individual descriptions?
             # oh boy, this could turn into a disaster. 
+            print(anchors['caption'])
+            print(positives['descriptions'])
+            print(negatives['descriptions'])
             triplets = pd.DataFrame({'anchors': anchors['caption'], 'positive': positives['descriptions'], 'negative': negatives['descriptions']})
             print(triplets)
 
