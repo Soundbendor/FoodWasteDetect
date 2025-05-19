@@ -63,10 +63,10 @@ class EmbeddingModel:
         descriptions = self.ds.to_pandas()
         
         # for each anchor
-        # randomly select positive and negative? 
+        # randomly select positive and negative?
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
-            class_idx = self.class_map[label]
+            class_idx = self.class_map[label[0]]
             print(len(anchors))
             print(descriptions)
             print(descriptions[descriptions['label'] == class_idx])
