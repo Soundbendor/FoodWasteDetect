@@ -51,7 +51,7 @@ def merge_files():
     base_path = 'assets/foodx251_captions_'
     dfs = []
     for n in range(n_splits):
-        path = f"{base_path}{n}.txt"
+        path = f"{base_path}{n+1}.txt"
         dfs.append(pd.read_csv(path))
     df = pd.concat(dfs)
     print(df)
