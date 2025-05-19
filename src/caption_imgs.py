@@ -46,3 +46,13 @@ def main():
             df.to_csv(save_path)
             buffer = []
 
+def merge_files():
+    n_splits = 4
+    base_path = 'assets/foodx251_captions_'
+    dfs = []
+    for n in range(n_splits):
+        path = f"{base_path}{n}.txt"
+        dfs.append(pd.read_csv(path))
+    df = pd.concat(dfs)
+    print(df)
+

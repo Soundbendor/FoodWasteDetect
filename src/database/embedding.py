@@ -28,7 +28,6 @@ class EmbeddingModel:
         self.eval_func = self.evaluator()
 
     def _load_dataset(self, path: str):
-        # WARN: this doesn't work!
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
