@@ -2,7 +2,7 @@ from database.embedding import EmbeddingModel
 from util import parse_args, parse_cfg
 
 
-def main(config_file: str):
+def main():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     dict_path = cfg.get("Models", "dictionary")
