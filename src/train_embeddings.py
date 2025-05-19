@@ -9,5 +9,8 @@ def main(config_file: str):
     embedder = EmbeddingModel(dict_path, cfg.get("Models", "anchor_path"), cfg.get("Models", "embed_model"))
     # train embedding model
     embedder.train(save_path=cfg.get("Models", "embed_model_save_path"))
+
+if __name__ == '__main__':
+    main()
     
 
