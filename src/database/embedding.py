@@ -72,15 +72,9 @@ class EmbeddingModel:
                                                                                 replace=True).reset_index(drop=True)
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors),
                                                                                 replace=False).reset_index(drop=True)
-            print(len(positives))
-            # merge all 3 of these?
-            # WARN: are we not extracting individual descriptions?
-            # oh boy, this could turn into a disaster. 
-            print(anchors['caption'])
-            print(positives['descriptions'])
-            print(negatives['descriptions'])
-            triplets = pd.DataFrame({'anchors': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']})
-            print(triplets)
+            dfs.append(pd.DataFrame({'anchors': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']}))
+        triplets = pd.concat(dfs, ignore_index = True)
+        print(triplets)
 
 
     def evaluator(self):
