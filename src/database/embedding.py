@@ -46,6 +46,7 @@ class EmbeddingModel:
         # positive/negatives sourced from gemma
         ds = {"label": class_names, "descriptions": descriptors}
         ds = Dataset.from_dict(ds)
+        ds = ds.train_test_split(test_size=0.1)
         # logging.info(f"Dataset: {ds}")
         return ds, class_map
 
@@ -99,9 +100,9 @@ class EmbeddingModel:
         trainer = SentenceTransformerTrainer(
             model=self.model,
             args=self.set_config(),
-            train_dataset=self.ds,
+            train_dataset=self.ds['train'],
             loss=self.loss,
-            eval_dataset = self.eval_ds,
+            eval_dataset = self.ds['test'],
             evaluator=self.evaluator
         )
         trainer.train()
@@ -124,6 +125,7 @@ class EmbeddingModel:
             # WARN: eventually, we want to define an evaluation function using a test dataset
             # We will want to generate Internv2.5 captions from foodx251 training data and form triplets from this data
             # Then, use triplet loss evaluation
+            # WARN: is searching for a [validation] set
             eval_strategy="steps",
             save_strategy="steps",
             save_steps=100,
