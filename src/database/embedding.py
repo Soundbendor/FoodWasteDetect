@@ -121,7 +121,7 @@ class EmbeddingModel:
             # WARN: eventually, we want to define an evaluation function using a test dataset
             # We will want to generate Internv2.5 captions from foodx251 training data and form triplets from this data
             # Then, use triplet loss evaluation
-            eval_strategy="no",
+            eval_strategy="steps",
             save_strategy="steps",
             save_steps=100,
             save_total_limit=2,
