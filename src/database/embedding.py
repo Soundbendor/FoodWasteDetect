@@ -68,7 +68,8 @@ class EmbeddingModel:
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
             class_idx = self.class_map[label[0]]
-            positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors), replace=True)
+            positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors),
+                                                                                replace=True).reset_index(drop=True)
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors), replace=False)
             print(len(positives))
             # merge all 3 of these?
