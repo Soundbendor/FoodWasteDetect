@@ -65,6 +65,8 @@ class EmbeddingModel:
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
             print(len(anchors))
+            print(label)
+            print(descriptions[descriptions['label'] == label])
             positives = descriptions[descriptions['label'] == label].sample(n=len(anchors), replace=True)
             negatives = descriptions[descriptions['label'] != label].sample(n=len(anchors), replace=False)
             logging.info(positives)
