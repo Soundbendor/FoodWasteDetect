@@ -82,13 +82,15 @@ class EmbeddingModel:
     def evaluator(self):
         # Our goal is to define some system to make sure descriptors of food categories are pushed away from one another
         # We need a subset of our dataset that's formatted as triplets?
-        return TripletEvaluator(
+        evaluator = TripletEvaluator(
             anchors=self.eval_ds["anchor"],
             positives=self.eval_ds["positive"],
             negatives=self.eval_ds["negative"],
             main_distance_function=SimilarityFunction.COSINE,
             name="food-desc-triplet-eval",
         )
+        evaluator(self.model)
+        return evaluator
 
     def get_embedding(self, txt: str):
         return self.model.encode(txt)
