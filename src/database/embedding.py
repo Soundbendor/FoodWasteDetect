@@ -70,7 +70,8 @@ class EmbeddingModel:
             class_idx = self.class_map[label[0]]
             positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors),
                                                                                 replace=True).reset_index(drop=True)
-            negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors), replace=False)
+            negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors),
+                                                                                replace=False).reset_index(drop=True)
             print(len(positives))
             # merge all 3 of these?
             # WARN: are we not extracting individual descriptions?
@@ -78,7 +79,7 @@ class EmbeddingModel:
             print(anchors['caption'])
             print(positives['descriptions'])
             print(negatives['descriptions'])
-            triplets = pd.DataFrame({'anchors': anchors['caption'], 'positive': positives['descriptions'], 'negative': negatives['descriptions']})
+            triplets = pd.DataFrame({'anchors': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']})
             print(triplets)
 
 
