@@ -62,8 +62,6 @@ class EmbeddingModel:
         
         # for each anchor
         # randomly select positive and negative? 
-        ds = {'anchor', [], 'positive', [], 'negative', []}
-        prev_class = ""
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
             positives = descriptions[descriptions['label'] == label].sample(n=len(anchors), replace=True)
