@@ -55,5 +55,5 @@ def merge_files():
         dfs.append(pd.read_csv(path, index_col = 'idx'))
     df = pd.concat(dfs)
     print(df)
-    pd.to_csv('assets/foodx251_captions.txt')
+    df.to_csv('assets/foodx251_captions.txt')
 
