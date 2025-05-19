@@ -52,7 +52,7 @@ def merge_files():
     dfs = []
     for n in range(n_splits):
         path = f"{base_path}{n+1}.txt"
-        dfs.append(pd.read_csv(path))
+        dfs.append(pd.read_csv(path, index_col = 'idx'))
     df = pd.concat(dfs)
     print(df)
 
