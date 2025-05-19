@@ -3,6 +3,7 @@ import logging
 
 from datasets import Dataset
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
+from sentence_transformers.evaluation import SimilarityFunction, TripletEvaluator
 from sentence_transformers.losses import BatchAllTripletLoss
 from sentence_transformers.training_args import (
     BatchSamplers,
@@ -19,16 +20,19 @@ from sentence_transformers.training_args import (
 
 class EmbeddingModel:
 
-    def __init__(self, dictionary_path: str, model_path: str):
+    def __init__(self, dictionary_path: str, anchor_path: str,  model_path: str):
         self.ds = self._load_dataset(dictionary_path)
+        self.eval_ds = self._load_triplet_dataset(anchor_path)
         self.model = SentenceTransformer(model_path)
         self.loss = BatchAllTripletLoss(self.model)
+        self.eval_func = self.evaluator()
 
     def _load_dataset(self, path: str):
         # WARN: this doesn't work!
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        logging.info(data)
         class_names = []
         descriptors = []
         for idx, (k, v) in enumerate(data.items()):
@@ -43,10 +47,23 @@ class EmbeddingModel:
         logging.info(f"Dataset: {ds}")
         return ds
 
+
+    # goal: load dataset in (anchor, positive, negative) pairs
+    # relies on _load_dataset
+    # should be Dataset class with
+    def _load_triplet_dataset(self, path: str):
+        pass
+
     def evaluator(self):
         # Our goal is to define some system to make sure descriptors of food categories are pushed away from one another
         # We need a subset of our dataset that's formatted as triplets?
-        pass
+        return TripletEvaluator(
+            anchors=self.eval_ds["anchor"],
+            positives=self.eval_ds["positive"],
+            negatives=self.eval_ds["negative"],
+            main_distance_function=SimilarityFunction.COSINE,
+            name="all-nli-dev",
+        )
 
     def get_embedding(self, txt: str):
         return self.model.encode(txt)
@@ -78,7 +95,6 @@ class EmbeddingModel:
             # WARN: eventually, we want to define an evaluation function using a test dataset
             # We will want to generate Internv2.5 captions from foodx251 training data and form triplets from this data
             # Then, use triplet loss evaluation
-            # Unsure whether to do this before or after InternV2.5 finetuning
             eval_strategy="no",
             save_strategy="steps",
             save_steps=100,
