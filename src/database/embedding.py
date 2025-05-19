@@ -61,7 +61,7 @@ class EmbeddingModel:
         # sort to aggregate each anchor class
         anchors_by_class = df.groupby(['class'])
         # convert descriptions dataset to pandas
-        descriptions = self.ds.to_pandas()
+        descriptions = self.ds['train'].to_pandas()
         
         # for each anchor
         # randomly select positive and negative?
