@@ -72,7 +72,7 @@ class EmbeddingModel:
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors), replace=False)
             print(len(positives))
             # merge all 3 of these?
-            triplets = pd.concat(anchors, positives, negatives, axis=1)
+            triplets = pd.concat([anchors, positives, negatives], axis=1)
             print(triplets)
 
 
