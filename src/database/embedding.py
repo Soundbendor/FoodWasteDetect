@@ -66,13 +66,12 @@ class EmbeddingModel:
         # randomly select positive and negative? 
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
+            class_idx = self.class_map[label]
             print(len(anchors))
-            print(label)
             print(descriptions)
-            print(descriptions['label'].unique())
-            print(descriptions[self.class_map[descriptions['label']] == label])
-            positives = descriptions[self.class_map[descriptions['label']] == label].sample(n=len(anchors), replace=True)
-            negatives = descriptions[self.class_map[descriptions['label']] != label].sample(n=len(anchors), replace=False)
+            print(descriptions[descriptions['label'] == class_idx])
+            positives = descriptions[descriptions['label'] == label].sample(n=len(anchors), replace=True)
+            negatives = descriptions[descriptions['label'] != label].sample(n=len(anchors), replace=False)
             logging.info(positives)
             logging.info(negatives)
             logging.info(anchors)
