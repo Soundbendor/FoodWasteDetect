@@ -72,7 +72,9 @@ class EmbeddingModel:
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors), replace=False)
             print(len(positives))
             # merge all 3 of these?
-            triplets = pd.Dataframe({'anchors': anchors['caption'], 'positive': positives['descriptions'], 'negative': negatives['descriptions']})
+            # WARN: are we not extracting individual descriptions?
+            # oh boy, this could turn into a disaster. 
+            triplets = pd.DataFrame({'anchors': anchors['caption'], 'positive': positives['descriptions'], 'negative': negatives['descriptions']})
             print(triplets)
 
 
