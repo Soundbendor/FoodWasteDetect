@@ -1,6 +1,7 @@
 import json
 import logging
 
+import pandas as pd
 from datasets import Dataset
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
 from sentence_transformers.evaluation import SimilarityFunction, TripletEvaluator
@@ -51,7 +52,25 @@ class EmbeddingModel:
     # relies on _load_dataset
     # should be Dataset class with
     def _load_triplet_dataset(self, path: str):
-        pass
+        # load anchor captions
+        df = pd.read_csv(path)
+        # has [class], [caption]
+        # sort to aggregate each anchor class
+        anchors_by_class = df.groupby(['class'])
+        # convert descriptions dataset to pandas
+        descriptions = self.ds.to_pandas()
+        
+        # for each anchor
+        # randomly select positive and negative? 
+        ds = {'anchor', [], 'positive', [], 'negative', []}
+        prev_class = ""
+        for label, anchors in anchors_by_class:
+            # extract all matching positive samples
+            positives = descriptions[descriptions['label'] == label].sample(n=len(anchors), replace=True)
+            negatives = descriptions[descriptions['label'] != label].sample(n=len(anchors), replace=False)
+            logging.info(positives)
+            logging.info(negatives)
+            logging.info(anchors)
 
     def evaluator(self):
         # Our goal is to define some system to make sure descriptors of food categories are pushed away from one another
