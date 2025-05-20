@@ -8,7 +8,8 @@ def main():
     dict_path = cfg.get("Models", "dictionary")
     embedder = EmbeddingModel(dict_path, cfg.get("Models", "anchor_path"), cfg.get("Models", "embed_model"))
     # train embedding model
-    metrics = embedder.train(save_path=cfg.get("Models", "embed_model_save_path"))
+    trainer = embedder.train(save_path=cfg.get("Models", "embed_model_save_path"))
+    metrics = trainer.state.log_history
     print(metrics)
 
 if __name__ == '__main__':

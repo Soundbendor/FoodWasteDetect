@@ -107,13 +107,14 @@ class EmbeddingModel:
         )
         trainer.train()
         self.model.save_pretrained(save_path)
+        return trainer
 
     def set_config(self):
         return SentenceTransformerTrainingArguments(
             # Required parameter:
             output_dir="models/all-mpnet-base-v2",
             # Optional training parameters:
-            num_train_epochs=10,
+            num_train_epochs=1,
             per_device_train_batch_size=16,
             per_device_eval_batch_size=16,
             learning_rate=2e-5,
