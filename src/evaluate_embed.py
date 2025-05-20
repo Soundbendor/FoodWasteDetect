@@ -18,7 +18,7 @@ def main():
     model = InternVLM(cfg.get("Models", "intern_path"))
     dataset = FoodX251(ds_path)
     embedder = EmbeddingModel(
-        cfg.get("Models", "dictionary"), cfg.get("Models", "embed_model_save_path")
+        cfg.get("Models", "dictionary"), cfg.get("Models", "anchor_path"), cfg.get("Models", "embed_model_save_path")
     )
     db = VectorDB(
         cfg.get("Models", "db_path"), embedder, cfg.get("Models", "collection_name")
