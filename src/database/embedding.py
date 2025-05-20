@@ -113,7 +113,7 @@ class EmbeddingModel:
             # Required parameter:
             output_dir="models/all-mpnet-base-v2",
             # Optional training parameters:
-            num_train_epochs=2,
+            num_train_epochs=10,
             per_device_train_batch_size=16,
             per_device_eval_batch_size=16,
             learning_rate=2e-5,
@@ -122,11 +122,7 @@ class EmbeddingModel:
             bf16=False,  # Set to True if you have a GPU that supports BF16
             batch_sampler=BatchSamplers.NO_DUPLICATES,  # losses that use "in-batch negatives" benefit from no duplicates
             # Optional tracking/debugging parameters:
-            # WARN: eventually, we want to define an evaluation function using a test dataset
-            # We will want to generate Internv2.5 captions from foodx251 training data and form triplets from this data
-            # Then, use triplet loss evaluation
-            # WARN: is searching for a [validation] set
-            eval_strategy="steps",
+            eval_strategy="epoch",
             save_strategy="steps",
             save_steps=100,
             save_total_limit=2,
