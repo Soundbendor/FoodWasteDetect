@@ -11,7 +11,7 @@ def main():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     dict_path = cfg.get("Models", "dictionary")
-    embedder = EmbeddingModel(dict_path, cfg.get("Models", "embed_model"))
+    embedder = EmbeddingModel(dict_path, cfg.get("Models", "anchor_path"), cfg.get("Models", "embed_model"))
     db = VectorDB(
         cfg.get("Models", "db_path"), embedder, cfg.get("Models", "collection_name")
     )
