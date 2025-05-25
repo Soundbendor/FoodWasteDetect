@@ -75,7 +75,7 @@ class EmbeddingModel:
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors),
                                                                                 replace=False).reset_index(drop=True)
             dfs.append(pd.DataFrame({'anchor': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']}))
-        triplets = pd.concat(dfs, ignore_index = True)
+        triplets = pd.concat(dfs, ignore_index = True).sample(frac=0.25)
         print(triplets[triplets.isna().any(axis=1)])
         dataset = Dataset.from_pandas(triplets)
         return dataset
