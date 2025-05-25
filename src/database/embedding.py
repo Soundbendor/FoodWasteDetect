@@ -69,6 +69,8 @@ class EmbeddingModel:
         dfs = []
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
+            print(label)
+            print(anchors)
             class_idx = self.class_map[label[0]]
             positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors),
                                                                                 replace=True).reset_index(drop=True)
