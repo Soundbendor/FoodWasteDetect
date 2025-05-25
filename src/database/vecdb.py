@@ -8,6 +8,7 @@ from typing import List, Tuple
 import requests
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, ScoredPoint, VectorParams
+from sentence_transformers import CrossEncoder, SentenceTransformer, util
 
 from .embedding import EmbeddingModel
 
@@ -20,6 +21,7 @@ class VectorDB:
         self.client = self.connect(addr=path)
         self.db_name = db_name
         self.model = model
+        self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')
 
     def connect(self, addr: str):
         """Check for qdrant server running on host. If connection fails, starts a Qdrant instance."""
@@ -65,7 +67,7 @@ class VectorDB:
                     PointStruct(
                         id=idx,
                         vector=self.model.get_embedding(descriptor),
-                        payload={"class": k},
+                        payload={"class": k, "description": descriptor},
                     )
                 )
 
@@ -74,16 +76,26 @@ class VectorDB:
             # Other embedding models will fail
             self.client.create_collection(
                 collection_name=self.db_name,
-                vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+                vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
             )
         self.client.upsert(collection_name=self.db_name, points=points)
 
     # Given a food image descriptor, return the most probable class and similarity score
     def query(self, query_text: str) -> List[ScoredPoint]:
         query_vector = self.model.get_embedding(query_text)
-        return self.client.search(
+        top10 = self.client.search(
             collection_name=self.db_name, query_vector=query_vector, limit=10
         )
+        rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
+        rerank_scores = self.reranker.predict(rerank_pairs)
+        # append rerank scores to query vectors
+        for idx in range(len(rerank_scores)):
+            print(f"DEBUG: Old Score: {top10[idx].score}")
+            print(f"DEBUG: New Score: {rerank_scores[idx]}")
+            top10[idx].score = rerank_scores[idx]
+        return top10
+            
+
 
     # Returns (Accuracy, Similarity) where acc is binary 1-0
     def score(
