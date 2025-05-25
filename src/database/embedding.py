@@ -69,17 +69,12 @@ class EmbeddingModel:
         dfs = []
         for label, anchors in anchors_by_class:
             # extract all matching positive samples
-            print(label)
-            print(anchors)
             class_idx = self.class_map[label[0]]
-            print(class_idx)
-            print(descriptions)
-            print(self.class_map)
-            print(descriptions[descriptions['label'] != class_idx])
             positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors),
                                                                                 replace=True).reset_index(drop=True)
+            # problem: more anchors than negative descriptors
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors),
-                                                                                replace=False).reset_index(drop=True)
+                                                                                replace=True).reset_index(drop=True)
             dfs.append(pd.DataFrame({'anchor': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']}))
         triplets = pd.concat(dfs, ignore_index = True).sample(frac=0.25)
         print(triplets[triplets.isna().any(axis=1)])
