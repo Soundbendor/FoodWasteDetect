@@ -23,7 +23,7 @@ class EmbeddingModel:
 
     def __init__(self, dictionary_path: str, anchor_path: str,  model_path: str):
         self.ds, self.class_map = self._load_dataset(dictionary_path)
-        self.save_dir = save_dir
+        self.save_dir = model_path
         self.eval_ds = self._load_triplet_dataset(anchor_path)
         self.model = SentenceTransformer(model_path)
         self.loss = BatchAllTripletLoss(self.model)
