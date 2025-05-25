@@ -93,6 +93,7 @@ class VectorDB:
             print(f"DEBUG: Old Score: {top10[idx].score}")
             print(f"DEBUG: New Score: {rerank_scores[idx]}")
             top10[idx].score = rerank_scores[idx]
+        logging.info(rerank_pairs)
         return sorted(top10, key=lambda x: x.score)
             
 
