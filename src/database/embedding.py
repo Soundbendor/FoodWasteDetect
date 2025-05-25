@@ -23,6 +23,7 @@ class EmbeddingModel:
 
     def __init__(self, dictionary_path: str, anchor_path: str,  model_path: str):
         self.ds, self.class_map = self._load_dataset(dictionary_path)
+        self.save_dir = save_dir
         self.eval_ds = self._load_triplet_dataset(anchor_path)
         self.model = SentenceTransformer(model_path)
         self.loss = BatchAllTripletLoss(self.model)
@@ -111,7 +112,7 @@ class EmbeddingModel:
     def set_config(self):
         return SentenceTransformerTrainingArguments(
             # Required parameter:
-            output_dir="models/all-mpnet-base-v2",
+            output_dir=self.save_dir,
             # Optional training parameters:
             num_train_epochs=1,
             per_device_train_batch_size=16,
