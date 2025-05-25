@@ -72,6 +72,10 @@ class EmbeddingModel:
             print(label)
             print(anchors)
             class_idx = self.class_map[label[0]]
+            print(class_idx)
+            print(descriptions)
+            print(self.class_map)
+            print(descriptions[descriptions['label'] != class_idx])
             positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors),
                                                                                 replace=True).reset_index(drop=True)
             negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors),
