@@ -21,11 +21,11 @@ from sentence_transformers.training_args import (
 
 class EmbeddingModel:
 
-    def __init__(self, dictionary_path: str, anchor_path: str,  model_path: str):
+    def __init__(self, dictionary_path: str, anchor_path: str,  model_path: str, model_name: str):
         self.ds, self.class_map = self._load_dataset(dictionary_path)
         self.save_dir = model_path
         self.eval_ds = self._load_triplet_dataset(anchor_path)
-        self.model = SentenceTransformer(model_path)
+        self.model = SentenceTransformer(model_name)
         self.loss = BatchAllTripletLoss(self.model)
         self.evaluator = self.evaluator()
 
