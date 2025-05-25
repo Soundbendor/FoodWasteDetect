@@ -57,7 +57,7 @@ class EmbeddingModel:
     # should be Dataset class with
     def _load_triplet_dataset(self, path: str):
         # load anchor captions
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, index_col='idx')
         # has [class], [caption]
         # sort to aggregate each anchor class
         anchors_by_class = df.groupby(['class'])
