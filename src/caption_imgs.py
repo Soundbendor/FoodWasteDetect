@@ -68,6 +68,6 @@ def convert_to_dictionary():
     for idx, row in df.iterrows():
         dataset[row['class']].append(row['caption'])
     with open('foodx251_captions.json', 'w') as f:
-        json.dump(dataset, f)
+        json.dump(dataset, f, indent=4)
 
 
