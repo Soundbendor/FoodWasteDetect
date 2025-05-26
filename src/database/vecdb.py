@@ -61,8 +61,16 @@ class VectorDB:
         with open(dict_path, "r", encoding="utf-8") as f:
             descriptors = json.load(f)
 
-        points = []
+        if not self.client.collection_exists(self.db_name):
+            # WARN: this is only configured for MPnet
+            # Other embedding models will fail
+            self.client.create_collection(
+                collection_name=self.db_name,
+                vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+            )
+
         for idx, (k, v) in enumerate(descriptors.items()):
+            points = []
             vectors = self.model.get_embedding(v)
             for j, descriptor in enumerate(v):
                 points.append(
@@ -72,19 +80,8 @@ class VectorDB:
                         payload={"class": k, "description": descriptor},
                     )
                 )
+            self.client.upsert(collection_name=self.db_name, points=points)
 
-        # pickle these to a local file
-        with open("embedding_store.pth", 'wb') as file:
-            pickle.dump(points, file)
-
-        if not self.client.collection_exists(self.db_name):
-            # WARN: this is only configured for MPnet
-            # Other embedding models will fail
-            self.client.create_collection(
-                collection_name=self.db_name,
-                vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
-            )
-        self.client.upsert(collection_name=self.db_name, points=points)
 
     # Given a food image descriptor, return the most probable class and similarity score
     def query(self, query_text: str) -> List[ScoredPoint]:
