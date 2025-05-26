@@ -63,11 +63,12 @@ class VectorDB:
 
         points = []
         for idx, (k, v) in enumerate(descriptors.items()):
-            for descriptor in v:
+            vectors = self.model.get_embedding(v)
+            for j, descriptor in enumerate(v):
                 points.append(
                     PointStruct(
                         id=idx,
-                        vector=self.model.get_embedding(descriptor),
+                        vector=vectors[j],
                         payload={"class": k, "description": descriptor},
                     )
                 )
