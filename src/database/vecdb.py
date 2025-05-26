@@ -51,7 +51,7 @@ class VectorDB:
             raise ConnectionError(
                 "Failure to contact Qdrant server, likely due to excess queue times on cn-m-1."
             )
-        return QdrantClient(addr)
+        return QdrantClient(addr, timeout=100)
 
     def add(self, dict_path: str):
         # Expecting a descriptor dictionary as
