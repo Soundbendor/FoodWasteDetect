@@ -86,15 +86,15 @@ class VectorDB:
         top10 = self.client.search(
             collection_name=self.db_name, query_vector=query_vector, limit=10
         )
-        # rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
-        # rerank_scores = self.reranker.predict(rerank_pairs)
-        # # append rerank scores to query vectors
-        # for idx in range(len(rerank_scores)):
-        #     print(f"DEBUG: Old Score: {top10[idx].score}")
-        #     print(f"DEBUG: New Score: {rerank_scores[idx]}")
-        #     top10[idx].score = rerank_scores[idx]
-        # logging.info(rerank_pairs)
-        return sorted(top10, key=lambda x: x.score)
+        rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
+        rerank_scores = self.reranker.predict(rerank_pairs)
+        # append rerank scores to query vectors
+        for idx in range(len(rerank_scores)):
+            print(f"DEBUG: Old Score: {top10[idx].score}")
+            print(f"DEBUG: New Score: {rerank_scores[idx]}")
+            top10[idx].score = rerank_scores[idx]
+        logging.info(rerank_pairs)
+        return sorted(top10, key=lambda x: x.score, reverse=True)
             
 
 
