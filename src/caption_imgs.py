@@ -65,7 +65,7 @@ def merge_files():
 def convert_to_dictionary():
     df = pd.read_csv("assets/foodx251_captions.txt", index_col='idx')
     dataset = defaultdict(list)
-    for row in df.iterrows():
+    for idx, row in df.iterrows():
         dataset[row['class']].append(row['caption'])
     with open('foodx251_captions.json', 'w') as f:
         json.dump(dataset, f)
