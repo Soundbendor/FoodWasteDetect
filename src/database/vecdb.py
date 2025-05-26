@@ -87,7 +87,7 @@ class VectorDB:
             collection_name=self.db_name, query_vector=query_vector, limit=10
         )
         rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
-        logging.info(rerank_pairs)
+        print(rerank_pairs)
         rerank_scores = self.reranker.predict(rerank_pairs)
         # append rerank scores to query vectors
         for idx in range(len(rerank_scores)):
