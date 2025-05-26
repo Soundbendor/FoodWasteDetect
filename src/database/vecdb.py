@@ -86,6 +86,7 @@ class VectorDB:
         top10 = self.client.search(
             collection_name=self.db_name, query_vector=query_vector, limit=10
         )
+        print(top10)
         rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
         print("DEBUG: Rerank Pairs \n\n")
         print(rerank_pairs)
