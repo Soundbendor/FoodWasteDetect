@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+from collections import defaultdict
 
 import pandas as pd
 
@@ -58,3 +60,14 @@ def merge_files():
     df = pd.concat(dfs)
     print(df)
     df.to_csv('assets/foodx251_captions.txt')
+
+
+def convert_to_dictionary():
+    df = pd.read_csv("assets/foodx251_captions.txt", index_col='idx')
+    dataset = defaultdict(list)
+    for row in df.iterrows():
+        dataset[row['class']].append(row['caption'])
+    with open('foodx251_captions.json', 'w') as f:
+        json.dump(dataset, f)
+
+

@@ -12,6 +12,7 @@ build_descriptions = "build_descriptor:main"
 build_vdb = "build_vdb:main"
 caption_imgs = "caption_imgs:main"
 merge_captions = "caption_imgs:merge_files"
+convert_dict = "caption_imgs:convert_to_dictionary"
 
 [tool.setuptools.packages.find]
 where = ["src"]
