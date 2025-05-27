@@ -1,8 +1,8 @@
 import argparse
-import configparser
 import logging
 
 import pandas as pd
+import yaml
 from qdrant_client.models import ScoredPoint
 
 from database.vecdb import VectorDB
@@ -30,11 +30,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--partition", type=int)
     return parser.parse_args()
 
-def parse_cfg(cfg_file: str) -> configparser.ConfigParser:
-    cfg = configparser.ConfigParser()
-    cfg.read(cfg_file)
+def parse_cfg(cfg_file: str) -> dict:
     logging.basicConfig(level=logging.INFO)
-    return cfg
+    return yaml.load(cfg_file, Loader = yaml.Loader)
 
 
 

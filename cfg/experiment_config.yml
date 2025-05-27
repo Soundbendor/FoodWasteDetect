@@ -1,0 +1,17 @@
+llm: gemma3:27b
+embed_model: BAAI/bge-large-en-v1.5
+qdrant_url: cn-m-1.hpc.engr.oregonstate.edu:6333
+collection_name: food_descriptor_gemma5
+
+paths:
+  intern: deps/InternVL2_5-8B-MPO
+  dataset: /nfs/stak/users/beerya/soundbendor/food_cap_datasets/FoodX-251
+  embed_model_save_path: assets/embed_models/bge-large-en/final
+  dictionary: assets/descriptor_dictionary.json
+  anchor_path: assets/foodx251_captions.txt
+
+settings:
+  eval_samples: 1000
+
+
+
