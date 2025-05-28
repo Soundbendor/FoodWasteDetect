@@ -75,7 +75,7 @@ def test_classification():
 '''
     Take a dataset and build a vector db using some pretrained embedding model
 '''
-def build_embedding_db():
+def build_vdb():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     dict_path = cfg.get("Models", "dictionary")
@@ -116,7 +116,7 @@ def merge_files():
     Used for converting zero-shot captions to embedding database
 '''
 # WARN: Hard-coded to only work for foodx251
-def convert_to_dictionary():
+def convert_csv_to_dictionary():
     df = pd.read_csv("assets/foodx251_captions.txt", index_col='idx')
     dataset = defaultdict(list)
     for idx, row in df.iterrows():

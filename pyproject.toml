@@ -7,12 +7,12 @@ name = "Intern-FW"
 version = "0.0.1"
 
 [project.scripts]
-eval_embed = "evaluate_embed:main"
-build_descriptions = "build_descriptor:main"
-build_vdb = "build_vdb:main"
-caption_imgs = "caption_imgs:main"
-merge_captions = "caption_imgs:merge_files"
-convert_dict = "caption_imgs:convert_to_dictionary"
+test_classification = "app:test_classification"
+generate_descriptions = "app:generate_descriptions"
+build_vdb = "app:build_vdb"
+caption_imgs = "app:caption_imgs"
+merge_captions = "app:merge_files"
+convert_dict = "app:convert_csv_to_dictionary"
 
 [tool.setuptools.packages.find]
 where = ["src"]
