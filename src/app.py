@@ -6,7 +6,8 @@ from collections import defaultdict
 import pandas as pd
 
 from data_wrappers.foodx251 import FoodX251
-from database.embedding import CLIPEmbedding, EmbeddingModel
+from database.clip_embedding import CLIPEmbedding
+from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
 from llm.describer import DescriberLLM
 from util import EvalMetric, parse_args, parse_cfg
