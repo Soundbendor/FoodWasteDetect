@@ -32,7 +32,8 @@ def parse_args() -> argparse.Namespace:
 
 def parse_cfg(cfg_file: str) -> dict:
     logging.basicConfig(level=logging.INFO)
-    return yaml.load(cfg_file, Loader = yaml.Loader)
+    with open(cfg_file, 'r') as stream:
+        return yaml.load(stream, Loader = yaml.Loader)
 
 
 
