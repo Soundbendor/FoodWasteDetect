@@ -1,5 +1,7 @@
 llm: gemma3:27b
 embed_model: BAAI/bge-large-en-v1.5
+embed_size: 1024
+reranker_model: cross-encoder/ms-marco-MiniLM-L6-v2
 qdrant_url: cn-m-1.hpc.engr.oregonstate.edu:6333
 collection_name: food_descriptor_gemma5
 

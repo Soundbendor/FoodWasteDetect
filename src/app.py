@@ -5,9 +5,9 @@ from collections import defaultdict
 
 import pandas as pd
 
+from data_wrappers.foodx251 import FoodX251
 from database.embedding import EmbeddingModel
 from database.vecdb import VectorDB
-from ds.foodx251 import FoodX251
 from llm.describer import DescriberLLM
 from util import EvalMetric, parse_args, parse_cfg
 from vlm.intern import InternVLM
@@ -42,9 +42,8 @@ def test_classification():
         cfg['paths']['embed_model_save_path'],
         cfg['paths']['anchor_path']
     )
-    # TODO: stopped here
     db = VectorDB(
-        cfg['qdrant_url'], embedder, cfg['collection_name']
+        cfg['qdrant_url'], cfg['collection_name'], cfg['reranker_model'], cfg['embed_size']
     )
 
     ds_path = cfg['paths']['dataset']
@@ -57,16 +56,21 @@ def test_classification():
 
     # TODO: Turn this into a .apply() function
     for i, row in val_set.iterrows():
-        response = model.infer(f"{ds_path}/val/val_set/{row['fname']}", intern_prompt)
-        q_vecs = db.query(response)
+        # Caption image with InternV2.5
+        img_caption = model.infer(f"{ds_path}/val/val_set/{row['fname']}", intern_prompt)
+        # Generate embedding from caption
+        query_vec = embedder.get_embedding(img_caption)
+        # Search vector database for most similar vector
+        candidate_vecs = db.query(img_caption, query_vec)
+        # Score our result
         # INFO: We use voting here as default
-        score, confidence, prediction = db.score(q_vecs, row["class"], "voting")
-        top5_score, _, _ = db.score(q_vecs, row["class"], "top5")
-        metric.update_scores(q_vecs, db, row["class"])
+        score, confidence, prediction = db.score(candidate_vecs, row["class"], "voting")
+        top5_score, _, _ = db.score(candidate_vecs, row["class"], "top5")
+        metric.update_scores(candidate_vecs, db, row["class"])
         logging.info(f"Predicted Label: {prediction}")
         logging.info(f"True label: {row['class']}")
         logging.info(f"In Top 5? {top5_score}")
-        logging.info(f"Description: {response}")
+        logging.info(f"Description: {img_caption}")
         logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
 
     scores = metric.compute_accuracies()
@@ -83,15 +87,25 @@ def build_vdb():
         dict_path, cfg.get("Models", "anchor_path"), cfg.get("Models", "embed_model_save_path"), cfg.get("Models", "embed_model")
     )
     db = VectorDB(
-        cfg.get("Models", "db_path"), embedder, cfg.get("Models", "collection_name")
+        cfg['qdrant_url'], cfg['collection_name'], cfg['reranker_model'], cfg['embed_size']
     )
-    # Goal, from dictionary, build vector database
+
+    # load dataset
+    with open(dict_path, "r", encoding="utf-8") as f:
+        descriptors = json.load(f)
+
     logging.info("Building Database...")
-    db.add(dict_path)
+    for k, v in descriptors.items():
+        # generate embeddings
+        vectors = embedder.get_embedding(v)
+        metadata = {'description': v}
+        db.add_records(k, vectors, metadata)
+
     logging.info("Database Built!")
     logging.info(f"Test Query: {test_query}")
-    q_vecs = db.query(test_query)
-    accuracy, conf, prediction = db.score(q_vecs, "Macaron", "voting")
+    query_vec = embedder.get_embedding(test_query)
+    candidate_vecs = db.query(test_query, query_vec)
+    accuracy, conf, prediction = db.score(candidate_vecs, "Macaron", "voting")
     logging.info(f"Prediction: {prediction}")
 
 '''

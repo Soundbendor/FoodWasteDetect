@@ -2,6 +2,7 @@ import json
 import logging
 
 import pandas as pd
+import torch
 from datasets import Dataset
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
 from sentence_transformers.evaluation import SimilarityFunction, TripletEvaluator
@@ -94,7 +95,7 @@ class EmbeddingModel:
         )
         return evaluator
 
-    def get_embedding(self, txt: str):
+    def get_embedding(self, txt: str) -> torch.Tensor:
         return self.model.encode(txt)
 
     def train(self, save_path: str):

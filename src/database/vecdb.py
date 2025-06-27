@@ -4,102 +4,84 @@ import pickle
 import subprocess
 import time
 from collections import Counter
-from typing import List, Tuple
+from typing import List, Optional, Tuple, Union
 
 import requests
+import torch
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, ScoredPoint, VectorParams
 from sentence_transformers import CrossEncoder, SentenceTransformer, util
 
-from .embedding import EmbeddingModel
-
 
 class VectorDB:
-    def __init__(self, path: str, model: EmbeddingModel, db_name: str):
-        # TODO: server startup
-        # check if cn-m-1.hpc.engr.oregonstate.edu:6443 is open
-        # if not, run startup script?
+    def __init__(self, path: str, db_name: str, reranker: Union[str, None], embed_size: int):
         self.client = self.connect(addr=path)
         self.db_name = db_name
-        self.model = model
-        self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')
+        self.embed_size = embed_size
+        if not reranker:
+            self.reranker = CrossEncoder(reranker)
+        else:
+            self.reranker = None
 
     def connect(self, addr: str):
         """Check for qdrant server running on host. If connection fails, starts a Qdrant instance."""
-        connection_status = 0
-        for i in range(5):
-            try:
-                response = requests.get(f"http://{addr}")
-            except requests.exceptions.ConnectionError:
-                connection_status = -1
-            if connection_status < 0 or response.status_code != 200:
-                # call qdrant startup script on first retry
-                if i == 0:
-                    proc = subprocess.Popen(
-                        "sbatch src/database/start_qdrant.sbatch",
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-                    out, error = proc.communicate()
-                    logging.info(f"QDRANT ALERT: {out}")
-                    logging.error(f"QDRANT ERROR: {error}")
-                logging.info("Waiting 60s, contacting Qdrant server...")
-                time.sleep(60)
-            else:
-                break
-        else:
+        try:
+            response = requests.get(f"http://{addr}")
+        except requests.exceptions.ConnectionError:
             raise ConnectionError(
-                "Failure to contact Qdrant server, likely due to excess queue times on cn-m-1."
+                "Failure to contact Qdrant server, please start vector database server from startup script in sbatch"
             )
         return QdrantClient(addr, timeout=9999)
 
-    def add(self, dict_path: str):
-        # Expecting a descriptor dictionary as
-        # { 'food_item': ['description 1', 'description 2'], ... }
 
-        with open(dict_path, "r", encoding="utf-8") as f:
-            descriptors = json.load(f)
-
+    def make_collection(self):
         if not self.client.collection_exists(self.db_name):
-            # WARN: this is only configured for MPnet
-            # Other embedding models will fail
             self.client.create_collection(
                 collection_name=self.db_name,
-                vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+                vectors_config=VectorParams(size=self.embed_size, distance=Distance.COSINE),
             )
 
-        for idx, (k, v) in enumerate(descriptors.items()):
-            points = []
-            vectors = self.model.get_embedding(v)
-            for j, descriptor in enumerate(v):
-                points.append(
-                    PointStruct(
-                        id=idx,
-                        vector=vectors[j],
-                        payload={"class": k, "description": descriptor},
-                    )
-                )
-            self.client.upsert(collection_name=self.db_name, points=points)
+    '''
+        Take embeddings for data points for a given food class and insert them into the database.
+        Optionally provide metadata to store in vector payload
+        Metadata format: { 'key': [description1, description2, ...] }
+        Metadata lists must have same length as embeddings.
+    '''
+    def add_records(self, food_type: str, embeddings: list, metadata: Optional[dict]):
+        
+        # Make sure the collection exists
+        self.make_collection()
 
+        # Check to ensure metadata length matches embedding length
+        if metadata:
+            for k, v in metadata.items():
+                if len(v) != len(embeddings):
+                    raise Exception("Incompatible metadata in vector database insert.")
+        
+        # Insert vectors into database
+        points = []
+        for idx, vector in enumerate(embeddings):
+            payload = {'class': food_type}
+            if metadata:
+                for k, v in metadata.items():
+                    payload[k] = v[idx]
+            points.append(PointStruct(vector=vector, payload=payload))
+
+        self.client.upsert(collection_name = self.db_name, points=points)
 
     # Given a food image descriptor, return the most probable class and similarity score
-    def query(self, query_text: str) -> List[ScoredPoint]:
-        query_vector = self.model.get_embedding(query_text)
+    # WARN: Reranker does not support image search.
+    def query(self, query_text: str, query_vec: torch.Tensor) -> List[ScoredPoint]:
         top10 = self.client.search(
-            collection_name=self.db_name, query_vector=query_vector, limit=10
+            collection_name=self.db_name, query_vector=query_vec, limit=10
         )
-        print(top10)
-        rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
-        print("DEBUG: Rerank Pairs \n\n")
-        print(rerank_pairs)
-        rerank_scores = self.reranker.predict(rerank_pairs)
-        # append rerank scores to query vectors
-        for idx in range(len(rerank_scores)):
-            print(f"DEBUG: Old Score: {top10[idx].score}")
-            print(f"DEBUG: New Score: {rerank_scores[idx]}")
-            top10[idx].score = rerank_scores[idx]
-        logging.info(rerank_pairs)
+        if self.reranker:
+            rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
+            rerank_scores = self.reranker.predict(rerank_pairs)
+            # append rerank scores to query vectors
+            for idx in range(len(rerank_scores)):
+                top10[idx].score = rerank_scores[idx]
+            logging.info(rerank_pairs)
         return sorted(top10, key=lambda x: x.score, reverse=True)
             
 
