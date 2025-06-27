@@ -126,7 +126,7 @@ def build_img_vdb():
     logging.info("Building Database...")
     for food_name, img_names in food_imgs:
         img_paths = [f"{ds_path}/val/val_set/{x}" for x in img_names]
-        vectors = embedder.get_embeding(img_paths)
+        vectors = embedder.get_embedding(img_paths)
         metadata = {'img_path': img_names}
         db.add_records(food_name, vectors, metadata)
         
@@ -146,6 +146,7 @@ def build_vdb():
     )
 
     # load dataset
+    
     with open(dict_path, "r", encoding="utf-8") as f:
         descriptors = json.load(f)
 
