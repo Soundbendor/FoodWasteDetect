@@ -18,7 +18,7 @@ class VectorDB:
         self.client = self.connect(addr=path)
         self.db_name = db_name
         self.embed_size = embed_size
-        if not reranker:
+        if reranker:
             self.reranker = CrossEncoder(reranker)
         else:
             self.reranker = None
