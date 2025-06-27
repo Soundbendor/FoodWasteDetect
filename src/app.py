@@ -96,7 +96,7 @@ def eval_img_vdb():
 
     for i, row in val_set.iterrows():
         # Generate embedding of test image
-        query_vec = embedder.get_embedding(row[f"{ds_path}/val/val_set/{row['fname']}"])
+        query_vec = embedder.get_embedding([f"{ds_path}/val/val_set/{row['fname']}"])
         candidate_vecs = db.query(None, query_vec)
         
         score, confidence, prediction = db.score(candidate_vecs, row["class"], "voting")
