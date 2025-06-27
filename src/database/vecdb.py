@@ -70,8 +70,8 @@ class VectorDB:
         self.client.upsert(collection_name = self.db_name, points=points)
 
     # Given a food image descriptor, return the most probable class and similarity score
-    # WARN: Reranker does not support image search.
-    def query(self, query_text: str, query_vec: torch.Tensor) -> List[ScoredPoint]:
+    # INFO: Query text must be None when using image search
+    def query(self, query_text: Union[None, str], query_vec: torch.Tensor) -> List[ScoredPoint]:
         top10 = self.client.search(
             collection_name=self.db_name, query_vector=query_vec, limit=10
         )

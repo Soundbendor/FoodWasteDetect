@@ -13,6 +13,8 @@ build_vdb = "app:build_vdb"
 caption_imgs = "app:caption_imgs"
 merge_captions = "app:merge_files"
 convert_dict = "app:convert_csv_to_dictionary"
+build_clip_db = "app:build_img_vdb"
+test_clip = "app:eval_img_vdb"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -6,7 +6,7 @@ from collections import defaultdict
 import pandas as pd
 
 from data_wrappers.foodx251 import FoodX251
-from database.embedding import EmbeddingModel
+from database.embedding import CLIPEmbedding, EmbeddingModel
 from database.vecdb import VectorDB
 from llm.describer import DescriberLLM
 from util import EvalMetric, parse_args, parse_cfg
@@ -76,15 +76,69 @@ def test_classification():
     scores = metric.compute_accuracies()
     print(scores)
 
+def eval_img_vdb():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    ds_path = cfg['paths']['dataset']
+    ds = FoodX251(ds_path)
+    embedder = CLIPEmbedding(ds , cfg['paths']['embed_model_save_path'])
+    db = VectorDB(
+        cfg['qdrant_url'], cfg['collection_name'], None, cfg['embed_size']
+    )
+
+    val_set = ds.val_set()
+    metric = EvalMetric()
+
+    n_samples = int(cfg['settings']['eval_samples'])
+    if n_samples != 0:
+        val_set = val_set.sample(n=n_samples, random_state=42)
+
+    for i, row in val_set.iterrows():
+        # Generate embedding of test image
+        query_vec = embedder.get_embedding(row[f"{ds_path}/val/val_set/{row['fname']}"])
+        candidate_vecs = db.query(None, query_vec)
+        
+        score, confidence, prediction = db.score(candidate_vecs, row["class"], "voting")
+        top5_score, _, _ = db.score(candidate_vecs, row["class"], "top5")
+        metric.update_scores(candidate_vecs, db, row["class"])
+        logging.info(f"Predicted Label: {prediction}")
+        logging.info(f"True label: {row['class']}")
+        logging.info(f"In Top 5? {top5_score}")
+        logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
+
+    scores = metric.compute_accuracies()
+    print(scores)
+
+
+def build_img_vdb():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    ds_path = cfg['paths']['dataset']
+    ds = FoodX251(ds_path)
+    embedder = CLIPEmbedding(ds , cfg['paths']['embed_model_save_path'])
+    db = VectorDB(
+        cfg['qdrant_url'], cfg['collection_name'], cfg['reranker_model'], cfg['embed_size']
+    )
+
+    food_imgs = ds.train_set().groupby(by='class')
+    # Generate CLIP embeddings
+    logging.info("Building Database...")
+    for food_name, img_names in food_imgs:
+        img_paths = [f"{ds_path}/val/val_set/{x}" for x in img_names]
+        vectors = embedder.get_embeding(img_paths)
+        metadata = {'img_path': img_names}
+        db.add_records(food_name, vectors, metadata)
+        
+
 '''
     Take a dataset and build a vector db using some pretrained embedding model
 '''
 def build_vdb():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
-    dict_path = cfg.get("Models", "dictionary")
+    dict_path = cfg['paths']['dictionary']
     embedder = EmbeddingModel(
-        dict_path, cfg.get("Models", "anchor_path"), cfg.get("Models", "embed_model_save_path"), cfg.get("Models", "embed_model")
+        dict_path, cfg['paths']['anchor_path'], cfg.get("Models", "embed_model_save_path"), cfg.get("Models", "embed_model")
     )
     db = VectorDB(
         cfg['qdrant_url'], cfg['collection_name'], cfg['reranker_model'], cfg['embed_size']
