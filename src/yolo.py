@@ -28,8 +28,11 @@ def main():
     for i, row in val_set.iterrows():
         results = model.predict(f"{ds_path}/val/val_set/{row['fname']}")
         preds = list(chain.from_iterable([x.boxes.cls.tolist() for x in results]))
+        preds = [int(x) for x in preds]
         ground_truth = ds.cmap.index[ds.cmap['label'] == row['class']].tolist()[0]
         if ground_truth in preds:
             acc += 1
         logging.info(results)
+        logging.info(f"Ground Truth Label: {row['class']}")
+        logging.info(f"Predicted Labels: {[ds.cmap.iloc[x] for x in preds]}")
     print(f"ACCURACY: {acc / n_samples}")
