@@ -1,5 +1,4 @@
 import logging
-import uuid
 from collections import Counter
 from typing import List, Optional, Tuple, Union
 
@@ -62,8 +61,7 @@ class VectorDB:
             if metadata:
                 for k, v in metadata.items():
                     payload[k] = v.iloc[idx]
-            uid = uuid.uuid4()
-            points.append(PointStruct(id = uid,vector=vector, payload=payload))
+            points.append(PointStruct(id=idx, vector=vector, payload=payload))
 
         self.client.upsert(collection_name = self.db_name, points=points)
 
