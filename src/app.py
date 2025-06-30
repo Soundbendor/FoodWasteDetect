@@ -125,7 +125,7 @@ def build_img_vdb():
     # Generate CLIP embeddings
     logging.info("Building Database...")
     for food_name, img_names in food_imgs:
-        img_paths = [f"{ds_path}/val/val_set/{x}" for x in img_names]
+        img_paths = [f"{ds_path}/val/val_set/{x}" for x in img_names['fname']]
         vectors = embedder.get_embedding(img_paths)
         metadata = {'img_path': img_names}
         db.add_records(food_name, vectors, metadata)
