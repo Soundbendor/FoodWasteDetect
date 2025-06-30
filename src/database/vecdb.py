@@ -64,7 +64,7 @@ class VectorDB:
             payload = {'class': food_type}
             if metadata:
                 for k, v in metadata.items():
-                    payload[k] = v[idx]
+                    payload[k] = v.loc[idx]
             points.append(PointStruct(vector=vector, payload=payload))
 
         self.client.upsert(collection_name = self.db_name, points=points)
