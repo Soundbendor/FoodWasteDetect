@@ -13,5 +13,5 @@ class CLIPEmbedding():
 
 
     def get_embedding(self, img_names: List[str]) -> torch.Tensor:
-        self.model.encode([Image.open(filepath) for filepath in img_names])
+        return self.model.encode([Image.open(filepath) for filepath in img_names])
 
