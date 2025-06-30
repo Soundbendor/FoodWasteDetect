@@ -1,8 +1,5 @@
-import json
 import logging
-import pickle
-import subprocess
-import time
+import uuid
 from collections import Counter
 from typing import List, Optional, Tuple, Union
 
@@ -65,7 +62,8 @@ class VectorDB:
             if metadata:
                 for k, v in metadata.items():
                     payload[k] = v.iloc[idx]
-            points.append(PointStruct(vector=vector, payload=payload))
+            uid = uuid.uuid4()
+            points.append(PointStruct(id = uid,vector=vector, payload=payload))
 
         self.client.upsert(collection_name = self.db_name, points=points)
 
