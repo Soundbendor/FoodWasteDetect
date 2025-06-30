@@ -23,5 +23,5 @@ def main():
         val_set = val_set.sample(n=n_samples, random_state=42)
 
     for i, row in val_set.iterrows():
-        results = model.predict("path/to/image.jpg")
+        results = model.predict(f"{ds_path}/val/val_set/{row['fname']}")
         logging.info(results)
