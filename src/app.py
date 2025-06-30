@@ -127,7 +127,7 @@ def build_img_vdb():
     for food_name, img_names in food_imgs:
         img_paths = [f"{ds_path}/train/train_set/{x}" for x in img_names['fname']]
         vectors = embedder.get_embedding(img_paths)
-        metadata = {'img_path': img_names}
+        metadata = {'img_path': img_names['fname']}
         db.add_records(food_name, vectors, metadata)
         
 
