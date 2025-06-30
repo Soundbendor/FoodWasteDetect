@@ -6,7 +6,7 @@ from data_wrappers.foodx251 import FoodX251
 from util import EvalMetric, parse_args, parse_cfg
 
 
-# Initialize a YOLO-World     args = parse_args()
+# Initialize a YOLO-World
 # TODO: evaluation metric
 def main():
     args = parse_args()
@@ -23,6 +23,12 @@ def main():
     if n_samples != 0:
         val_set = val_set.sample(n=n_samples, random_state=42)
 
+    acc = 0
     for i, row in val_set.iterrows():
         results = model.predict(f"{ds_path}/val/val_set/{row['fname']}")
+        preds = [x.boxes.cls for x in results]
+        ground_truth = ds.cmap.index[ds.cmap['label'] == row['class']].tolist()[0]
+        if ground_truth in preds:
+            acc += 1
         logging.info(results)
+    print(f"ACCURACY: {acc / n_samples}")
