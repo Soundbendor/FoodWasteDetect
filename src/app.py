@@ -82,7 +82,7 @@ def eval_img_vdb():
     cfg = parse_cfg(args.config_file)
     ds_path = cfg['paths']['dataset']
     ds = FoodX251(ds_path)
-    embedder = CLIPEmbedding(ds , cfg['paths']['embed_model_save_path'])
+    embedder = CLIPEmbedding(ds, cfg['embed_model'], cfg['paths']['embed_model_save_path'])
     db = VectorDB(
         cfg['qdrant_url'], cfg['collection_name'], None, cfg['embed_size']
     )
@@ -116,7 +116,7 @@ def build_img_vdb():
     cfg = parse_cfg(args.config_file)
     ds_path = cfg['paths']['dataset']
     ds = FoodX251(ds_path)
-    embedder = CLIPEmbedding(ds , cfg['paths']['embed_model_save_path'])
+    embedder = CLIPEmbedding(ds, cfg['embed_model'], cfg['paths']['embed_model_save_path'])
     db = VectorDB(
         cfg['qdrant_url'], cfg['collection_name'], cfg['reranker_model'], cfg['embed_size']
     )
