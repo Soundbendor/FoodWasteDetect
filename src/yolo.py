@@ -12,8 +12,9 @@ def main():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     ds_path = cfg['paths']['dataset']
-    model = YOLOWorld("yolov8x-worldv2.pt")  # or select yolov8m/l-world.pt for different sizes
     ds = FoodX251(ds_path)
+    model = YOLOWorld("yolov8x-worldv2.pt")  # or select yolov8m/l-world.pt for different sizes
+    model.set_classes(ds.cmap['label'])
 
     val_set = ds.val_set()
     metric = EvalMetric()
