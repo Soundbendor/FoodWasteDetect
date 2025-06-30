@@ -1,5 +1,5 @@
 import logging
-from collections import Counter
+import os
 from typing import List, Optional, Tuple, Union
 
 import requests
@@ -61,7 +61,8 @@ class VectorDB:
             if metadata:
                 for k, v in metadata.items():
                     payload[k] = v.iloc[idx]
-            points.append(PointStruct(id=idx, vector=vector, payload=payload))
+            img_num = int(os.path.splitext(payload['img_path'])[0].split('_')[1])
+            points.append(PointStruct(id=img_num, vector=vector, payload=payload))
 
         self.client.upsert(collection_name = self.db_name, points=points)
 
