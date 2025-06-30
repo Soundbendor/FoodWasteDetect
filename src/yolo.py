@@ -1,4 +1,5 @@
 import logging
+from itertools import chain
 
 from ultralytics import YOLOWorld
 
@@ -26,7 +27,7 @@ def main():
     acc = 0
     for i, row in val_set.iterrows():
         results = model.predict(f"{ds_path}/val/val_set/{row['fname']}")
-        preds = [x.boxes.cls for x in results]
+        preds = list(chain.from_iterable([x.boxes.cls.tolist() for x in results]))
         ground_truth = ds.cmap.index[ds.cmap['label'] == row['class']].tolist()[0]
         if ground_truth in preds:
             acc += 1
