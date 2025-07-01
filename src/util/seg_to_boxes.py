@@ -2,6 +2,7 @@ import argparse
 import os
 
 import numpy as np
+from tqdm import tqdm
 from ultralytics.utils.ops import segments2boxes
 
 # for each file in /labels directory
@@ -23,7 +24,8 @@ def main():
     seg_path = os.path.join(args.dataset_path, 'labels')
     outdir = os.path.join(args.dataset_path, 'boxes')
     os.makedirs(outdir, exist_ok=True)
-    for fname in os.listdir(seg_path):
+    print("Generating bounding boxes...")
+    for fname in tqdm(os.listdir(seg_path)):
         fpath = os.path.join(seg_path, fname)
         segments = []
         labels = []
@@ -36,9 +38,7 @@ def main():
         with open(os.path.join(outdir, fname), 'w') as box_file:
             for idx, label in enumerate(labels):
                 label_string = f"{int(label)} {' '.join([str(x) for x in bboxes[idx]])}\n"
-                print(label_string)
                 box_file.write(label_string)
-        
 
 main()
 
