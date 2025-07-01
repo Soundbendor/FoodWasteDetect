@@ -21,6 +21,8 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     seg_path = os.path.join(args.dataset_path, 'labels')
+    outdir = os.path.join(args.dataset_path, 'boxes')
+    os.makedirs(outdir, exist_ok=True)
     for fname in os.listdir(seg_path):
         fpath = os.path.join(seg_path, fname)
         segments = []
@@ -31,9 +33,7 @@ def main():
                 segments.append(seg_label[1:])
                 labels.append(seg_label[0])
         bboxes = segments2boxes([np.array(s).reshape(-1, 2) for s in segments])
-        outdir = os.path.join(args.dataset_path, 'boxes', fname)
-        os.makedirs(outdir, exist_ok=True)
-        with open(outdir, 'w') as box_file:
+        with open(os.path.join(outdir, fname), 'w') as box_file:
             for idx, label in enumerate(labels):
                 label_string = f"{label} {str(bboxes[idx])}\n"
                 print(label_string)
