@@ -30,3 +30,5 @@ def main():
                 bbox = segments2boxes(seg_map)
                 print(bbox)
 
+main()
+
