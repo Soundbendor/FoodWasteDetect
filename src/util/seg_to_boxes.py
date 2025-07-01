@@ -31,7 +31,9 @@ def main():
                 segments.append(seg_label[1:])
                 labels.append(seg_label[0])
         bboxes = segments2boxes([np.array(s).reshape(-1, 2) for s in segments])
-        with open(os.path.join(args.dataset_path, 'boxes', fname), 'w') as box_file:
+        outdir = os.path.join(args.dataset_path, 'boxes', fname)
+        os.makedirs(outdir, exist_ok=True)
+        with open(outdir, 'w') as box_file:
             for idx, label in enumerate(labels):
                 label_string = f"{label} {str(bboxes[idx])}\n"
                 print(label_string)
