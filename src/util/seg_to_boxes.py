@@ -22,13 +22,15 @@ def main():
     args = parse_args()
     for fname in os.listdir(args.dataset_path):
         fpath = os.path.join(args.dataset_path, fname)
+        segments = []
+        labels = []
         with open(fpath, 'r') as file:
             for segment in file.readlines():
                 seg_label = np.fromstring(segment)
-                # Skip class label (first number in string)
-                seg_map = seg_label[1:]
-                bbox = segments2boxes(seg_map)
-                print(bbox)
+                segments.append(seg_label[1:])
+                labels.append(seg_label[0])
+        bboxes = segments2boxes(np.array(segments))
+        print(bboxes)
 
 main()
 
