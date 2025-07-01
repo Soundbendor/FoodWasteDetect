@@ -29,7 +29,7 @@ def main():
                 seg_label = np.fromstring(segment)
                 segments.append(seg_label[1:])
                 labels.append(seg_label[0])
-        bboxes = segments2boxes(np.array(segments))
+        bboxes = segments2boxes([np.array(s).reshape(-1, 2) for s in segments])
         print(bboxes)
 
 main()
