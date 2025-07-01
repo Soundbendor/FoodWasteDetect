@@ -35,7 +35,7 @@ def main():
         bboxes = segments2boxes([np.array(s).reshape(-1, 2) for s in segments])
         with open(os.path.join(outdir, fname), 'w') as box_file:
             for idx, label in enumerate(labels):
-                label_string = f"{label} {str(bboxes[idx])}\n"
+                label_string = f"{int(label)} {' '.join([x for x in bboxes[idx]])}\n"
                 print(label_string)
                 box_file.write(label_string)
         
