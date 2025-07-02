@@ -52,9 +52,9 @@ def main():
             w, h = source_img.size
             x0 = box[0] * w
             y0 = box[1] * h
-            x1 = x0 + ((box[2] + box[0]) * w)
-            y1 = y0 + ((box[3] + box[1]) * h)
-            draw.rectangle([x0, y0, x1, y1], fill="black")
+            x1 = x0 + (box[2] * w)
+            y1 = y0 + (box[3] * h)
+            draw.rectangle([x0, y0, x1, y1], outline="black")
         source_img.save(out_pth, "JPEG")
 
 main()
