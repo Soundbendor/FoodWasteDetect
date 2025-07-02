@@ -24,7 +24,9 @@ def main():
     args = parse_args()
     seg_path = os.path.join(args.dataset_path, 'labels')
     outdir = os.path.join(args.dataset_path, 'boxes')
+    box_dir = os.path.join(args.dataset_path, 'boxed_imgs')
     os.makedirs(outdir, exist_ok=True)
+    os.makedirs(box_dir, exist_ok=True)
     print("Generating bounding boxes...")
     for fname in tqdm(os.listdir(seg_path)):
         fpath = os.path.join(seg_path, fname)
@@ -43,7 +45,7 @@ def main():
         # Draw bounding boxes over image
         basename = os.path.splitext(fname)[0]
         img_pth = os.path.join(args.dataset_path, 'images', f"{basename}.jpg")
-        out_pth = os.path.join(args.dataset_path, 'boxed_imgs', f"{basename}.jpg")
+        out_pth = os.path.join(box_dir, f"{basename}.jpg")
         source_img = Image.open(img_pth).convert('RGB')
         draw = ImageDraw.Draw(source_img)
         for box in bboxes:
