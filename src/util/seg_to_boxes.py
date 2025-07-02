@@ -46,7 +46,7 @@ def main():
         out_pth = os.path.join(args.dataset_path, 'boxed_imgs', f"{basename}.jpg")
         source_img = Image.open(img_pth).convert('RGB')
         draw = ImageDraw.Draw(source_img)
-        draw.rectangle(list(map(tuple, bboxes.reshape(-1, 2))), fill="black")
+        draw.rectangle([bboxes[0], bboxes[1], bboxes[0] + bboxes[3], bboxes[1] + bboxes[4]], fill="black")
         source_img.save(out_pth, "JPEG")
 
 main()
