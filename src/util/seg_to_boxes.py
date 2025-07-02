@@ -2,6 +2,7 @@ import argparse
 import os
 
 import numpy as np
+from PIL import Image, ImageDraw
 from tqdm import tqdm
 from ultralytics.utils.ops import segments2boxes
 
@@ -39,6 +40,14 @@ def main():
             for idx, label in enumerate(labels):
                 label_string = f"{int(label)} {' '.join([str(x) for x in bboxes[idx]])}\n"
                 box_file.write(label_string)
+        # Draw bounding boxes over image
+        basename = os.path.splitext(fname)[0]
+        img_pth = os.path.join(args.dataset_path, 'images', f"{basename}.jpg")
+        out_pth = os.path.join(args.dataset_path, 'boxed_imgs', f"{basename}.jpg")
+        source_img = Image.open(img_pth).convert('RGB')
+        draw = ImageDraw.Draw(source_img)
+        draw.rectangle(list(map(tuple, bboxes.reshape(-1, 2))), fill="black")
+        source_img.save(out_pth, "JPEG")
 
 main()
 
