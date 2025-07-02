@@ -49,7 +49,12 @@ def main():
         source_img = Image.open(img_pth).convert('RGB')
         draw = ImageDraw.Draw(source_img)
         for box in bboxes:
-            draw.rectangle([box[0], box[1], box[0] + box[2], box[1] + box[3]], fill="black")
+            w, h = source_img.size
+            x0 = box[0] * w
+            y0 = box[1] * h
+            x1 = x0 + ((box[2] + box[0]) * w)
+            y1 = y0 + ((box[3] + box[1]) * h)
+            draw.rectangle([x0, y0, x1, y1], fill="black")
         source_img.save(out_pth, "JPEG")
 
 main()
