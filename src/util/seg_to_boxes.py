@@ -46,16 +46,17 @@ def main():
         basename = os.path.splitext(fname)[0]
         img_pth = os.path.join(args.dataset_path, 'images', f"{basename}.jpg")
         out_pth = os.path.join(box_dir, f"{basename}.jpg")
-        source_img = Image.open(img_pth).convert('RGB')
-        draw = ImageDraw.Draw(source_img)
-        for box in bboxes:
-            w, h = source_img.size
-            x0 = box[0] * w
-            y0 = box[1] * h
-            x1 = x0 + (box[2] * w)
-            y1 = y0 + (box[3] * h)
-            draw.rectangle([x0, y0, x1, y1], outline="black")
-        source_img.save(out_pth, "JPEG")
+        with Image.open(img_pth) as source_img:
+            source_img = source_img.convert('RGB')
+            draw = ImageDraw.Draw(source_img)
+            for box in bboxes:
+                w, h = source_img.size
+                x0 = box[0] * w
+                y0 = box[1] * h
+                x1 = x0 + (box[2] * w)
+                y1 = y0 + (box[3] * h)
+                draw.rectangle([x0, y0, x1, y1], outline="black")
+            source_img.save(out_pth, "JPEG")
 
 main()
 
