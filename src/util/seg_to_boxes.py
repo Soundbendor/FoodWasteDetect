@@ -37,6 +37,9 @@ def main():
                 seg_label = np.fromstring(segment, sep=' ')
                 segments.append(seg_label[1:])
                 labels.append(seg_label[0])
+        for s in segments:
+            print(s)
+            print(np.array(s).reshape(-1, 2))
         bboxes = segments2boxes([np.array(s).reshape(-1, 2) for s in segments])
         with open(os.path.join(outdir, fname), 'w') as box_file:
             for idx, label in enumerate(labels):
