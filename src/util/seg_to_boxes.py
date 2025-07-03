@@ -69,7 +69,7 @@ def main():
             out_pth = os.path.join(box_dir, f"{basename}.jpg")
             draw_box_img(source_img, bboxes, out_pth)
             # Convert coordinates to (x, y, w, h), normalize, and write to file
-            yolo_boxes = xyxy2xywh(bboxes)
+            yolo_boxes = xyxy2xywh(np.array(bboxes))
             with open(os.path.join(outdir, fname), 'w') as box_file:
                 for idx, label in enumerate(labels.keys()):
                     label_string = f"{int(label)} {' '.join([str(x) for x in yolo_boxes[idx]])}\n"
