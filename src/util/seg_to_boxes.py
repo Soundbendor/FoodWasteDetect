@@ -35,7 +35,7 @@ def draw_box_img(img, boxes: List[np.ndarray], out_pth: str) -> None:
     source_img = img.convert('RGB')
     draw = ImageDraw.Draw(img)
     for box in boxes:
-        draw.rectangle(box, outline="red")
+        draw.rectangle([(box[0], box[1]), (box[2], box[3])], outline="red")
     source_img.save(out_pth, "JPEG")
 
 # Read a segmentation coordinate file in YOLO format.
