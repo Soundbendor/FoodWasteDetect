@@ -37,23 +37,27 @@ def main():
                 seg_label = np.fromstring(segment, sep=' ')
                 segments.append(seg_label[1:])
                 labels.append(seg_label[0])
-        for s in segments:
-            print(s)
-            print(np.array(s).reshape(-1, 2))
-        bboxes = segments2boxes([np.array(s).reshape(-1, 2) for s in segments])
-        with open(os.path.join(outdir, fname), 'w') as box_file:
-            for idx, label in enumerate(labels):
-                label_string = f"{int(label)} {' '.join([str(x) for x in bboxes[idx]])}\n"
-                box_file.write(label_string)
-        # Draw bounding boxes over image
+
         basename = os.path.splitext(fname)[0]
         img_pth = os.path.join(args.dataset_path, 'images', f"{basename}.jpg")
-        out_pth = os.path.join(box_dir, f"{basename}.jpg")
         with Image.open(img_pth) as source_img:
+            w, h = source_img.size
+            coords = []
+            for s in segments:
+                coord_arr = np.array(s).reshape(-1, 2)
+                coord_arr[0] = coord_arr[0] * w
+                coord_arr[1] = coord_arr[1] * h
+                coords.append(coord_arr)
+            bboxes = segments2boxes(coords)
+            with open(os.path.join(outdir, fname), 'w') as box_file:
+                for idx, label in enumerate(labels):
+                    label_string = f"{int(label)} {' '.join([str(x) for x in bboxes[idx]])}\n"
+                    box_file.write(label_string)
+            # Draw bounding boxes over image
+            out_pth = os.path.join(box_dir, f"{basename}.jpg")
             source_img = source_img.convert('RGB')
             draw = ImageDraw.Draw(source_img)
             for box in bboxes:
-                w, h = source_img.size
                 x0 = box[0] * w
                 y0 = box[1] * h
                 x1 = x0 + (box[2] * w)
