@@ -3,7 +3,6 @@ import os
 from typing import List
 
 import numpy as np
-import pybboxes as pbx
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 from ultralytics.utils.ops import xyxy2xywh
@@ -86,9 +85,7 @@ def main():
             yolo_boxes = []
             for coco_box in coco_boxes:
                 yolo_boxes.append(
-                    pbx.convert_bbox(
-                        coco_box, from_type="coco", to_type="yolo", image_size=(w, h)
-                    )
+                    [coco_box[0] / w, coco_box[1] / w, coco_box[2] / h, coco_box[3] / h]
                 )
             # Normalize coordinates
             with open(os.path.join(outdir, fname), "w") as box_file:
