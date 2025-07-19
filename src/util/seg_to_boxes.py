@@ -95,7 +95,7 @@ def main(ds_split: str):
                     box_file.write(label_string)
 
 
-if __name__ == "__name__":
+if __name__ == "__main__":
     args = parse_args()
     for ds_split in os.listdir(args.dataset_path):
         main(ds_split)
