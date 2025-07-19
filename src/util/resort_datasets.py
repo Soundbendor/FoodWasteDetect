@@ -2,6 +2,7 @@ import os
 import shutil
 
 import pandas as pd
+import tqdm as tqdm
 
 
 def main():
@@ -33,7 +34,7 @@ def main():
 
     # Read each file path from dataframe
     for dest_folder, dest_df in zip([train_dir, test_dir], [train_df, test_df]):
-        for record in dest_df:
+        for record in tqdm(dest_df):
             # train records are in format food_type / id_num
             # test records are in format "test_pixel_annotations" / food_type / id_num
             food_type, id_num = record.split("/")[-2:]
