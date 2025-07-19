@@ -19,7 +19,6 @@ class InternVLM():
             trust_remote_code=True).eval()
         self.tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True, use_fast=False)
         self.generation_config = dict(max_new_tokens=1024, do_sample=False)
-
     def _build_transform(self, input_size):
         MEAN, STD = IMAGENET_MEAN, IMAGENET_STD
         transform = T.Compose([
