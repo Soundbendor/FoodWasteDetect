@@ -38,7 +38,7 @@ def main():
                 basename = f"{file_type}-{id_num}{ext}"
                 # move images
                 shutil.copy(
-                    os.path.join(ds_path, file_type, record_basename),
+                    os.path.join(ds_path, file_type, basename),
                     os.path.join(dest_folder, file_type),
                 )
 
