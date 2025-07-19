@@ -10,11 +10,15 @@ def main():
     # load class map
     # INFO: not a csv
     test_df = pd.read_csv(
-        os.path.join(ds_path, "food201", "test_pixel_annotations.txt")
-    )
+        os.path.join(ds_path, "food201", "test_pixel_annotations.txt"),
+        header=None,
+        names=["records"],
+    )["records"]
     train_df = pd.read_csv(
-        os.path.join(ds_path, "food201", "train_pixel_annotations.txt")
-    )
+        os.path.join(ds_path, "food201", "train_pixel_annotations.txt"),
+        header=None,
+        names=["records"],
+    )["records"]
     test_dir = os.path.join(ds_path, "test")
     train_dir = os.path.join(ds_path, "train")
     folders = [("masks", ".png"), ("images", ".jpg"), ("labels", ".txt")]
