@@ -98,4 +98,4 @@ def main(ds_split: str):
 if __name__ == "__main__":
     args = parse_args()
     for ds_split in os.listdir(args.dataset_path):
-        main(ds_split)
+        main(os.path.join(args.dataset_path, ds_split))
