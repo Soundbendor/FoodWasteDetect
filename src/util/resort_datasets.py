@@ -33,7 +33,7 @@ def main():
             # test records are in format "test_pixel_annotations" / food_type / id_num
             food_type, id_num = record.split("/")[-1:-2]
             for file_type, ext in folders:
-                record_basename = f"{food_type}-{id_num}.{ext}"
+                record_basename = f"{food_type}-{id_num}"
                 # move images
                 shutil.copy(
                     os.path.join(ds_path, file_type, record_basename),
