@@ -17,8 +17,8 @@ def main():
     )
     test_dir = os.path.join(ds_path, "test")
     train_dir = os.path.join(ds_path, "train")
-    folders = ["masks", "images", "labels"]
-    for dir in folders:
+    folders = [("masks", ".png"), ("images", ".jpg"), ("labels", ".txt")]
+    for dir, _ in folders:
         os.makedirs(os.path.join(test_dir, dir), exist_ok=True)
         os.makedirs(os.path.join(train_dir, dir), exist_ok=True)
     # for each file in list
@@ -33,8 +33,9 @@ def main():
             # train records are in format food_type / id_num
             # test records are in format "test_pixel_annotations" / food_type / id_num
             food_type, id_num = record.split("/")[-2:]
-            for file_type in folders:
-                record_basename = f"{food_type}-{id_num}"
+            id_num = os.path.splitext(id_num)[0]
+            for file_type, ext in folders:
+                basename = f"{file_type}-{id_num}{ext}"
                 # move images
                 shutil.copy(
                     os.path.join(ds_path, file_type, record_basename),
