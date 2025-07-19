@@ -33,9 +33,9 @@ def main():
             for file_type, ext in folders:
                 record_basename = f"{food_type}-{id_num}.{ext}"
                 # move images
-                shutil.move(
+                shutil.copy(
                     os.path.join(ds_path, file_type, record_basename),
-                    os.path.join(test_dir, file_type, record_basename),
+                    os.path.join(dest_folder, file_type, record_basename),
                 )
 
 
