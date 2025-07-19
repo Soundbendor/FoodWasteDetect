@@ -2,7 +2,7 @@ import os
 import shutil
 
 import pandas as pd
-import tqdm as tqdm
+from tqdm import tqdm
 
 
 def main():
