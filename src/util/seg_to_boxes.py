@@ -60,11 +60,10 @@ def read_segments(fpath: str) -> dict:
     return labels
 
 
-def main():
-    args = parse_args()
-    seg_path = os.path.join(args.dataset_path, "labels")
-    outdir = os.path.join(args.dataset_path, "boxes")
-    box_dir = os.path.join(args.dataset_path, "boxed_imgs")
+def main(ds_split: str):
+    seg_path = os.path.join(ds_split, "labels")
+    outdir = os.path.join(ds_split, "boxes")
+    box_dir = os.path.join(ds_split, "boxed_imgs")
     os.makedirs(outdir, exist_ok=True)
     os.makedirs(box_dir, exist_ok=True)
     print("Generating bounding boxes...")
@@ -72,7 +71,7 @@ def main():
         fpath = os.path.join(seg_path, fname)
         labels = read_segments(fpath)
         basename = os.path.splitext(fname)[0]
-        img_pth = os.path.join(args.dataset_path, "images", f"{basename}.jpg")
+        img_pth = os.path.join(ds_split, "images", f"{basename}.jpg")
         with Image.open(img_pth) as source_img:
             w, h = source_img.size
             # Compute bounding box coordinates (x0, y0, x1, y1)
@@ -96,4 +95,7 @@ def main():
                     box_file.write(label_string)
 
 
-main()
+if __name__ == "__name__":
+    args = parse_args()
+    for ds_split in os.listdir(args.dataset_path):
+        main(ds_split)
