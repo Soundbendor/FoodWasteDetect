@@ -37,3 +37,7 @@ def main():
                     os.path.join(ds_path, file_type, record_basename),
                     os.path.join(test_dir, file_type, record_basename),
                 )
+
+
+if __name__ == "__main__":
+    main()
