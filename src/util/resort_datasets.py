@@ -35,7 +35,7 @@ def main():
             food_type, id_num = record.split("/")[-2:]
             id_num = os.path.splitext(id_num)[0]
             for file_type, ext in folders:
-                basename = f"{file_type}-{id_num}{ext}"
+                basename = f"{food_type}-{id_num}{ext}"
                 # move images
                 shutil.copy(
                     os.path.join(ds_path, file_type, basename),
