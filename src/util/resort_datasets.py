@@ -29,7 +29,9 @@ def main():
     # Read each file path from dataframe
     for dest_folder, dest_df in zip([train_dir, test_dir], [train_df, test_df]):
         for record in dest_df:
-            _, food_type, id_num = record.split("/")
+            # train records are in format food_type / id_num
+            # test records are in format "test_pixel_annotations" / food_type / id_num
+            food_type, id_num = record.split("/")[1:]
             for file_type, ext in folders:
                 record_basename = f"{food_type}-{id_num}.{ext}"
                 # move images
