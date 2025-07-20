@@ -4,8 +4,21 @@ import shutil
 import pandas as pd
 from tqdm import tqdm
 
+'''
+    order: images / train/validation
+    expected order: train/ images, masks...
+'''
 
-def main():
+def resort_foodseg103():
+    ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/foodseg103"
+    folders = [("masks", ".png"), ("images", ".jpg"), ("labels", ".txt")]
+    destination_folders = ['train', 'validation']
+    for destination_folder in destination_folders:
+        dest_path = os.path.join(ds_path, destination_folder)
+        for ftype, ext in folders:
+            shutil.copytree(os.path.join(ds_path, ftype), os.path.join(dest_path, ftype))
+    
+def resort_food201():
     # load food201
     ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201"
     # load class map
@@ -49,4 +62,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    resort_foodseg103()
