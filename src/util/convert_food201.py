@@ -19,16 +19,18 @@ def main():
     conversion_key = dict(zip(origin_label_key["id"], normalized_label_key["id"]))
     for dir in os.listdir(os.path.join(root_pth, "data")):
         # [images, ...]
-        for box_pth in os.listdir(os.path.join(root_pth, "data", dir, "boxes"))[0:2]:
+        folder_pth = os.path.join(root_pth, "data", dir, "boxes")
+        for box_pth in os.listdir(folder_pth)[0:2]:
             print(box_pth)
+            img_pth = os.path.join(folder_pth, box_pth)
             # modify bounding box
             data = []
-            with open(box_pth, "r") as f:
+            with open(img_pth, "r") as f:
                 for line in f.readlines():
                     line_arr = f.split()
                     line_arr[0] = conversion_key[line_arr[0]]
                     data.append(" ".join(line_arr))
-            with open(box_pth, "w") as f:
+            with open(img_pth, "w") as f:
                 f.writelines(data)
 
 
