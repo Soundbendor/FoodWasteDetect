@@ -26,7 +26,7 @@ def main():
             # modify bounding box
             data = []
             with open(img_pth, "r") as f:
-                for line in f.readlines():
+                for line in f:
                     line_arr = f.split()
                     line_arr[0] = conversion_key[line_arr[0]]
                     data.append(" ".join(line_arr))
