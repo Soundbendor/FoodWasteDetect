@@ -17,7 +17,7 @@ def main():
     )
     # [test, train]
     conversion_key = dict(zip(origin_label_key["id"], normalized_label_key["id"]))
-    for dir in os.listdir(os.path.join(root_pth, "data")):
+    for dir in ["test", "train"]:
         # [images, ...]
         folder_pth = os.path.join(root_pth, "data", dir, "boxes")
         for box_pth in os.listdir(folder_pth)[0:2]:
@@ -28,7 +28,7 @@ def main():
             with open(img_pth, "r") as f:
                 for line in f:
                     line_arr = line.split()
-                    line_arr[0] = conversion_key[line_arr[0]]
+                    line_arr[0] = conversion_key[int(line_arr[0])]
                     data.append(" ".join(line_arr))
             with open(img_pth, "w") as f:
                 f.writelines(data)
