@@ -6,7 +6,7 @@ import pandas as pd
 def main():
     root_pth = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/"
     origin_label_key = pd.read_csv(
-        os.path.join(root_pth, "food201/pixel_annotation_map.csv"),
+        os.path.join(root_pth, "food201/pixel_annotations_map.csv"),
         names=["id", "label"],
         header=None,
     )
