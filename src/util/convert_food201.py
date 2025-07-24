@@ -7,12 +7,12 @@ def main():
     root_pth = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/"
     origin_label_key = pd.read_csv(
         os.path.join(root_pth, "food201/pixel_annotation_map.csv"),
-        columns=["id", "label"],
+        names=["id", "label"],
         header=None,
     )
     normalized_label_key = pd.read_csv(
         os.path.join(root_pth, "food201/multilabel_map.csv"),
-        columns=["id", "label"],
+        names=["id", "label"],
         header=None,
     )
     # [test, train]
