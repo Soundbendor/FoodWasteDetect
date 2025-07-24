@@ -10,12 +10,21 @@ class Food201(Dataset):
         self.root = root
 
     def get_class_list(self) -> list[str]:
-        return pd.read_csv(os.path.join(self.root, "food201", "pixel_annotations_map.csv"), names=['id', 'label'])
+        return pd.read_csv(
+            os.path.join(self.root, "food201", "pixel_annotations_map.csv"),
+            names=["id", "label"],
+        )
 
     # Build a dataframe containing image paths for a dataset subset.
     # should have [img, class_id, mask, segment, box]
-    def _build_df(self):
-        pass
+    def _build_df(self, split: str):
+        # Go to either train or test
+        path = os.path.join(self.root, split)
+        dirs = os.listdir(path)
+        df = pd.DataFrame(columns=dirs)
+        for dir in os.listdir(path):
+            df[dir] = os.listdir(os.path.join(path, dir))
+        df.to_csv(f"{split}.csv", index=False)
 
     def _load_df(self, fname: str):
         # load test.csv
