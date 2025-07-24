@@ -10,13 +10,8 @@ def main():
         names=["id", "label"],
         header=None,
     )
-    normalized_label_key = pd.read_csv(
-        os.path.join(root_pth, "food201/multilabel_map.csv"),
-        names=["id", "label"],
-        header=None,
-    )
     # [test, train]
-    conversion_key = dict(zip(origin_label_key["id"], normalized_label_key["id"]))
+    conversion_key = dict(zip(origin_label_key["id"], range(len(origin_label_key))))
     for dir in ["test", "train"]:
         # [images, ...]
         folder_pth = os.path.join(root_pth, "data", dir, "boxes")
