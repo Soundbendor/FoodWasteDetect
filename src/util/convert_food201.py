@@ -19,7 +19,7 @@ def main():
     conversion_key = dict(zip(origin_label_key["id"], normalized_label_key["id"]))
     for dir in os.listdir(os.path.join(root_pth, "data")):
         # [images, ...]
-        for box_pth in os.listdir(os.path.join(root_pth, dir, "bboxes"))[0:2]:
+        for box_pth in os.listdir(os.path.join(root_pth, "data", dir, "bboxes"))[0:2]:
             print(box_pth)
             # modify bounding box
             data = []
