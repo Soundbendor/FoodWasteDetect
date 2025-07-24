@@ -28,7 +28,7 @@ def main():
             with open(img_pth, "r") as f:
                 for line in f:
                     line_arr = line.split()
-                    line_arr[0] = conversion_key[int(line_arr[0])]
+                    line_arr[0] = str(conversion_key[int(line_arr[0])])
                     data.append(" ".join(line_arr))
             with open(img_pth, "w") as f:
                 f.writelines(data)
