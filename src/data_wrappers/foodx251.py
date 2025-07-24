@@ -3,7 +3,7 @@ from typing import List
 
 import pandas as pd
 
-from .dataset import Dataset
+from .data_wrappers import Dataset
 
 # root
 # --- annot
