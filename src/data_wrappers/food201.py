@@ -19,7 +19,7 @@ class Food201(Dataset):
         # impute missing class labels
         missing_values = class_label.idx - np.arange(208)
         for idx in missing_values:
-            class_label.loc(idx) = "Unknown"
+            class_label.loc[idx] = "Unknown"
         return class_label
 
 
