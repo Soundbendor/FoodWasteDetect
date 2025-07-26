@@ -17,7 +17,7 @@ class Food201(Dataset):
         )
         class_label = class_label.set_index('id')
         # impute missing class labels
-        missing_values = set(class_label['id']).symmetric_difference(set(range(208)))
+        missing_values = set(class_label.index).symmetric_difference(set(range(208)))
         for idx in missing_values:
             class_label.loc[idx] = "Unknown"
         class_label = class_label.sort_index()
