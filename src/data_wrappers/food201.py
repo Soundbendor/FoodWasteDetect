@@ -15,6 +15,7 @@ class Food201(Dataset):
             os.path.join(self.root, "food201", "pixel_annotations_map.csv"),
             names=["id", "label"],
         )
+        class_label['id'] = class_label['id'] - 1
         class_label = class_label.set_index('id')
         # impute missing class labels
         missing_values = set(class_label.index).symmetric_difference(set(range(208)))
