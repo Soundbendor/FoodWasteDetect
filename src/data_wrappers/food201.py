@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 import pandas as pd
 
 from .dataset import Dataset
@@ -10,10 +11,17 @@ class Food201(Dataset):
         self.root = root
 
     def get_class_list(self) -> list[str]:
-        return pd.read_csv(
+        class_label = pd.read_csv(
             os.path.join(self.root, "food201", "pixel_annotations_map.csv"),
             names=["id", "label"],
         )
+        class_label = class_label.set_index('id')
+        # impute missing class labels
+        missing_values = class_label.idx - np.arange(208)
+        for idx in missing_values:
+            class_label.loc(idx) = "Unknown"
+        return class_label
+
 
     # Build a dataframe containing image paths for a dataset subset.
     # should have [img, class_id, mask, segment, box]
