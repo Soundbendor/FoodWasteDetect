@@ -1,4 +1,5 @@
 import argparse
+import functools
 import os
 from typing import List
 
@@ -60,6 +61,18 @@ def read_segments(fpath: str) -> dict:
     return labels
 
 
+# Take (x, y, w, h) left-corner aligned coordinates
+# and convert to (x_center, y_center, w, h) image-scale normalized coordinates
+def coco_to_yolo(coco_box: List[float], img_w: int, img_h: int) -> List[float]:
+    # unpack coco box coordinates
+    x_left, y_left, box_w, box_h = coco_box
+    # move (x, y) from left-corner to center
+    x_center = x_left + (box_w / 2)
+    y_center = y_left + (box_h / 2)
+    # normalize to image scale
+    return [x_center / img_w, y_center / img_h, box_w / img_w, box_h / img_h]
+
+
 def main(ds_split: str):
     seg_path = os.path.join(ds_split, "labels")
     outdir = os.path.join(ds_split, "boxes")
@@ -79,14 +92,19 @@ def main(ds_split: str):
             # Draw boxes and render image
             out_pth = os.path.join(box_dir, f"{basename}.jpg")
             draw_box_img(source_img, bboxes, out_pth)
+
             # Convert coordinates to (x, y, w, h), normalize, and write to file
-            coco_boxes = xyxy2xywh(np.array(bboxes))
-            yolo_boxes = []
-            for coco_box in coco_boxes:
-                yolo_boxes.append(
-                    [coco_box[0] / w, coco_box[1] / w, coco_box[2] / h, coco_box[3] / h]
-                )
+            try:
+                coco_boxes = xyxy2xywh(np.array(bboxes))
+            except Exception as e:
+                print(e)
+                continue
+
             # Normalize coordinates
+            coco_converter = functools.partial(coco_to_yolo, img_w=w, img_h=h)
+            yolo_boxes = list(map(coco_converter, coco_boxes))
+
+            # Write coordinates to label file
             with open(os.path.join(outdir, fname), "w") as box_file:
                 for idx, label in enumerate(labels.keys()):
                     label_string = (
