@@ -44,7 +44,7 @@ def compute_bounding_box(segment: np.ndarray, w: int, h: int) -> np.ndarray:
 
 def draw_box_img(img, boxes: List[np.ndarray], out_pth: str) -> None:
     source_img = img.convert("RGB")
-    draw = ImageDraw.Draw(img)
+    draw = ImageDraw.Draw(source_img)
     for box in boxes:
         draw.rectangle([box[0], box[1], box[2], box[3]], outline="red")
     source_img.save(out_pth, "JPEG")
