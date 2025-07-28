@@ -65,10 +65,10 @@ def read_segments(fpath: str) -> dict:
 # and convert to (x_center, y_center, w, h) image-scale normalized coordinates
 def coco_to_yolo(coco_box: List[float], img_w: int, img_h: int) -> List[float]:
     # unpack coco box coordinates
-    x_left, y_left, box_w, box_h = coco_box
+    x_center, y_center, box_w, box_h = coco_box
     # move (x, y) from left-corner to center
-    x_center = x_left + (box_w / 2)
-    y_center = y_left + (box_h / 2)
+    # x_center = x_left + (box_w / 2)
+    # y_center = y_left + (box_h / 2)
     # normalize to image scale
     return [x_center / img_w, y_center / img_h, box_w / img_w, box_h / img_h]
 
