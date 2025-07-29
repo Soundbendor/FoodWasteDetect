@@ -49,7 +49,7 @@ def eval_food201():
     ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data"
     ds = Food201(root=ds_path)
     model = YOLOWorld("yolov8x-worldv2.pt")
-    model.set_classes(ds.get_class_list())
+    model.set_classes(ds.get_class_list()["labels"].tolist())
     results = model.val(data=os.path.join(ds_path, "test"))
     print(results.box.map)
     print(results.results_dict)
