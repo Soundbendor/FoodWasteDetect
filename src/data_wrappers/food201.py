@@ -10,13 +10,13 @@ class Food201(Dataset):
     def __init__(self, root: str):
         self.root = root
 
-    def get_class_list(self) -> list[str]:
+    def get_class_list(self) -> pd.Series:
         class_label = pd.read_csv(
             os.path.join(self.root, "food201", "pixel_annotations_map.csv"),
             names=["id", "label"],
         )
-        class_label['id'] = class_label['id'] - 1
-        class_label = class_label.set_index('id')
+        class_label["id"] = class_label["id"] - 1
+        class_label = class_label.set_index("id")
         # impute missing class labels
         missing_values = set(class_label.index).symmetric_difference(set(range(208)))
         for idx in missing_values:
@@ -24,7 +24,6 @@ class Food201(Dataset):
         class_label = class_label.sort_index()
         class_label.to_csv("food201_class_labels.csv")
         return class_label
-
 
     # Build a dataframe containing image paths for a dataset subset.
     # should have [img, class_id, mask, segment, box]

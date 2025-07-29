@@ -1,12 +1,16 @@
 import argparse
 import functools
 import os
+import random
 from typing import List
 
 import numpy as np
 from PIL import Image, ImageDraw
 from tqdm import tqdm
+from ultralytics.data.utils import visualize_image_annotations
 from ultralytics.utils.ops import xyxy2xywh
+
+from data_wrappers.food201 import Food201
 
 # for each file in /labels directory
 # open file
@@ -113,7 +117,21 @@ def main(ds_split: str):
                     box_file.write(label_string)
 
 
+def visualize_annotations(ds_path: str):
+    # load dataset
+    ds = Food201(ds_path)
+    cmap = ds.get_class_list()
+    # randomly sample 5 images
+    for img_fname in os.listdir(os.path.join(ds_path, "images"))[:5]:
+        basename = os.path.splitext(img_fname)[0]
+        img_pth = os.path.join(ds_path, "images", img_fname)
+        label_pth = os.path.join(ds_path, "boxes", basename)
+        # TODO: get classmap
+        visualize_image_annotations(img_pth, label_pth, cmap)
+
+
 if __name__ == "__main__":
     args = parse_args()
-    for ds_split in os.listdir(args.dataset_path):
-        main(os.path.join(args.dataset_path, ds_split))
+    visualize_annotations(args.dataset_path)
+    # for ds_split in os.listdir(args.dataset_path):
+    #     main(os.path.join(args.dataset_path, ds_split))
