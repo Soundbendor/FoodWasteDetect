@@ -125,7 +125,7 @@ def visualize_annotations(ds_path: str):
     for img_fname in os.listdir(os.path.join(ds_path, "test", "images"))[:5]:
         basename = os.path.splitext(img_fname)[0]
         img_pth = os.path.join(ds_path, "test", "images", img_fname)
-        label_pth = os.path.join(ds_path, "test", "boxes", basename)
+        label_pth = os.path.join(ds_path, "test", "boxes", basename + ".txt")
         # TODO: get classmap
         visualize_image_annotations(img_pth, label_pth, cmap)
 
