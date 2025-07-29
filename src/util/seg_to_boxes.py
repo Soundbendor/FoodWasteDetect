@@ -121,7 +121,7 @@ def main(ds_split: str):
 def visualize_annotations(ds_path: str):
     # load dataset
     ds = Food201(ds_path)
-    cmap = ds.get_class_list()
+    cmap = ds.get_class_list()["label"].tolist()
     # randomly sample 5 images
     for img_fname in os.listdir(os.path.join(ds_path, "test", "images"))[:5]:
         basename = os.path.splitext(img_fname)[0]
