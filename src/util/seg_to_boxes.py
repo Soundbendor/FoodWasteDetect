@@ -122,10 +122,10 @@ def visualize_annotations(ds_path: str):
     ds = Food201(ds_path)
     cmap = ds.get_class_list()
     # randomly sample 5 images
-    for img_fname in os.listdir(os.path.join(ds_path, "images"))[:5]:
+    for img_fname in os.listdir(os.path.join(ds_path, "test", "images"))[:5]:
         basename = os.path.splitext(img_fname)[0]
-        img_pth = os.path.join(ds_path, "images", img_fname)
-        label_pth = os.path.join(ds_path, "boxes", basename)
+        img_pth = os.path.join(ds_path, "test", "images", img_fname)
+        label_pth = os.path.join(ds_path, "test", "boxes", basename)
         # TODO: get classmap
         visualize_image_annotations(img_pth, label_pth, cmap)
 
