@@ -46,8 +46,8 @@ def eval_food201():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # WARN: hard-coded file
-    ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data/dataset.yaml"
-    ds = Food201(root=ds_path)
+    ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data/"
+    ds = Food201(root=ds_path + "dataset.yaml")
     model = YOLOWorld("yolov8x-worldv2.pt")
     model.set_classes(ds.get_class_list()["label"].tolist())
     results = model.val(data=os.path.join(ds_path, "test"))
