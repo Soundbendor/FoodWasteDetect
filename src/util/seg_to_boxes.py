@@ -4,6 +4,7 @@ import os
 import random
 from typing import List
 
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, ImageDraw
 from tqdm import tqdm
@@ -128,6 +129,7 @@ def visualize_annotations(ds_path: str):
         label_pth = os.path.join(ds_path, "test", "boxes", basename + ".txt")
         # TODO: get classmap
         visualize_image_annotations(img_pth, label_pth, cmap)
+        plt.savefig(f"{basename}.jpg")
 
 
 if __name__ == "__main__":
