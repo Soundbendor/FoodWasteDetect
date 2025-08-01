@@ -7,13 +7,11 @@ from data_wrappers.dataset import Dataset
 
 
 class ImageCropper:
-    def __init__(self, dataset: Dataset) -> None:
-        # TODO: Convert get_class_list to return list
+    def __init__(self, dataset: Dataset, model: str) -> None:
+        # TODO: Convert get_class_list to return list, rather than dataframe
         self.ds = dataset
-        self.classes = ds.get_class_list()
-        self.model = solutions.ObjectCropper(
-            model="yolo11x.pt", crop_dir="cropped-detections"
-        )
+        self.classes = dataset.get_class_list()
+        self.model = solutions.ObjectCropper(model=model, crop_dir="cropped-detections")
 
     def crop_dataset(self):
         # for img in dataset

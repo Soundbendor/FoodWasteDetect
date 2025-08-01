@@ -62,7 +62,7 @@ def crop_imgs():
     # WARN: hard-coded file
     ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data/"
     ds = Food201(root=ds_path)
-    cropper = ImageCropper(ds)
+    cropper = ImageCropper(dataset=ds, model="yolo11x.pt")
     cropper.crop_dataset()
 
 
