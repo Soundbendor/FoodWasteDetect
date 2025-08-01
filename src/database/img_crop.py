@@ -7,9 +7,9 @@ from data_wrappers.dataset import Dataset
 
 
 class ImageCropper:
-    def __init__(self, ds: Dataset) -> None:
+    def __init__(self, dataset: Dataset) -> None:
         # TODO: Convert get_class_list to return list
-        self.ds = ds
+        self.ds = dataset
         self.classes = ds.get_class_list()
         self.model = solutions.ObjectCropper(
             model="yolo11x.pt", crop_dir="cropped-detections"

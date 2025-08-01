@@ -6,6 +6,7 @@ from ultralytics import YOLOWorld
 
 from data_wrappers.food201 import Food201
 from data_wrappers.foodx251 import FoodX251
+from database.img_crop import ImageCropper
 from util import EvalMetric, parse_args, parse_cfg
 
 
@@ -47,7 +48,7 @@ def eval_food201():
     cfg = parse_cfg(args.config_file)
     # WARN: hard-coded file
     ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data/"
-    ds = Food201(root=ds_path + "dataset.yaml")
+    ds = Food201(root=ds_path)
     model = YOLOWorld("yolov8x-worldv2.pt")
     model.set_classes(ds.get_class_list()["label"].tolist())
     results = model.val(data=os.path.join(ds_path, "test"))
@@ -55,5 +56,15 @@ def eval_food201():
     print(results.results_dict)
 
 
+def crop_imgs():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    # WARN: hard-coded file
+    ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data/"
+    ds = Food201(root=ds_path)
+    cropper = ImageCropper(ds)
+    cropper.crop_dataset()
+
+
 if __name__ == "__main__":
-    eval_food201()
+    crop_imgs()
