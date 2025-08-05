@@ -2,11 +2,14 @@ import logging
 import os
 from itertools import chain
 
+from more_itertools import grouper
 from ultralytics import YOLOWorld
 
 from data_wrappers.food201 import Food201
 from data_wrappers.foodx251 import FoodX251
+from database.clip_embedding import CLIPEmbedding
 from database.img_crop import ImageCropper
+from database.vecdb import VectorDB
 from util import EvalMetric, parse_args, parse_cfg
 
 
@@ -50,7 +53,7 @@ def eval_food201():
     ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data/"
     ds = Food201(root=ds_path)
     model = YOLOWorld("yolov8x-worldv2.pt")
-    model.set_classes(ds.get_class_list()["label"].tolist())
+    model.set_classes(ds.get_class_labels())
     results = model.val(data=os.path.join(ds_path, "test"))
     print(results.box.map)
     print(results.results_dict)
@@ -60,10 +63,31 @@ def crop_imgs():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # WARN: hard-coded file
-    ds_path = "/nfs/guille/eecs_research/soundbendor/beerya/food_datasets/food201/data/"
+    ds_path = cfg["paths"]["dataset"]
     ds = Food201(root=ds_path)
     cropper = ImageCropper(dataset=ds, model="yolo11x.pt")
     cropper.crop_dataset()
+    # load vector database
+    embedder = CLIPEmbedding(
+        ds, cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed size"]
+    )
+    db = VectorDB(
+        cfg["qdrant_url"],
+        cfg["collection_name"],
+        cfg["reranker_model"],
+        cfg["embed_size"],
+    )
+    # TODO: should get list of info from dataset dataframe
+    patches_path = os.path.join(ds_path, "train", "cropped-detections")
+    # TODO: split images into minibatches
+    for patch_batch in grouper(os.listdir(patches_path), 64):
+        patch_batch = [os.path.join(patches_path, x) for x in patch_batch]
+        vectors = embedder.get_embedding(patch_batch)
+        # TODO: should give metadata for original image path, class name
+        # TODO: patches should have their own dataset method
+        metadata = {"img_path": patch_batch}
+        # WARN: not ready, needs extra metadata
+        db.add_records(patch_batch, vectors, metadata)
 
 
 if __name__ == "__main__":

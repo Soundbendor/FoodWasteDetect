@@ -14,7 +14,6 @@ from .dataset import Dataset
 class FoodX251(Dataset):
     def __init__(self, root: str) -> None:
         self.root = root
-        self.cmap = self._get_classmap()
         self.train_path = os.path.join(root, "annot/train_info.csv")
         # WARN: test_path csv does not have class labels
         self.test_path = os.path.join(root, "annot/test_info.csv")
