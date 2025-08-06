@@ -4,6 +4,7 @@ from typing import List
 import numpy as np
 import pandas as pd
 from PIL import Image
+from tqdm import tqdm
 from ultralytics.utils.ops import xywhn2xyxy
 
 
@@ -54,7 +55,7 @@ class Dataset:
         if os.path.isdir(os.path.join(imgs_pth, "patches")):
             print("WARN: Patches already exist in this directory.")
             return
-        for img in os.listdir(imgs_pth):
+        for img in tqdm(os.listdir(imgs_pth)):
             basename = os.path.splitext(img)[0]
             img_pth = os.path.join(imgs_pth, img)
             label_pth = os.path.join(self.root, subset_pth, "boxes", basename + ".txt")
