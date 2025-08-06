@@ -3,6 +3,7 @@ import os
 from itertools import chain
 
 import numpy as np
+import pandas as pd
 from ultralytics import YOLOWorld
 
 from data_wrappers.food201 import Food201
@@ -81,14 +82,14 @@ def build_patch_db():
         cfg["embed_size"],
     )
 
-    batches = np.array_split(patches_df, 10000)
+    batches = np.array_split(patches_df, 500)
     for patches in batches:
         patch_pths = [
             os.path.join(ds_path, "train", "patches", x) for x in patches["patch_name"]
         ]
         vectors = embedder.get_embedding(patch_pths)
         metadata = {
-            "img_path": patch_pths,
+            "img_path": pd.Series(patch_pths),
             "src_img": patches["src_img"],
         }
         db.add_records(patches["class"], vectors, metadata)
