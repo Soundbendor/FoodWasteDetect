@@ -55,7 +55,7 @@ class Dataset:
         for img in os.listdir(imgs_pth):
             basename = os.path.splitext(img)[0]
             img_pth = os.path.join(imgs_pth, img)
-            label_pth = os.path.join(subset_pth, "boxes", basename + ".txt")
+            label_pth = os.path.join(self.root, subset_pth, "boxes", basename + ".txt")
             src_img = Image.open(img_pth)
             width, height = src_img.size
             with open(label_pth, "r") as label_file:
@@ -66,7 +66,9 @@ class Dataset:
                     coordinates = xywhn2xyxy(np.array(yolo_label[1:]), width, height)
                     patch = src_img.crop(coordinates)
                     patch_name = f"{basename}_{idx}_{class_label}.jpg"
-                    patch.save(os.path.join(subset_pth, "patches", patch_name))
+                    patch.save(
+                        os.path.join(self.root, subset_pth, "patches", patch_name)
+                    )
                     records.append(
                         {
                             "patch_name": patch_name,
