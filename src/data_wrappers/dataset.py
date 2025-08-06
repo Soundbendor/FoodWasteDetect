@@ -48,6 +48,10 @@ class Dataset:
         """
         imgs_pth = os.path.join(subset_pth, "images")
         records = []
+        # First, check if patches already exist.
+        if os.path.isdir(os.path.join(imgs_pth, "patches")):
+            print("WARN: Patches already exist in this directory.")
+            return
         for img in os.listdir(imgs_pth):
             basename = os.path.splitext(img)[0]
             img_pth = os.path.join(imgs_pth, img)
@@ -74,7 +78,7 @@ class Dataset:
         df = pd.DataFrame.from_records(records)
         df.to_csv(os.path.join(subset_pth, "patches.csv"))
 
-    def get_patches(self, subset: str) -> str:
+    def get_patches(self, subset: str) -> pd.DataFrame:
         # 1) Check if patches directory exists
         if subset in ["train", "test", "val"]:
             df_path = os.path.join(self.root, subset, "patches.csv")
@@ -84,7 +88,7 @@ class Dataset:
             raise FileNotFoundError()
         raise ValueError("Must use train, test, or val")
 
-    def get_boxes(self, subset: str) -> pd.DataFrame:
+    def get_boxes(self, subset: str) -> str:
         """
         Given test, train, or val subset, return the path to bounding boxes for this set.
         """

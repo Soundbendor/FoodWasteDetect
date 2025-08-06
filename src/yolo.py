@@ -2,7 +2,7 @@ import logging
 import os
 from itertools import chain
 
-from more_itertools import grouper
+import numpy as np
 from ultralytics import YOLOWorld
 
 from data_wrappers.food201 import Food201
@@ -59,14 +59,17 @@ def eval_food201():
     print(results.results_dict)
 
 
-def crop_imgs():
+def build_patch_db():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # WARN: hard-coded file
     ds_path = cfg["paths"]["dataset"]
     ds = Food201(root=ds_path)
-    cropper = ImageCropper(dataset=ds, model="yolo11x.pt")
-    cropper.crop_dataset()
+    ds.crop_patches("train")
+    patches_df = ds.get_patches("train")
+
+    # cropper = ImageCropper(dataset=ds, model="yolo11x.pt")
+    # cropper.crop_dataset()
     # load vector database
     embedder = CLIPEmbedding(
         ds, cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed size"]
@@ -77,18 +80,17 @@ def crop_imgs():
         cfg["reranker_model"],
         cfg["embed_size"],
     )
-    # TODO: should get list of info from dataset dataframe
-    patches_path = os.path.join(ds_path, "train", "cropped-detections")
-    # TODO: split images into minibatches
-    for patch_batch in grouper(os.listdir(patches_path), 64):
-        patch_batch = [os.path.join(patches_path, x) for x in patch_batch]
-        vectors = embedder.get_embedding(patch_batch)
-        # TODO: should give metadata for original image path, class name
-        # TODO: patches should have their own dataset method
-        metadata = {"img_path": patch_batch}
-        # WARN: not ready, needs extra metadata
-        db.add_records(patch_batch, vectors, metadata)
+
+    batches = np.array_split(patches_df, 10000)
+    for patches in batches:
+        patch_pths = [os.path.join(ds_path, "train", x) for x in patches["patch_name"]]
+        vectors = embedder.get_embedding(patch_pths)
+        metadata = {
+            "img_path": patch_pths,
+            "src_img": patches["src_img"],
+        }
+        db.add_records(patches["class"], vectors, metadata)
 
 
 if __name__ == "__main__":
-    crop_imgs()
+    build_patch_db()
