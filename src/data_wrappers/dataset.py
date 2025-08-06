@@ -46,7 +46,7 @@ class Dataset:
         Crop each image according to its bounding boxes and save patches
         Save class labels and parent images to patches.csv
         """
-        imgs_pth = os.path.join(subset_pth, "images")
+        imgs_pth = os.path.join(self.root, subset_pth, "images")
         records = []
         # First, check if patches already exist.
         if os.path.isdir(os.path.join(imgs_pth, "patches")):
