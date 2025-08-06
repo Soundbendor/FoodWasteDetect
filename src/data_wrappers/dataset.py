@@ -80,7 +80,7 @@ class Dataset:
                         }
                     )
         df = pd.DataFrame.from_records(records)
-        df.to_csv(os.path.join(subset_pth, "patches.csv"))
+        df.to_csv(os.path.join(os.path.join(self.root, subset_pth), "patches.csv"))
 
     def get_patches(self, subset: str) -> pd.DataFrame:
         # 1) Check if patches directory exists
