@@ -60,6 +60,42 @@ def eval_food201():
     print(results.results_dict)
 
 
+def eval_obj_det():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    # WARN: hard-coded file
+    ds_path = cfg["paths"]["dataset"]
+    ds = Food201(root=ds_path)
+    ds.crop_patches("test")
+    val_set = ds.get_patches("test")
+    metric = EvalMetric()
+
+    embedder = CLIPEmbedding(
+        ds, cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed_size"]
+    )
+    db = VectorDB(
+        cfg["qdrant_url"],
+        cfg["collection_name"],
+        cfg["reranker_model"],
+        cfg["embed_size"],
+    )
+
+    for i, row in val_set.iterrows():
+        eval_patch = os.path.join(ds.root, "test", "patches", row["patch_name"])
+        query_vec = embedder.get_embedding([eval_patch])[0]
+        candidate_vecs = db.query(None, query_vec)
+        score, confidence, prediction = db.score(candidate_vecs, row["class"], "voting")
+        top5_score, _, _ = db.score(candidate_vecs, row["class"], "top5")
+        metric.update_scores(candidate_vecs, db, row["class"])
+        logging.info(f"Predicted Label: {prediction}")
+        logging.info(f"True label: {row['class']}")
+        logging.info(f"In Top 5? {top5_score}")
+        logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
+
+    scores = metric.compute_accuracies()
+    print(scores)
+
+
 def build_patch_db():
     def get_id(pth: str):
         basename = os.path.splitext(os.path.basename(pth))[0]
@@ -102,4 +138,4 @@ def build_patch_db():
 
 
 if __name__ == "__main__":
-    build_patch_db()
+    eval_obj_det()
