@@ -60,5 +60,3 @@ class Food201(Dataset):
         # load train.csv
         # if it doesn't exist, create it
         self._load_df("train.csv")
-
-    def get_boxes(self, subset)
