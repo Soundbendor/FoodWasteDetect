@@ -72,7 +72,7 @@ def build_patch_db():
     # cropper.crop_dataset()
     # load vector database
     embedder = CLIPEmbedding(
-        ds, cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed size"]
+        ds, cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed_size"]
     )
     db = VectorDB(
         cfg["qdrant_url"],
