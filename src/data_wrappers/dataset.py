@@ -63,7 +63,9 @@ class Dataset:
                     yolo_label = line.split()
                     class_label = self.cmap[int(yolo_label[0])]
                     # WARN: does ultralytics conversion work for single label?
-                    coordinates = xywhn2xyxy(np.array(yolo_label[1:]), width, height)
+                    coordinates = xywhn2xyxy(
+                        np.array(np.array(yolo_label[1:])), width, height
+                    )
                     patch = src_img.crop(coordinates)
                     patch_name = f"{basename}_{idx}_{class_label}.jpg"
                     patch.save(
