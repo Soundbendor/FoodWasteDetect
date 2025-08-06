@@ -47,6 +47,8 @@ class Dataset:
         Save class labels and parent images to patches.csv
         """
         imgs_pth = os.path.join(self.root, subset_pth, "images")
+        patches_pth = os.path.join(self.root, subset_pth, "patches")
+        os.makedirs(patches_pth, exist_ok=True)
         records = []
         # First, check if patches already exist.
         if os.path.isdir(os.path.join(imgs_pth, "patches")):
@@ -62,15 +64,12 @@ class Dataset:
                 for idx, line in enumerate(label_file.readlines()):
                     yolo_label = line.split()
                     class_label = self.cmap[int(yolo_label[0])]
-                    # WARN: does ultralytics conversion work for single label?
                     coordinates = xywhn2xyxy(
-                        np.array(np.array(yolo_label[1:])), width, height
+                        np.array(yolo_label[1:], dtype=np.float32), width, height
                     )
                     patch = src_img.crop(coordinates)
                     patch_name = f"{basename}_{idx}_{class_label}.jpg"
-                    patch.save(
-                        os.path.join(self.root, subset_pth, "patches", patch_name)
-                    )
+                    patch.save(os.path.join(patches_pth, patch_name))
                     records.append(
                         {
                             "patch_name": patch_name,
