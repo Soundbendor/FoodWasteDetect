@@ -48,7 +48,13 @@ class VectorDB:
         Metadata lists must have same length as embeddings.
     """
 
-    def add_records(self, food_type: str, embeddings: list, metadata: Optional[dict]):
+    def add_records(
+        self,
+        food_type: str,
+        embeddings: list,
+        metadata: Optional[dict],
+        ids: Optional[list[int]],
+    ):
         # Make sure the collection exists
         self.make_collection()
         # Check to ensure metadata length matches embedding length
@@ -64,7 +70,10 @@ class VectorDB:
             if metadata:
                 for k, v in metadata.items():
                     payload[k] = v.iloc[idx]
-            img_num = int(os.path.splitext(payload["img_path"])[0].split("_")[1])
+            if not ids:
+                img_num = int(os.path.splitext(payload["img_path"])[0].split("_")[1])
+            else:
+                img_num = ids[idx]
             points.append(PointStruct(id=img_num, vector=vector, payload=payload))
 
         self.client.upsert(collection_name=self.db_name, points=points)

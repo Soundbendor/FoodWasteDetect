@@ -61,6 +61,10 @@ def eval_food201():
 
 
 def build_patch_db():
+    def get_id(pth: str):
+        basename = os.path.splitext(os.path.basename(pth))[0]
+        return int(basename.split("-")[1].split("_")[0]) + int(basename.split("_")[-2])
+
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # WARN: hard-coded file
@@ -92,7 +96,9 @@ def build_patch_db():
             "img_path": pd.Series(patch_pths),
             "src_img": patches["src_img"],
         }
-        db.add_records(patches["class"], vectors, metadata)
+
+        ids = [get_id(pth) for pth in patch_pths]
+        db.add_records(patches["class"], vectors, metadata, ids)
 
 
 if __name__ == "__main__":
