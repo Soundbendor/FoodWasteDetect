@@ -93,12 +93,12 @@ def build_patch_db():
         ]
         vectors = embedder.get_embedding(patch_pths)
         metadata = {
-            "img_path": patch_pths,
+            "img_path": pd.Series(patch_pths),
             "src_img": patches["src_img"],
         }
 
         ids = [get_id(pth) for pth in patch_pths]
-        db.add_records(patches["class"], vectors, metadata, ids)
+        db.add_records(list(patches["class"]), vectors, metadata, ids)
 
 
 if __name__ == "__main__":
