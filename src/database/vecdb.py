@@ -66,7 +66,7 @@ class VectorDB:
         # Insert vectors into database
         points = []
         for idx, vector in enumerate(embeddings):
-            payload = {"class": food_type}
+            payload = {"class": food_type[idx]}
             if metadata:
                 for k, v in metadata.items():
                     payload[k] = v.iloc[idx]

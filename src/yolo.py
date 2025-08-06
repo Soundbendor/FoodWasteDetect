@@ -63,7 +63,6 @@ def eval_food201():
 def eval_obj_det():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
-    # WARN: hard-coded file
     ds_path = cfg["paths"]["dataset"]
     ds = Food201(root=ds_path)
     ds.crop_patches("test")
