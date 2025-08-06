@@ -83,7 +83,9 @@ def build_patch_db():
 
     batches = np.array_split(patches_df, 10000)
     for patches in batches:
-        patch_pths = [os.path.join(ds_path, "train", x) for x in patches["patch_name"]]
+        patch_pths = [
+            os.path.join(ds_path, "train", "patches", x) for x in patches["patch_name"]
+        ]
         vectors = embedder.get_embedding(patch_pths)
         metadata = {
             "img_path": patch_pths,
