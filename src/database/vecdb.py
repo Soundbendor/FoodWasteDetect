@@ -69,7 +69,7 @@ class VectorDB:
             payload = {"class": food_type}
             if metadata:
                 for k, v in metadata.items():
-                    payload[k] = v[idx]
+                    payload[k] = v.iloc[idx]
             if not ids:
                 img_num = int(os.path.splitext(payload["img_path"])[0].split("_")[1])
             else:
