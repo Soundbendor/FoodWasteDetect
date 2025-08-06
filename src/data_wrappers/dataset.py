@@ -61,7 +61,7 @@ class Dataset:
             with open(label_pth, "r") as label_file:
                 for idx, line in enumerate(label_file.readlines()):
                     yolo_label = line.split()
-                    class_label = self.cmap[yolo_label[0]]
+                    class_label = self.cmap.loc[yolo_label[0]]
                     # WARN: does ultralytics conversion work for single label?
                     coordinates = xywhn2xyxy(np.array(yolo_label[1:]), width, height)
                     patch = src_img.crop(coordinates)
