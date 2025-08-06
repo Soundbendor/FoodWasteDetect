@@ -8,7 +8,7 @@ from .dataset import Dataset
 class Food201(Dataset):
     def __init__(self, root: str):
         self.root = root
-        self.cmap = self.get_class_list()
+        self.cmap = self.get_class_labels()
 
     def get_class_labels(self) -> list[str]:
         """Get unindexed list of class labels."""
