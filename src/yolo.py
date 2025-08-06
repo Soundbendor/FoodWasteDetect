@@ -93,7 +93,7 @@ def build_patch_db():
         ]
         vectors = embedder.get_embedding(patch_pths)
         metadata = {
-            "img_path": pd.Series(patch_pths),
+            "img_path": patch_pths,
             "src_img": patches["src_img"],
         }
 
