@@ -66,7 +66,7 @@ def build_patch_db():
     # WARN: hard-coded file
     ds_path = cfg["paths"]["dataset"]
     ds = Food201(root=ds_path)
-    ds.crop_patches("train")
+    # ds.crop_patches("train")
     patches_df = ds.get_patches("train")
 
     # cropper = ImageCropper(dataset=ds, model="yolo11x.pt")
