@@ -5,13 +5,16 @@ from PIL import Image
 from sentence_transformers import SentenceTransformer
 
 
-class CLIPEmbedding():
+class CLIPEmbedding:
     def __init__(self, dataset, model_name: str, save_dir: str, vec_dim: int):
         self.ds = dataset
         self.save_dir = save_dir
-        self.model = SentenceTransformer(model_name, truncate_dim = vec_dim, trust_remote_code = True)
-
+        self.model = SentenceTransformer(
+            model_name, truncate_dim=vec_dim, trust_remote_code=True
+        )
 
     def get_embedding(self, img_names: List[str]) -> torch.Tensor:
         return self.model.encode([Image.open(filepath) for filepath in img_names])
 
+    def get_text_embedding(self, labels: List[str]) -> torch.Tensor:
+        return self.model.encode(labels)

@@ -95,6 +95,35 @@ def eval_obj_det():
     print(scores)
 
 
+def insert_class_labels():
+    """
+    Given a set of class labels for a dataset, compute the embeddings
+    for each label and insert this into our vector database.
+    """
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    ds_path = cfg["paths"]["dataset"]
+    ds = FoodX251(root=ds_path)
+    # TODO: implement
+    ds.detect_patches("train")
+
+    # Establish connection to vector database
+
+    clip_embedder = CLIPEmbedding(
+        ds, cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed_size"]
+    )
+    db = VectorDB(
+        cfg["qdrant_url"],
+        cfg["collection_name"],
+        cfg["reranker_model"],
+        cfg["embed_size"],
+    )
+
+    label_embeddings = clip_embedder.get_text_embedding(ds.cmap)
+
+    val_set = ds.get_patches("test", detections=True)
+
+
 def build_patch_db():
     def get_id(pth: str):
         basename = os.path.splitext(os.path.basename(pth))[0]

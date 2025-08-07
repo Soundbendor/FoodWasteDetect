@@ -41,6 +41,27 @@ class Dataset:
             )
         )
 
+    def detect_patches(self, subset_pth: str) -> None:
+        """
+        Use ObjectCropper solution to extract patches from
+        image classification dataset. Save in detected-patches directory
+        and make patches_dets.csv.
+        """
+        imgs_pth = os.path.join(self.root, subset_pth, "images")
+        dets_pth = os.path.join(self.root, subset_pth, "detected-patches")
+        os.makedirs(dets_pth, exist_ok=True)
+        # TODO:  Load ObjectCropper solution
+        cropper = ImageCropper(dataset=self, model="yolo11x.pt")
+        cropper.crop_dataset()
+        records = []
+        # First, check if patches already exist.
+        if os.path.isdir(os.path.join(imgs_pth, "patches")):
+            print("WARN: Patches already exist in this directory.")
+            return
+        for img in tqdm(os.listdir(imgs_pth)):
+            basename = os.path.splitext(img)[0]
+            img_pth = os.path.join(imgs_pth, img)
+
     def crop_patches(self, subset_pth: str) -> None:
         """
         Given a set of bounding boxes, and a set of images,
@@ -82,12 +103,14 @@ class Dataset:
         df = pd.DataFrame.from_records(records)
         df.to_csv(os.path.join(os.path.join(self.root, subset_pth), "patches.csv"))
 
-    def get_patches(self, subset: str) -> pd.DataFrame:
+    def get_patches(self, subset: str, detections: bool) -> pd.DataFrame:
         # 1) Check if patches directory exists
         if subset in ["train", "test", "val"]:
             df_path = os.path.join(self.root, subset, "patches.csv")
             # 2) Check if patches.csv exists
             if os.path.isfile(df_path):
+                if detections:
+                    return pd.read_csv(f"{df_path}_dets.csv")
                 return pd.read_csv(df_path)
             raise FileNotFoundError()
         raise ValueError("Must use train, test, or val")
