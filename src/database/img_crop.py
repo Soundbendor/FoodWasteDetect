@@ -31,7 +31,7 @@ class ImageCropper:
             # Update path to save crops
             self.model.crop_dir = os.path.join(ds_path, "cropped-detections")
             # WARN: Depends on subset (e.g. val_set) returning ['fname', 'class']
-            for idx, img_name, class_label in subset.iterrows():
+            for idx, (img_name, class_label) in subset.iterrows():
                 img_pth = os.path.join(ds_path, img_name)
                 results = self.model.process(img_pth)
                 init_crop_idx = self.model.crop_idx = results.total_crop_objects
