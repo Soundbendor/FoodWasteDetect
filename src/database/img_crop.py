@@ -4,11 +4,10 @@ from typing import Callable
 import pandas as pd
 from ultralytics import solutions
 
-from data_wrappers.dataset import Dataset
 
 
 class ImageCropper:
-    def __init__(self, dataset: Dataset, model: str) -> None:
+    def __init__(self, dataset, model: str) -> None:
         # TODO: Convert get_class_list to return list, rather than dataframe
         self.ds = dataset
         self.classes = dataset.get_class_list()
