@@ -14,10 +14,13 @@ from .dataset import Dataset
 class FoodX251(Dataset):
     def __init__(self, root: str) -> None:
         self.root = root
-        self.train_path = os.path.join(root, "annot/train_info.csv")
+        self.train_path = "train/train_set"
+        self.test_path = "test/test_set" 
+        self.val_path = "val/val_set"
+        self.train_df = os.path.join(root, "annot/train_info.csv")
         # WARN: test_path csv does not have class labels
-        self.test_path = os.path.join(root, "annot/test_info.csv")
-        self.val_path = os.path.join(root, "annot/val_info.csv")
+        self.test_df = os.path.join(root, "annot/test_info.csv")
+        self.val_df = os.path.join(root, "annot/val_info.csv")
         self.cmap = self._get_classmap()
 
     # WARN: This is returning pd.Series

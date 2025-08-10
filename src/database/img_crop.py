@@ -20,6 +20,7 @@ class ImageCropper:
         # load training set
         # iterate over each training folder
         for subset_dirname, dataloader in self.ds.get_subsets():
+            # WARN: subset_dirname points to 
             try:
                 subset = dataloader()
             except NotImplementedError:
@@ -29,7 +30,7 @@ class ImageCropper:
             records = []
             ds_path = os.path.join(self.ds.root, subset_dirname)
             # Update path to save crops
-            self.model.crop_dir = os.path.join(ds_path, "cropped-detections")
+            self.model.crop_dir = os.path.join(os.path.dirname(ds_path), "cropped-detections")
             # WARN: Depends on subset (e.g. val_set) returning ['fname', 'class']
             for idx, (img_name, class_label) in subset.iterrows():
                 img_pth = os.path.join(ds_path, img_name)
