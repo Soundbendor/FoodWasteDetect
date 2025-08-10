@@ -2,6 +2,7 @@ import os
 from typing import Callable
 
 import pandas as pd
+from PIL import Image
 from ultralytics import solutions
 
 
@@ -34,6 +35,8 @@ class ImageCropper:
             # WARN: Depends on subset (e.g. val_set) returning ['fname', 'class']
             for idx, (img_name, class_label) in subset.iterrows():
                 img_pth = os.path.join(ds_path, img_name)
+                # load image
+                img = Image.open(img_pth)
                 results = self.model.process(img_pth)
                 init_crop_idx = self.model.crop_idx = results.total_crop_objects
                 # for each detection
