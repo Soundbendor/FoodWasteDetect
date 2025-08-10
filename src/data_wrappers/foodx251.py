@@ -18,6 +18,7 @@ class FoodX251(Dataset):
         # WARN: test_path csv does not have class labels
         self.test_path = os.path.join(root, "annot/test_info.csv")
         self.val_path = os.path.join(root, "annot/val_info.csv")
+        self.label_map = None
 
     def get_class_list(self) -> List[str]:
         return self.cmap["label"]
@@ -53,3 +54,4 @@ class FoodX251(Dataset):
 
     def train_set(self) -> pd.DataFrame:
         return self._get_dataset(self.train_path)
+

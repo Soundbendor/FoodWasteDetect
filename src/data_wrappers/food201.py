@@ -30,7 +30,7 @@ class Food201(Dataset):
         class_label.to_csv("food201_class_labels.csv")
         return class_label
 
-    #
+    
     # INFO: untested
     def _build_df(self, split: str):
         """
@@ -40,6 +40,7 @@ class Food201(Dataset):
         # Go to either train or test
         path = os.path.join(self.root, split)
         dirs = os.listdir(path)
+        # WARN: this will not match schema for train_set in food201
         df = pd.DataFrame(columns=dirs)
         for dir in os.listdir(path):
             df[dir] = os.listdir(os.path.join(path, dir))

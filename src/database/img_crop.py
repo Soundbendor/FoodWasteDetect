@@ -1,4 +1,5 @@
 import os
+from typing import Callable
 
 import pandas as pd
 from ultralytics import solutions
@@ -24,13 +25,21 @@ class ImageCropper:
                 print(f"Error: Subset {dataloader} not implemented for dataset!")
                 continue
 
-            # WARN: Problem, how do we match labels to classifications?
-            # Rather than do detections, do we "warm start" using known bounding boxes
-            df = pd.DataFrame(columns=["patch_name", "label", "source_img"])
+            records = []
             ds_path = os.path.join(self.ds.root, subset_dirname)
             # Update path to save crops
             self.model.crop_dir = os.path.join(ds_path, "cropped-detections")
-            for img_name in subset["fname"]:
+            # WARN: Depends on subset (e.g. val_set) returning ['fname', 'class']
+            for idx, img_name, class_label in subset.iterrows():
                 img_pth = os.path.join(ds_path, img_name)
                 results = self.model.process(img_pth)
+                init_crop_idx = self.model.crop_idx = results.total_crop_objects
+                # for each detection
+                for crop_idx in range(init_crop_idx, self.model.crop_idx):
+                    records.append({'patch_name': f"crop_{self.model.crop_idx}.jpg", 
+                                    "label": class_label,
+                                    "source_img": img_name})
                 print(f"Cropped Images: {results.total_crop_objects}")
+            df = pd.DataFrame.from_records(records)
+            df_path = os.path.join(self.ds.root, subset_dirname, "dets.csv")
+            df.to_csv(df_path)
