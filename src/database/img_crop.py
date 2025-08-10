@@ -2,7 +2,7 @@ import os
 from typing import Callable
 
 import pandas as pd
-from PIL import Image
+import cv2
 from ultralytics import solutions
 
 
@@ -36,7 +36,7 @@ class ImageCropper:
             for idx, (img_name, class_label) in subset.iterrows():
                 img_pth = os.path.join(ds_path, img_name)
                 # load image
-                img = Image.open(img_pth)
+                img = cv2.imread(img_pth)
                 results = self.model.process(img)
                 init_crop_idx = self.model.crop_idx = results.total_crop_objects
                 # for each detection
