@@ -7,6 +7,8 @@ from ultralytics import solutions
 
 
 class ImageCropper:
+    # WARN: This is probably a bad interface, since Dataset depends 
+    # on ImageCropper and ImageCropper depends on Dataset.
     def __init__(self, dataset, model: str) -> None:
         # TODO: Convert get_class_list to return list, rather than dataframe
         self.ds = dataset
