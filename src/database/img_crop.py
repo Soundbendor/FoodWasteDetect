@@ -37,7 +37,7 @@ class ImageCropper:
                 img_pth = os.path.join(ds_path, img_name)
                 # load image
                 img = Image.open(img_pth)
-                results = self.model.process(img_pth)
+                results = self.model.process(img)
                 init_crop_idx = self.model.crop_idx = results.total_crop_objects
                 # for each detection
                 for crop_idx in range(init_crop_idx, self.model.crop_idx):
