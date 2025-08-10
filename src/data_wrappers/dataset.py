@@ -48,19 +48,13 @@ class Dataset:
         and make patches_dets.csv.
         """
         imgs_pth = os.path.join(self.root, subset_pth, "images")
-        dets_pth = os.path.join(self.root, subset_pth, "detected-patches")
-        os.makedirs(dets_pth, exist_ok=True)
-        # TODO:  Load ObjectCropper solution
-        cropper = ImageCropper(dataset=self, model="yolo11x.pt")
-        cropper.crop_dataset()
-        records = []
-        # First, check if patches already exist.
-        if os.path.isdir(os.path.join(imgs_pth, "patches")):
+        dets_pth = os.path.join(self.root, subset_pth, "cropped-detections")
+        if os.path.isdir(os.path.join(imgs_pth, "cropped-detections")):
             print("WARN: Patches already exist in this directory.")
             return
-        for img in tqdm(os.listdir(imgs_pth)):
-            basename = os.path.splitext(img)[0]
-            img_pth = os.path.join(imgs_pth, img)
+        os.makedirs(dets_pth, exist_ok=True)
+        cropper = ImageCropper(dataset=self, model="yolo11x.pt")
+        cropper.crop_dataset()
 
     def crop_patches(self, subset_pth: str) -> None:
         """
