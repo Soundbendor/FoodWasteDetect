@@ -51,11 +51,11 @@ class FoodX251(Dataset):
 
     # WARN: need to fix, csv is different
     def test_set(self) -> pd.DataFrame:
-        return self._get_dataset(self.test_path)
+        return self._get_dataset(self.test_df)
 
     def val_set(self) -> pd.DataFrame:
-        return self._get_dataset(self.val_path)
+        return self._get_dataset(self.val_df)
 
     def train_set(self) -> pd.DataFrame:
-        return self._get_dataset(self.train_path)
+        return self._get_dataset(self.train_df)
 
