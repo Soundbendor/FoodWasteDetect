@@ -7,6 +7,8 @@ from PIL import Image
 from tqdm import tqdm
 from ultralytics.utils.ops import xywhn2xyxy
 
+from database.img_crop import ImageCropper
+
 
 class Dataset:
     """Template class for datasets"""

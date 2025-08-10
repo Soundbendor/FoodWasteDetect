@@ -166,4 +166,4 @@ def build_patch_db():
 
 
 if __name__ == "__main__":
-    eval_obj_det()
+    insert_class_labels()
