@@ -33,6 +33,7 @@ class ImageCropper:
             # load image
             img = cv2.imread(img_pth)
             results = self.model.process(img)
+            cv2.destroyAllWindows()
             init_crop_idx = self.model.crop_idx - results.total_crop_objects
             # for each detection
             for crop_idx in range(init_crop_idx, self.model.crop_idx):
