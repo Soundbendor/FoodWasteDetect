@@ -34,12 +34,15 @@ class ImageCropper:
             img = cv2.imread(img_pth)
             results = self.model.process(img)
             cv2.destroyAllWindows()
+            del img
             init_crop_idx = self.model.crop_idx - results.total_crop_objects
             # for each detection
             for crop_idx in range(init_crop_idx, self.model.crop_idx):
-                records.append({'patch_name': f"crop_{self.model.crop_idx}.jpg", 
-                                "label": class_label,
-                                "source_img": img_name})
+                record = {'patch_name': f"crop_{self.model.crop_idx}.jpg", 
+                          "label": class_label,
+                           "source_img": img_name}
+                print(record)
+                records.append(record)
             print(f"Cropped Images: {results.total_crop_objects}")
         df = pd.DataFrame.from_records(records)
         # WARN: empty df
