@@ -28,6 +28,7 @@ class ImageCropper:
         # Update path to save crops
         self.model.crop_dir = os.path.join(os.path.dirname(ds_path), "cropped-detections")
         # WARN: Depends on subset (e.g. val_set) returning ['fname', 'class']
+        prev_total_crops = 0
         for idx, (img_name, class_label) in subset.iterrows():
             img_pth = os.path.join(ds_path, img_name)
             # load image
@@ -35,7 +36,7 @@ class ImageCropper:
             results = self.model.process(img)
             cv2.destroyAllWindows()
             del img
-            init_crop_idx = self.model.crop_idx - results.total_crop_objects
+            init_crop_idx = prev_total_crops - self.model.crop_idx
             # for each detection
             for crop_idx in range(init_crop_idx, self.model.crop_idx):
                 record = {'patch_name': f"crop_{crop_idx}.jpg", 
@@ -43,6 +44,7 @@ class ImageCropper:
                            "source_img": img_name}
                 print(record)
                 records.append(record)
+            prev_total_crops = self.model.crop_idx
             print(f"Cropped Images: {results.total_crop_objects}")
         df = pd.DataFrame.from_records(records)
         # WARN: empty df
