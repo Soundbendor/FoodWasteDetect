@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 from itertools import chain
 
 import numpy as np
@@ -105,7 +106,7 @@ def insert_class_labels():
     ds_path = cfg["paths"]["dataset"]
     ds = FoodX251(root=ds_path)
     # TODO: implement
-    ds.detect_patches(ds.train_path, ds.train_set)
+    ds.detect_patches(ds.val_path, ds.val_set)
 
     # Establish connection to vector database
 
@@ -119,9 +120,14 @@ def insert_class_labels():
         cfg["embed_size"],
     )
 
-    label_embeddings = clip_embedder.get_text_embedding(ds.cmap)
+    labels = ds.get_class_list()
+    label_embeddings = clip_embedder.get_text_embedding(labels)
 
     val_set = ds.get_patches("test", detections=True)
+
+    # insert into database
+
+    db.add_records(labels, label_embeddings, metadata = None, ids = [uuid.uuid4() for _ in range(len(labels))])
 
 
 def build_patch_db():
