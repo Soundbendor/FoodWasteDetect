@@ -38,7 +38,7 @@ class ImageCropper:
             init_crop_idx = self.model.crop_idx - results.total_crop_objects
             # for each detection
             for crop_idx in range(init_crop_idx, self.model.crop_idx):
-                record = {'patch_name': f"crop_{self.model.crop_idx}.jpg", 
+                record = {'patch_name': f"crop_{crop_idx}.jpg", 
                           "label": class_label,
                            "source_img": img_name}
                 print(record)
