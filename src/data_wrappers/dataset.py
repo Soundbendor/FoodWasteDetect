@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import Callable, List
 
 import numpy as np
 import pandas as pd
@@ -43,7 +43,7 @@ class Dataset:
             )
         )
 
-    def detect_patches(self, subset_pth: str) -> None:
+    def detect_patches(self, subset_pth: str, subset_loader: Callable) -> None:
         """
         Use ObjectCropper solution to extract patches from
         image classification dataset. Save in detected-patches directory
@@ -56,7 +56,7 @@ class Dataset:
             return
         os.makedirs(dets_pth, exist_ok=True)
         cropper = ImageCropper(dataset=self, model="yolo11x.pt")
-        cropper.crop_dataset()
+        cropper.crop_dataset(subset_pth, subset_loader)
 
     def crop_patches(self, subset_pth: str) -> None:
         """

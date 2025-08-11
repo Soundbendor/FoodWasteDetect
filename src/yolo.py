@@ -105,7 +105,7 @@ def insert_class_labels():
     ds_path = cfg["paths"]["dataset"]
     ds = FoodX251(root=ds_path)
     # TODO: implement
-    ds.detect_patches("train")
+    ds.detect_patches(ds.train_path, ds.train_set)
 
     # Establish connection to vector database
 
