@@ -96,6 +96,7 @@ def eval_obj_det():
     print(scores)
 
 
+# INFO: Current experiment 09/07
 def insert_class_labels():
     """
     Given a set of class labels for a dataset, compute the embeddings
@@ -105,8 +106,7 @@ def insert_class_labels():
     cfg = parse_cfg(args.config_file)
     ds_path = cfg["paths"]["dataset"]
     ds = FoodX251(root=ds_path)
-    # TODO: implement
-    ds.detect_patches(ds.val_path, ds.val_set)
+    # ds.detect_patches(ds.val_path, ds.val_set)
 
     # Establish connection to vector database
 
@@ -131,7 +131,7 @@ def insert_class_labels():
 
     # search vector database using ds.test
     for i, row in val_set.iterrows():
-        eval_patch = os.path.join(ds.root, "test", "patches", row["patch_name"])
+        eval_patch = os.path.join(ds.root, "val", "cropped-detections", row["patch_name"])
         query_vec = clip_embedder.get_embedding([eval_patch])[0]
         candidate_vecs = db.query(None, query_vec)
         # score based on if image class is detected at all

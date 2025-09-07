@@ -102,7 +102,7 @@ class Dataset:
     def get_patches(self, subset: str, detections: bool) -> pd.DataFrame:
         # 1) Check if patches directory exists
         if subset in ["train", "test", "val"]:
-            df_path = os.path.join(self.root, subset, "patches.csv")
+            df_path = os.path.join(self.root, subset, "dets.csv")
             # 2) Check if patches.csv exists
             if os.path.isfile(df_path):
                 if detections:
