@@ -124,10 +124,26 @@ def insert_class_labels():
     label_embeddings = clip_embedder.get_text_embedding(labels)
 
     val_set = ds.get_patches("test", detections=True)
+    metric = EvalMetric()
 
     # insert into database
+    # db.add_records(labels, label_embeddings, metadata = None, ids = [uuid.uuid4() for _ in range(len(labels))])
 
-    db.add_records(labels, label_embeddings, metadata = None, ids = [uuid.uuid4() for _ in range(len(labels))])
+    # search vector database using ds.test
+    for i, row in val_set.iterrows():
+        eval_patch = os.path.join(ds.root, "test", "patches", row["patch_name"])
+        query_vec = clip_embedder.get_embedding([eval_patch])[0]
+        candidate_vecs = db.query(None, query_vec)
+        # score based on if image class is detected at all
+        score, confidence, prediction = db.score(candidate_vecs, row["class"], "voting")
+        top5_score, _, _ = db.score(candidate_vecs, row["class"], "top5")
+        metric.update_scores(candidate_vecs, db, row["class"])
+        logging.info(f"Predicted Label: {prediction}")
+        logging.info(f"True label: {row['class']}")
+        logging.info(f"In Top 5? {top5_score}")
+        logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
+
+
 
 
 def build_patch_db():
