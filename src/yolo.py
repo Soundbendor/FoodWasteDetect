@@ -123,7 +123,7 @@ def insert_class_labels():
     labels = ds.get_class_list()
     label_embeddings = clip_embedder.get_text_embedding(labels)
 
-    val_set = ds.get_patches("test", detections=True)
+    val_set = ds.get_patches("val", detections=True)
     metric = EvalMetric()
 
     # insert into database
