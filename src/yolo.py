@@ -8,7 +8,9 @@ import pandas as pd
 from ultralytics import YOLOWorld
 
 from data_wrappers.food201 import Food201
+from data_wrappers.foodseg103 import FoodSeg103
 from data_wrappers.foodx251 import FoodX251
+from data_wrappers.uecfoodpix import UECFoodPix
 from database.clip_embedding import CLIPEmbedding
 from database.img_crop import ImageCropper
 from database.vecdb import VectorDB
@@ -131,7 +133,9 @@ def insert_class_labels():
 
     # search vector database using ds.test
     for i, row in val_set.iterrows():
-        eval_patch = os.path.join(ds.root, "val", "cropped-detections", row["patch_name"])
+        eval_patch = os.path.join(
+            ds.root, "val", "cropped-detections", row["patch_name"]
+        )
         query_vec = clip_embedder.get_embedding([eval_patch])[0]
         candidate_vecs = db.query(None, query_vec)
         # score based on if image class is detected at all
@@ -142,8 +146,6 @@ def insert_class_labels():
         logging.info(f"True label: {row['label']}")
         logging.info(f"In Top 5? {top5_score}")
         logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
-
-
 
 
 def build_patch_db():
@@ -185,6 +187,18 @@ def build_patch_db():
 
         ids = [get_id(pth) for pth in patch_pths]
         db.add_records(list(patches["class"]), vectors, metadata, ids)
+
+
+def test_new_datasets():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+
+    food201 = Food201(root=food201_pth)
+    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
+    foodseg103 = FoodSeg103(root=foodseg103_pth)
 
 
 if __name__ == "__main__":

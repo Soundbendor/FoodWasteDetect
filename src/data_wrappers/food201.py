@@ -2,10 +2,10 @@ import os
 
 import pandas as pd
 
-from .dataset import Dataset
+from .dataset import SegDataset
 
 
-class Food201(Dataset):
+class Food201(SegDataset):
     def __init__(self, root: str):
         self.root = root
         self.cmap = self.get_class_labels()
@@ -29,31 +29,6 @@ class Food201(Dataset):
         class_label = class_label.sort_index()
         class_label.to_csv("food201_class_labels.csv")
         return class_label
-
-    
-    # INFO: untested
-    def _build_df(self, split: str):
-        """
-        Build a dataframe containing image paths for a dataset subset.
-        should have [img, class_id, mask, segment, box]
-        """
-        # Go to either train or test
-        path = os.path.join(self.root, split)
-        dirs = os.listdir(path)
-        # WARN: this will not match schema for train_set in food201
-        df = pd.DataFrame(columns=dirs)
-        for dir in os.listdir(path):
-            df[dir] = os.listdir(os.path.join(path, dir))
-        df.to_csv(f"{split}.csv", index=False)
-
-    def _load_df(self, fname: str):
-        # load csv. if it doesn't exist, create it
-        csv_pth = os.path.join(self.root, fname)
-        if not os.path.isfile(csv_pth):
-            # build test set csv
-            subset = os.path.splitext(fname)[0]
-            self._build_df(subset)
-        return pd.read_csv(csv_pth)
 
     def test_set(self):
         self._load_df("test.csv")

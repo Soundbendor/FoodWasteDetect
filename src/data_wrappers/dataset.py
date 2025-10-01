@@ -122,3 +122,30 @@ class Dataset:
                 return boxes_pth
             raise FileNotFoundError(f"Boxes directory does not exist for {subset}")
         raise ValueError("Must use train, test, or val")
+
+
+class SegDataset(Dataset):
+    def __init__(self):
+        super().__init__()
+
+    def _build_df(self, split: str):
+        """
+        Build a dataframe containing image paths for a dataset subset.
+        should have [img, class_id, mask, segment, box]
+        """
+        # Go to either train or test
+        path = os.path.join(self.root, split)
+        dirs = os.listdir(path)
+        df = pd.DataFrame(columns=dirs)
+        for dir in os.listdir(path):
+            df[dir] = os.listdir(os.path.join(path, dir))
+        df.to_csv(f"{split}.csv", index=False)
+
+    def _load_df(self, fname: str):
+        # load csv. if it doesn't exist, create it
+        csv_pth = os.path.join(self.root, fname)
+        if not os.path.isfile(csv_pth):
+            # build test set csv
+            subset = os.path.splitext(fname)[0]
+            self._build_df(subset)
+        return pd.read_csv(csv_pth)
