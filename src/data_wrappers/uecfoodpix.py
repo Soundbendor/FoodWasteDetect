@@ -16,7 +16,7 @@ class UECFoodPix(SegDataset):
     # WARN: Will break get_patches.
     def get_class_labels(self) -> pd.DataFrame:
         # Load category.txt
-        df = pd.read_csv(os.path.join(self.root, "category.txt"), delim_whitespace=True)
+        df = pd.read_csv(os.path.join(self.root, "category.txt"), sep="\t")
         return df
 
     def val_set(self) -> pd.DataFrame:
