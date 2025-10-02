@@ -138,7 +138,8 @@ class SegDataset(Dataset):
         dirs = os.listdir(path)
         df = pd.DataFrame(columns=dirs)
         for dir in os.listdir(path):
-            df[dir] = os.listdir(os.path.join(path, dir))
+            if os.path.isdir(dir):
+                df[dir] = os.listdir(os.path.join(path, dir))
         df.to_csv(f"{split}.csv", index=False)
 
     def _load_df(self, fname: str):
