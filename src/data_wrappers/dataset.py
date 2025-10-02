@@ -90,7 +90,11 @@ class Dataset:
                     )
                     patch = src_img.crop(coordinates)
                     patch_name = f"{basename}_{idx}_{class_label}.jpg"
-                    patch.save(os.path.join(patches_pth, patch_name))
+                    try:
+                        patch.save(os.path.join(patches_pth, patch_name))
+                    except ValueError:
+                        # empty detection, skip
+                        continue
                     records.append(
                         {
                             "patch_name": patch_name,
