@@ -145,7 +145,7 @@ class SegDataset(Dataset):
             if basename == "patches":
                 continue
             df[basename] = os.listdir(dir)
-        df.to_csv(f"{split}.csv", index=False)
+        df.to_csv(os.path.join(path, f"{split}.csv"), index=False)
 
     def _load_df(self, fname: str):
         # load csv. if it doesn't exist, create it
