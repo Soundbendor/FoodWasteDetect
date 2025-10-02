@@ -144,6 +144,12 @@ class SegDataset(Dataset):
             # Explicitly ignore patches directory
             if basename == "patches":
                 continue
+            # We need a special handler for boxes, to fix missing files
+            # TODO: complete or delete
+            # if basename == "boxes":
+            #     for file in os.listdir("boxed_imgs"):
+            #         fname = os.path.splitext(file)[0]
+            #         if 
             df[basename] = os.listdir(dir)
         df.to_csv(os.path.join(self.root, f"{split}.csv"), index=False)
 
