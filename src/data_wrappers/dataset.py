@@ -78,6 +78,9 @@ class Dataset:
             label_pth = os.path.join(self.root, subset_pth, "boxes", basename + ".txt")
             src_img = Image.open(img_pth)
             width, height = src_img.size
+            # If the file has no detections, skip it.
+            if not os.path.isfile(label_pth):
+                pass
             with open(label_pth, "r") as label_file:
                 for idx, line in enumerate(label_file.readlines()):
                     yolo_label = line.split()
