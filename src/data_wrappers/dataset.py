@@ -137,12 +137,14 @@ class SegDataset(Dataset):
         path = os.path.join(self.root, split)
         dirs = [os.path.join(path, x) for x in os.listdir(path)]
         dirs = [x for x in dirs if os.path.isdir(x)]
-        df = pd.DataFrame(columns=dirs)
-        for dir in dirs:
+        basenames = [os.path.basename(x) for x in dirs]
+        paths = zip(dirs, basenames)
+        df = pd.DataFrame(columns=basenames)
+        for dir, basename in paths:
             # Explicitly ignore patches directory
-            if os.path.basename(dir) == "patches":
+            if basename == "patches":
                 continue
-            df[os.path.basename(dir)] = os.listdir(dir)
+            df[basename] = os.listdir(dir)
         df.to_csv(f"{split}.csv", index=False)
 
     def _load_df(self, fname: str):
