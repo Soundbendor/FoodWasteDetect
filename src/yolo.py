@@ -205,6 +205,10 @@ def test_new_datasets():
     uecfoodpix_train = uecfoodpix.train_set()
     foodseg103_train = foodseg103.train_set()
 
+    food201_train_patch = food201.get_patches("train", False)
+    uecfoodpix_train_patch = uecfoodpix.get_patches("train", False)
+    foodseg103_train_patch = foodseg103.get_patches("train", False)
+
 
 if __name__ == "__main__":
     insert_class_labels()
