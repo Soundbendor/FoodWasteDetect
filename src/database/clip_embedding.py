@@ -6,8 +6,7 @@ from sentence_transformers import SentenceTransformer
 
 
 class CLIPEmbedding:
-    def __init__(self, dataset, model_name: str, save_dir: str, vec_dim: int):
-        self.ds = dataset
+    def __init__(self, model_name: str, save_dir: str, vec_dim: int):
         self.save_dir = save_dir
         self.model = SentenceTransformer(
             model_name, truncate_dim=vec_dim, trust_remote_code=True

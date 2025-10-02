@@ -147,12 +147,12 @@ def insert_class_labels():
         logging.info(f"In Top 5? {top5_score}")
         logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
 
-
-def build_patch_db():
-    def get_id(pth: str):
+def get_id(pth: str):
         basename = os.path.splitext(os.path.basename(pth))[0]
         return int(basename.split("-")[1].split("_")[0]) + int(basename.split("_")[-2])
 
+def build_patch_db():
+    
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # WARN: hard-coded file
@@ -206,12 +206,39 @@ def test_new_datasets():
     foodseg103_train = foodseg103.train_set()
     
     # food201.crop_patches()
-    uecfoodpix.crop_patches("train")
-    foodseg103.crop_patches("train")
+    # uecfoodpix.crop_patches("train")
+    # foodseg103.crop_patches("train")
 
     food201_train_patch = food201.get_patches("train", False)
     uecfoodpix_train_patch = uecfoodpix.get_patches("train", False)
     foodseg103_train_patch = foodseg103.get_patches("train", False)
+
+    embedder = CLIPEmbedding(
+        cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed_size"]
+    )
+
+    db = VectorDB(
+        cfg["qdrant_url"],
+        cfg["collection_name"],
+        cfg["reranker_model"],
+        cfg["embed_size"],
+    )
+    
+    for ds, ds_path in zip([food201_train_patch, uecfoodpix_train_patch, foodseg103_train_patch], [food201_pth, uecfoodpix_pth, foodseg103_pth]):
+        batches = np.array_split(ds, 500)
+        for patches in batches:
+            patch_pths = [
+                os.path.join(ds_path, "train", "patches", x) for x in patches["patch_name"]
+            ]
+            vectors = embedder.get_embedding(patch_pths)
+            metadata = {
+                "img_path": pd.Series(patch_pths),
+                "src_img": patches["src_img"],
+            }
+
+            ids = [get_id(pth) for pth in patch_pths]
+            db.add_records(list(patches["class"]), vectors, metadata, ids)
+        
 
 
 if __name__ == "__main__":
