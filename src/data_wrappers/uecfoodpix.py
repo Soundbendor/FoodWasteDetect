@@ -17,7 +17,7 @@ class UECFoodPix(SegDataset):
     def get_class_labels(self) -> dict:
         # Load category.txt
         df = pd.read_csv(os.path.join(self.root, "category.txt"), sep="\t", index_col = "id")
-        return df.to_dict()
+        return df.to_dict()["name"]
 
     def val_set(self) -> pd.DataFrame:
         return self._load_df("validation.csv")
