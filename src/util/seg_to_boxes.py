@@ -103,7 +103,7 @@ def main(ds_split: str):
                 coco_boxes = xyxy2xywh(np.array(bboxes))
             except Exception as e:
                 print(e)
-                with open(os.path.join(outdir, os.path.splitext(fname)[0], "_NAN.txt"), "w") as box_file:
+                with open(os.path.join(outdir, f"{os.path.splitext(fname)[0]}_NAN.txt"), "w") as box_file:
                     box_file.write("Empty")
                 continue
 
