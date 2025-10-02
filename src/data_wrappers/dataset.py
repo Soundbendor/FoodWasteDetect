@@ -80,7 +80,7 @@ class Dataset:
             width, height = src_img.size
             # If the file has no detections, skip it.
             if not os.path.isfile(label_pth):
-                pass
+                continue
             with open(label_pth, "r") as label_file:
                 for idx, line in enumerate(label_file.readlines()):
                     yolo_label = line.split()
