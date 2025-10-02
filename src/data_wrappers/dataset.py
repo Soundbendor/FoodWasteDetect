@@ -139,6 +139,9 @@ class SegDataset(Dataset):
         dirs = [x for x in dirs if os.path.isdir(x)]
         df = pd.DataFrame(columns=dirs)
         for dir in dirs:
+            # Explicitly ignore patches directory
+            if os.path.basename(dir) == "patches":
+                continue
             df[os.path.basename(dir)] = os.listdir(dir)
         df.to_csv(f"{split}.csv", index=False)
 
