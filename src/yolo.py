@@ -200,6 +200,11 @@ def test_new_datasets():
     uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
+    # load training set for each dataset
+    food201_train = food201.train_set()
+    uecfoodpix_train = uecfoodpix.train_set()
+    foodseg103_train = foodseg103.train_set()
+
 
 if __name__ == "__main__":
     insert_class_labels()
