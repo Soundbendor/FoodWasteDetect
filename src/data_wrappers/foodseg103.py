@@ -18,7 +18,7 @@ class FoodSeg103(SegDataset):
         # Load id2label.json
         with open(os.path.join(self.root, "id2label.json"), "r") as label_map:
             labels = json.load(label_map)
-        return labels
+        return {int(k): v for k,v in labels.items()}
 
     def val_set(self) -> pd.DataFrame:
         return self._load_df("validation.csv")
