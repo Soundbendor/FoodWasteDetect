@@ -34,6 +34,4 @@ class Food201(SegDataset):
         self._load_df("test.csv")
 
     def train_set(self):
-        # load train.csv
-        # if it doesn't exist, create it
         self._load_df("train.csv")
