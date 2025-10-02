@@ -14,9 +14,9 @@ class UECFoodPix(SegDataset):
 
     # INFO: And now, it's a dict return type, overriding List[str]?
     # WARN: Will break get_patches.
-    def get_class_labels(self) -> pd.DataFrame:
+    def get_class_labels(self) -> pd.Series:
         # Load category.txt
-        df = pd.read_csv(os.path.join(self.root, "category.txt"), sep="\t")
+        df = pd.read_csv(os.path.join(self.root, "category.txt"), sep="\t", index_col = "id")
         return df
 
     def val_set(self) -> pd.DataFrame:
