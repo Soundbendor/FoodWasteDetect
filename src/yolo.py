@@ -278,21 +278,21 @@ class ExperimentManager():
         for batchnum, patches in enumerate(batches):
             # TODO: check if IDs exist before rendering vectors
             print(patches)
-            patch_pths = [
-                os.path.join(ds.root, "train", "patches", x)
-                for x in patches["patch_name"]
-            ]
-            vectors = self.embedder.get_embedding(patch_pths)
-            metadata = {
-                "img_path": pd.Series(patch_pths),
-                "src_img": patches["src_img"],
-            }
-
-            # WARN: This STILL doesn't work
-            # idx is only within a given dataset...
-            ids = list(map(int, (batchnum * len(vectors)) + np.arange(len(vectors))))
-            self.db.add_records(list(patches["class"]), vectors, metadata, ids)
-
+            # patch_pths = [
+            #     os.path.join(ds.root, "train", "patches", x)
+            #     for x in patches["patch_name"]
+            # ]
+            # vectors = self.embedder.get_embedding(patch_pths)
+            # metadata = {
+            #     "img_path": pd.Series(patch_pths),
+            #     "src_img": patches["src_img"],
+            # }
+            #
+            # # WARN: This STILL doesn't work
+            # # idx is only within a given dataset...
+            # ids = list(map(int, (batchnum * len(vectors)) + np.arange(len(vectors))))
+            # self.db.add_records(list(patches["class"]), vectors, metadata, ids)
+            #
             
         
 
