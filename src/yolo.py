@@ -245,7 +245,7 @@ def test_new_datasets():
 
             # WARN: ID COLLISION BETWEEN DATASETS
             # ids = [get_id(pth) for pth in patch_pths]
-            ids = (idx * len(vectors)) + np.arange(1, len(vectors))
+            ids = list((idx * len(vectors)) + np.arange(1, len(vectors)))
             db.add_records(list(patches["class"]), vectors, metadata, ids)
 
 
