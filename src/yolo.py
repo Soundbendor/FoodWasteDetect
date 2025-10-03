@@ -284,7 +284,7 @@ class ExperimentManager():
                 "src_img": patches["src_img"],
             }
 
-            self.db.add_records(list(patches["class"]), vectors, metadata, patches.index)
+            self.db.add_records(list(patches["class"]), vectors, metadata, list(patches.index))
         # For subsequent calls, return the max ID value placed in dataset
         return patch_df.index[-1]
 
