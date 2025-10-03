@@ -9,6 +9,7 @@ from .dataset import SegDataset
 class UECFoodPix(SegDataset):
     def __init__(self, root: str):
         # where self.root = ".../food_datasets/uecfoodpix/UECFOODPIXCOMPLETE/data/UECFoodPIXCOMPLETE"
+        self.name = "uecfoodpix"
         self.root = root
         self.cmap = self.get_class_labels()
 

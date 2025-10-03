@@ -3,6 +3,7 @@ import os
 import uuid
 from itertools import chain
 
+from data_wrappers.dataset import Dataset
 import numpy as np
 import pandas as pd
 from ultralytics import YOLOWorld
@@ -227,14 +228,14 @@ def test_new_datasets():
         cfg["embed_size"],
     )
 
-    for ds, ds_path in zip(
-        [food201_train_patch, uecfoodpix_train_patch, foodseg103_train_patch],
-        [food201_pth, uecfoodpix_pth, foodseg103_pth],
-    ):
+    for ds in [food201_pth, uecfoodpix_pth, foodseg103_pth]:
         batches = np.array_split(ds, BATCH_SIZE)
         for idx, patches in enumerate(batches):
+            # Before generating, check if points exist in database
+            # We can't check len(vectors) yet here
+            # 
             patch_pths = [
-                os.path.join(ds_path, "train", "patches", x)
+                os.path.join(ds.root, "train", "patches", x)
                 for x in patches["patch_name"]
             ]
             vectors = embedder.get_embedding(patch_pths)
@@ -243,11 +244,72 @@ def test_new_datasets():
                 "src_img": patches["src_img"],
             }
 
-            # WARN: ID COLLISION BETWEEN DATASETS
-            # ids = [get_id(pth) for pth in patch_pths]
+            # WARN: This STILL doesn't work
+            # idx is only within a given dataset...
             ids = list(map(int, (idx * len(vectors)) + np.arange(len(vectors))))
             db.add_records(list(patches["class"]), vectors, metadata, ids)
 
 
+class ExperimentManager():
+    def __init__(self, cfg: dict):
+        self.embedder = CLIPEmbedding(
+            cfg["embed_model"], 
+            cfg["paths"]["embed_model_save_path"], 
+            cfg["embed_size"],
+        )
+        self.db = VectorDB(
+            cfg["qdrant_url"],
+            cfg["collection_name"],
+            cfg["reranker_model"],
+            cfg["embed_size"],
+        )
+        self.BATCH_SIZE = 500
+         
+
+    def get_patches(self, datasets: list[Dataset], key: str) -> dict[str, pd.DataFrame]:
+        patch_datasets = {}
+        for ds in datasets:
+            patch_datasets[ds.name] = ds.get_patches(key, False)
+        return patch_datasets
+
+    def update_vecdb(self, patch_datasets: dict[str, pd.DataFrame]):
+        ds = pd.concat(patch_datasets.values())
+        batches = np.array_split(ds, self.BATCH_SIZE)
+        for batchnum, patches in enumerate(batches):
+            # TODO: check if IDs exist before rendering vectors
+            print(patches)
+            patch_pths = [
+                os.path.join(ds.root, "train", "patches", x)
+                for x in patches["patch_name"]
+            ]
+            vectors = self.embedder.get_embedding(patch_pths)
+            metadata = {
+                "img_path": pd.Series(patch_pths),
+                "src_img": patches["src_img"],
+            }
+
+            # WARN: This STILL doesn't work
+            # idx is only within a given dataset...
+            ids = list(map(int, (batchnum * len(vectors)) + np.arange(len(vectors))))
+            self.db.add_records(list(patches["class"]), vectors, metadata, ids)
+
+            
+        
+
+     
+
 if __name__ == "__main__":
-    test_new_datasets()
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+
+    food201 = Food201(root=food201_pth)
+    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
+    foodseg103 = FoodSeg103(root=foodseg103_pth)
+
+    exp = ExperimentManager(cfg)
+
+    patch_set = exp.get_patches([food201, uecfoodpix, foodseg103], "train")
+    exp.update_vecdb(patch_set)

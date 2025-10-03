@@ -14,6 +14,7 @@ class Dataset:
     """Template class for datasets"""
 
     def __init__(self):
+        self.name = ""
         self.train_path = ""
         self.test_path = ""
         self.val_path = ""

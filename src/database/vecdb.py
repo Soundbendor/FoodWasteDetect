@@ -50,7 +50,7 @@ class VectorDB:
 
     def add_records(
         self,
-        food_type: str,
+        food_type: list[str],
         embeddings: list,
         metadata: Optional[dict],
         ids: Optional[list[int]],
