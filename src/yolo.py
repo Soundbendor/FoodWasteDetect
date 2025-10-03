@@ -147,12 +147,14 @@ def insert_class_labels():
         logging.info(f"In Top 5? {top5_score}")
         logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
 
+
 def get_id(pth: str):
-        basename = os.path.splitext(os.path.basename(pth))[0]
-        return int(basename.split("-")[1].split("_")[0]) + int(basename.split("_")[-2])
+    basename = os.path.splitext(os.path.basename(pth))[0]
+    return int(basename.split("-")[1].split("_")[0]) + int(basename.split("_")[-2])
+
 
 def build_patch_db():
-    
+
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # WARN: hard-coded file
@@ -190,6 +192,7 @@ def build_patch_db():
 
 
 def test_new_datasets():
+    BATCH_SIZE = 500
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     foodseg103_pth = cfg["paths"]["foodseg103"]
@@ -204,7 +207,7 @@ def test_new_datasets():
     food201_train = food201.train_set()
     uecfoodpix_train = uecfoodpix.train_set()
     foodseg103_train = foodseg103.train_set()
-    
+
     # food201.crop_patches()
     # uecfoodpix.crop_patches("train")
     # foodseg103.crop_patches("train")
@@ -223,12 +226,16 @@ def test_new_datasets():
         cfg["reranker_model"],
         cfg["embed_size"],
     )
-    
-    for ds, ds_path in zip([food201_train_patch, uecfoodpix_train_patch, foodseg103_train_patch], [food201_pth, uecfoodpix_pth, foodseg103_pth]):
-        batches = np.array_split(ds, 500)
-        for patches in batches:
+
+    for ds, ds_path in zip(
+        [food201_train_patch, uecfoodpix_train_patch, foodseg103_train_patch],
+        [food201_pth, uecfoodpix_pth, foodseg103_pth],
+    ):
+        batches = np.array_split(ds, BATCH_SIZE)
+        for idx, patches in enumerate(batches):
             patch_pths = [
-                os.path.join(ds_path, "train", "patches", x) for x in patches["patch_name"]
+                os.path.join(ds_path, "train", "patches", x)
+                for x in patches["patch_name"]
             ]
             vectors = embedder.get_embedding(patch_pths)
             metadata = {
@@ -236,9 +243,10 @@ def test_new_datasets():
                 "src_img": patches["src_img"],
             }
 
-            ids = [get_id(pth) for pth in patch_pths]
+            # WARN: ID COLLISION BETWEEN DATASETS
+            # ids = [get_id(pth) for pth in patch_pths]
+            ids = (idx * len(vectors)) + np.arange(1, len(vectors))
             db.add_records(list(patches["class"]), vectors, metadata, ids)
-        
 
 
 if __name__ == "__main__":
