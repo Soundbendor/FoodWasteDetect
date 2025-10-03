@@ -23,7 +23,7 @@ class EvalMetric:
     def compute_accuracies(self):
         return self.scores / self.len
 
-
+ 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
     parser.add_argument("--config_file", help="Path to experiment config")

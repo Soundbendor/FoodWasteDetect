@@ -14,6 +14,7 @@ from .dataset import Dataset
 class FoodX251(Dataset):
     def __init__(self, root: str) -> None:
         self.root = root
+        self.name = "foodx251"
         self.train_path = "train/train_set"
         self.test_path = "test/test_set" 
         self.val_path = "val/val_set"

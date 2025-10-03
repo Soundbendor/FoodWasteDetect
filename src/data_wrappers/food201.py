@@ -7,6 +7,7 @@ from .dataset import SegDataset
 
 class Food201(SegDataset):
     def __init__(self, root: str):
+        self.name="food201"
         self.root = root
         self.cmap = self.get_class_labels()
 
