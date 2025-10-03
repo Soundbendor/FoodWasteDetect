@@ -266,19 +266,16 @@ class ExperimentManager():
         self.BATCH_SIZE = 500
          
 
-    def get_patches(self, datasets: list[Dataset], key: str) -> dict[str, pd.DataFrame]:
-        patch_datasets = {}
-        for ds in datasets:
-            patch_datasets[ds.name] = ds.get_patches(key, False)
-        return patch_datasets
-
-    def update_vecdb(self, patch_datasets: dict[str, pd.DataFrame]):
-        ds = pd.concat(patch_datasets.values(), ignore_index=True)
-        batches = np.array_split(ds, self.BATCH_SIZE)
-        for batchnum, patches in enumerate(batches):
-            # TODO: check if IDs exist before rendering vectors
+    def update_vecdb(self, ds: Dataset, subset: str, start_idx: int) -> int:
+        # Load patches for dataset
+        patch_df = ds.get_patches(subset, False)
+        # Update index to start from desired database ID position
+        patch_df.index = patch_df.index.to_numpy() + start_idx
+        # Split dataset into batches
+        batches = np.array_split(patch_df, self.BATCH_SIZE)
+        for patches in batches:
             patch_pths = [
-                os.path.join(ds.root, "train", "patches", x)
+                os.path.join(ds.root, subset, "patches", x)
                 for x in patches["patch_name"]
             ]
             vectors = self.embedder.get_embedding(patch_pths)
@@ -288,10 +285,10 @@ class ExperimentManager():
             }
 
             self.db.add_records(list(patches["class"]), vectors, metadata, patches.index)
+        # For subsequent calls, return the max ID value placed in dataset
+        return patch_df.index[-1]
 
             
-        
-
      
 
 if __name__ == "__main__":
@@ -306,6 +303,8 @@ if __name__ == "__main__":
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
     exp = ExperimentManager(cfg)
+    
+    start_id = 0
+    for ds in [food201, uecfoodpix, foodseg103]:
+        start_id = exp.update_vecdb(ds, "train", start_id)
 
-    patch_set = exp.get_patches([food201, uecfoodpix, foodseg103], "train")
-    exp.update_vecdb(patch_set)
