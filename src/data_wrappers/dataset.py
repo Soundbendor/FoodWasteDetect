@@ -108,15 +108,23 @@ class Dataset:
         df.to_csv(os.path.join(os.path.join(self.root, subset_pth), "patches.csv"))
 
     def get_patches(self, subset: str, detections: bool) -> pd.DataFrame:
+        def update_sample_path(fname: str, subset: str, folder: str, root: str) -> str:
+            return os.path.join(root, subset, "patches", fname)
+
         # 1) Check if patches directory exists
         if subset in ["train", "test", "val"]:
             if detections:
                 df_path = os.path.join(self.root, subset, "dets.csv")
+                folder = "cropped-detections"
             else:
                 df_path = os.path.join(self.root, subset, "patches.csv")
+                folder = "patches"
             # 2) Check if patches.csv exists
             if os.path.isfile(df_path):
-                return pd.read_csv(df_path)
+                df = pd.read_csv(df_path)
+                df["patch_pth"] = df["patch_name"].apply(
+                    lambda x: update_sample_path(x, subset, folder, self.root)
+                )
             raise FileNotFoundError()
         raise ValueError("Must use train, test, or val")
 
@@ -157,7 +165,7 @@ class SegDataset(Dataset):
             # if basename == "boxes":
             #     for file in os.listdir("boxed_imgs"):
             #         fname = os.path.splitext(file)[0]
-            #         if 
+            #         if
             df[basename] = os.listdir(dir)
         df.to_csv(os.path.join(self.root, f"{split}.csv"), index=False)
 

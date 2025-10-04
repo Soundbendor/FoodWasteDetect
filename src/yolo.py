@@ -239,6 +239,7 @@ class ExperimentManager:
 
 
 if __name__ == "__main__":
+
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     foodseg103_pth = cfg["paths"]["foodseg103"]
@@ -249,8 +250,36 @@ if __name__ == "__main__":
     uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
+    uecfoodpix.crop_patches("test")
+    foodseg103.crop_patches("validation")
+
     exp = ExperimentManager(cfg)
 
     start_id = 0
     for ds in [food201, uecfoodpix, foodseg103]:
         start_id = exp.update_vecdb(ds, "train", start_id)
+
+    food201_test_patch = food201.get_patches("test", False)[:1000]
+    uecfoodpix_test_patch = uecfoodpix.get_patches("test", False)[:1000]
+    foodseg103_test_patch = uecfoodpix.get_patches("validation", False)[:1000]
+    eval_set = pd.concat(
+        [food201_test_patch, uecfoodpix_test_patch, foodseg103_test_patch],
+        ignore_index=True,
+    )
+
+    metric = EvalMetric()
+    for i, row in eval_set.iterrows():
+        query_vec = exp.embedder.get_embedding(row["patch_pth"])[0]
+        candidate_vecs = exp.db.query(None, query_vec)
+        score, confidence, prediction = exp.db.score(
+            candidate_vecs, row["class"], "voting"
+        )
+        top5_score, _, _ = exp.db.score(candidate_vecs, row["class"], "top5")
+        metric.update_scores(candidate_vecs, exp.db, row["class"])
+        logging.info(f"Predicted Label: {prediction}")
+        logging.info(f"True label: {row['class']}")
+        logging.info(f"In Top 5? {top5_score}")
+        logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
+
+    scores = metric.compute_accuracies()
+    print(scores)
