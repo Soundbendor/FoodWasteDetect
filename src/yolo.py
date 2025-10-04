@@ -225,7 +225,7 @@ class ExperimentManager:
             vectors = self.embedder.get_embedding(patch_pths)
             metadata = {
                 "img_path": pd.Series(patch_pths),
-                "src_img": list(map(int, patches["src_img"])),
+                "src_img": patches["src_img"].astype(object),
             }
 
             self.db.add_records(
