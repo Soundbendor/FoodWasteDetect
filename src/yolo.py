@@ -232,7 +232,7 @@ class ExperimentManager:
                 list(patches["class"]),
                 vectors,
                 metadata,
-                list(patches.index.astype(int)),
+                list(map(int, patches.index)),
             )
         # For subsequent calls, return the max ID value placed in dataset
         return patch_df.index[-1]
