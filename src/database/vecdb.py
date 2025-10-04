@@ -25,7 +25,7 @@ class VectorDB:
     def point_exists(self, id: int) -> bool:
         return self.client.retrieve(
             collection_name=self.db_name,
-            ids=[id],
+            ids=[int(id)],
             with_payload=False,
             with_vectors=False,
         )
