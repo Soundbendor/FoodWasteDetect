@@ -3,11 +3,11 @@ import os
 import uuid
 from itertools import chain
 
-from data_wrappers.dataset import Dataset
 import numpy as np
 import pandas as pd
 from ultralytics import YOLOWorld
 
+from data_wrappers.dataset import Dataset
 from data_wrappers.food201 import Food201
 from data_wrappers.foodseg103 import FoodSeg103
 from data_wrappers.foodx251 import FoodX251
@@ -192,69 +192,11 @@ def build_patch_db():
         db.add_records(list(patches["class"]), vectors, metadata, ids)
 
 
-def test_new_datasets():
-    BATCH_SIZE = 500
-    args = parse_args()
-    cfg = parse_cfg(args.config_file)
-    foodseg103_pth = cfg["paths"]["foodseg103"]
-    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
-    food201_pth = cfg["paths"]["food201"]
-
-    food201 = Food201(root=food201_pth)
-    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
-    foodseg103 = FoodSeg103(root=foodseg103_pth)
-
-    # load training set for each dataset
-    food201_train = food201.train_set()
-    uecfoodpix_train = uecfoodpix.train_set()
-    foodseg103_train = foodseg103.train_set()
-
-    # food201.crop_patches()
-    # uecfoodpix.crop_patches("train")
-    # foodseg103.crop_patches("train")
-
-    food201_train_patch = food201.get_patches("train", False)
-    uecfoodpix_train_patch = uecfoodpix.get_patches("train", False)
-    foodseg103_train_patch = foodseg103.get_patches("train", False)
-
-    embedder = CLIPEmbedding(
-        cfg["embed_model"], cfg["paths"]["embed_model_save_path"], cfg["embed_size"]
-    )
-
-    db = VectorDB(
-        cfg["qdrant_url"],
-        cfg["collection_name"],
-        cfg["reranker_model"],
-        cfg["embed_size"],
-    )
-
-    for ds in [food201_pth, uecfoodpix_pth, foodseg103_pth]:
-        batches = np.array_split(ds, BATCH_SIZE)
-        for idx, patches in enumerate(batches):
-            # Before generating, check if points exist in database
-            # We can't check len(vectors) yet here
-            # 
-            patch_pths = [
-                os.path.join(ds.root, "train", "patches", x)
-                for x in patches["patch_name"]
-            ]
-            vectors = embedder.get_embedding(patch_pths)
-            metadata = {
-                "img_path": pd.Series(patch_pths),
-                "src_img": patches["src_img"],
-            }
-
-            # WARN: This STILL doesn't work
-            # idx is only within a given dataset...
-            ids = list(map(int, (idx * len(vectors)) + np.arange(len(vectors))))
-            db.add_records(list(patches["class"]), vectors, metadata, ids)
-
-
-class ExperimentManager():
+class ExperimentManager:
     def __init__(self, cfg: dict):
         self.embedder = CLIPEmbedding(
-            cfg["embed_model"], 
-            cfg["paths"]["embed_model_save_path"], 
+            cfg["embed_model"],
+            cfg["paths"]["embed_model_save_path"],
             cfg["embed_size"],
         )
         self.db = VectorDB(
@@ -264,7 +206,6 @@ class ExperimentManager():
             cfg["embed_size"],
         )
         self.BATCH_SIZE = 500
-         
 
     def update_vecdb(self, ds: Dataset, subset: str, start_idx: int) -> int:
         # Load patches for dataset
@@ -274,6 +215,9 @@ class ExperimentManager():
         # Split dataset into batches
         batches = np.array_split(patch_df, self.BATCH_SIZE)
         for patches in batches:
+            if self.db.point_exists(patches.index[0]):
+                print("WARN: ID already exists, skipping...")
+                continue
             patch_pths = [
                 os.path.join(ds.root, subset, "patches", x)
                 for x in patches["patch_name"]
@@ -284,12 +228,12 @@ class ExperimentManager():
                 "src_img": patches["src_img"],
             }
 
-            self.db.add_records(list(patches["class"]), vectors, metadata, list(patches.index))
+            self.db.add_records(
+                list(patches["class"]), vectors, metadata, list(patches.index)
+            )
         # For subsequent calls, return the max ID value placed in dataset
         return patch_df.index[-1]
 
-            
-     
 
 if __name__ == "__main__":
     args = parse_args()
@@ -303,8 +247,7 @@ if __name__ == "__main__":
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
     exp = ExperimentManager(cfg)
-    
+
     start_id = 0
     for ds in [food201, uecfoodpix, foodseg103]:
         start_id = exp.update_vecdb(ds, "train", start_id)
-

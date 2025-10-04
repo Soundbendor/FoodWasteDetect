@@ -22,6 +22,14 @@ class VectorDB:
         else:
             self.reranker = None
 
+    def point_exists(self, id: int) -> bool:
+        return self.client.retrieve(
+            collection_name=self.db_name,
+            ids=[id],
+            with_payload=False,
+            with_vectors=False,
+        )
+
     def connect(self, addr: str):
         """Check for qdrant server running on host. If connection fails, starts a Qdrant instance."""
         try:
