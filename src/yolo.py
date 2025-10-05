@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
     food201_test_patch = food201.get_patches("test", False)[:1000]
     uecfoodpix_test_patch = uecfoodpix.get_patches("test", False)[:1000]
-    foodseg103_test_patch = uecfoodpix.get_patches("validation", False)[:1000]
+    foodseg103_test_patch = foodseg103.get_patches("validation", False)[:1000]
     eval_set = pd.concat(
         [food201_test_patch, uecfoodpix_test_patch, foodseg103_test_patch],
         ignore_index=True,
