@@ -112,7 +112,7 @@ class Dataset:
             return os.path.join(root, subset, "patches", fname)
 
         # 1) Check if patches directory exists
-        if subset in ["train", "test", "val"]:
+        if subset in ["train", "test", "val", "validation"]:
             if detections:
                 df_path = os.path.join(self.root, subset, "dets.csv")
                 folder = "cropped-detections"
