@@ -125,6 +125,7 @@ class Dataset:
                 df["patch_pth"] = df["patch_name"].apply(
                     lambda x: update_sample_path(x, subset, folder, self.root)
                 )
+                return df
             raise FileNotFoundError()
         raise ValueError("Must use train, test, or val")
 
