@@ -5,7 +5,7 @@ from itertools import chain
 
 import numpy as np
 import pandas as pd
-from ultralytics import YOLOWorld
+from ultralytics import YOLO
 
 from data_wrappers.dataset import Dataset
 from data_wrappers.food201 import Food201
@@ -237,8 +237,39 @@ class ExperimentManager:
         # For subsequent calls, return the max ID value placed in dataset
         return patch_df.index[-1]
 
+    def evaluate_model(self, eval_set: pd.DataFrame) -> EvalMetric:
+        metric = EvalMetric()
+        for i, row in eval_set.iterrows():
+            query_vec = self.embedder.get_embedding([row["patch_pth"]])[0]
+            candidate_vecs = self.db.query(None, query_vec)
+            score, confidence, prediction = self.db.score(
+                candidate_vecs, row["class"], "voting"
+            )
+            top5_score, _, _ = self.db.score(candidate_vecs, row["class"], "top5")
+            metric.update_scores(candidate_vecs, self.db, row["class"])
+            logging.info(f"Predicted Label: {prediction}")
+            logging.info(f"True label: {row['class']}")
+            logging.info(f"In Top 5? {top5_score}")
+            logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
 
-if __name__ == "__main__":
+        scores = metric.compute_accuracies()
+        print(scores)
+        return metric
+
+
+def finetune_yolov11():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+    model = YOLO("yolv11x")
+
+    metrics = model.val(data=food201_pth)
+    print(metrics.box.map)
+
+
+def experiment_combined_dataset():
 
     args = parse_args()
     cfg = parse_cfg(args.config_file)
@@ -266,20 +297,8 @@ if __name__ == "__main__":
         [food201_test_patch, uecfoodpix_test_patch, foodseg103_test_patch],
         ignore_index=True,
     )
+    exp.evaluate_model(eval_set)
 
-    metric = EvalMetric()
-    for i, row in eval_set.iterrows():
-        query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
-        candidate_vecs = exp.db.query(None, query_vec)
-        score, confidence, prediction = exp.db.score(
-            candidate_vecs, row["class"], "voting"
-        )
-        top5_score, _, _ = exp.db.score(candidate_vecs, row["class"], "top5")
-        metric.update_scores(candidate_vecs, exp.db, row["class"])
-        logging.info(f"Predicted Label: {prediction}")
-        logging.info(f"True label: {row['class']}")
-        logging.info(f"In Top 5? {top5_score}")
-        logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
 
-    scores = metric.compute_accuracies()
-    print(scores)
+if __name__ == "__main__":
+    finetune_yolov11()
