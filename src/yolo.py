@@ -269,7 +269,7 @@ if __name__ == "__main__":
 
     metric = EvalMetric()
     for i, row in eval_set.iterrows():
-        query_vec = exp.embedder.get_embedding(row["patch_pth"])[0]
+        query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
         candidate_vecs = exp.db.query(None, query_vec)
         score, confidence, prediction = exp.db.score(
             candidate_vecs, row["class"], "voting"
