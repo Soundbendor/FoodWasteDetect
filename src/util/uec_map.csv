@@ -1,0 +1,104 @@
+old_id,new_id,label
+0,208, background
+1,169, rice
+2,210, eels on rice
+3,211, pilaf
+4,212, chicken-'n'-egg on rice
+5,213, pork cutlet on rice
+6,214, beef curry
+7,191, sushi
+8,216, chicken rice
+9,89, fried rice
+10,218, tempura bowl
+11,19, bibimbap
+12,197, toast
+13,221, croissant
+14,222, roll bread
+15,223, raisin bread
+16,224, chip butty
+17,107, hamburger
+18,157, pizza
+19,227, sandwiches
+20,228, udon noodle
+21,229, tempura udon
+22,230, soba noodle
+23,231, ramen noodle
+24,232, beef noodle
+25,233, tensin noodle
+26,234, fried noodle
+27,235, spaghetti
+28,236, Japanese-style pancake
+29,194, takoyaki
+30,238, gratin
+31,239, sauteed vegetables
+32,240, croquette
+33,241, grilled eggplant
+34,242, sauteed spinach
+35,243, vegetable tempura
+36,127, miso soup
+37,245, potage
+38,176, sausage
+39,247, oden
+40,248, omelet
+41,249, ganmodoki
+42,250, jiaozi
+43,251, stew
+44,252, teriyaki grilled fish
+45,253, fried fish
+46,103, grilled salmon
+47,255, salmon meuniere
+48,174, sashimi
+49,257, grilled pacific saury
+50,258, sukiyaki
+51,259, sweet and sour pork
+52,260, lightly roasted fish
+53,261, steamed egg hotchpotch
+54,262, tempura
+55,263, fried chicken
+56,264, sirloin cutlet
+57,265, nanbanzuke
+58,266, boiled fish
+59,267, seasoned beef with potatoes
+60,268, hambarg steak
+61,269, beef steak
+62,270, dried fish
+63,271, ginger pork saute
+64,272, spicy chili-flavored tofu
+65,273, yakitori
+66,274, cabbage roll
+67,275, rolled omelet
+68,276, egg sunny-side up
+69,277, fermented soybeans
+70,278, cold tofu
+71,279, egg roll
+72,280, chilled noodle
+73,281, stir-fried beef and peppers
+74,282, simmered pork
+75,283, boiled chicken and vegetables
+76,284, sashimi bowl
+77,285, sushi bowl
+78,286, fish-shaped pancake with bean jam
+79,287, shrimp with chill source
+80,288, roast chicken
+81,289, steamed meat dumpling
+82,290, omelet with fried rice
+83,291, cutlet curry
+84,292, spaghetti meat sauce
+85,293, fried shrimp
+86,294, potato salad
+87,295, green salad
+88,296, macaroni salad
+89,297, Japanese tofu and vegetable chowder
+90,298, pork miso soup
+91,299, chinese soup
+92,300, beef bowl
+93,301, kinpira-style sauteed burdock
+94,302, rice ball
+95,303, pizza toast
+96,304, dipping noodles
+97,111, hot dog
+98,84, french fries
+99,307, mixed rice
+100,308, goya chanpuru
+101,309, others
+102,310, beverage
