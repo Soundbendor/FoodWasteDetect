@@ -26,9 +26,9 @@ for file in os.listdir(ROOT_PTH):
         id_mapper = partial(change_id, id_map=foodseg103_map)
     elif re.match(r"uec_.*", file):
         id_mapper = partial(change_id, id_map=uec_map)
-    elif re.search(r".*NAN", file):
-        continue
     else:
+        continue
+    if re.search(r".*NAN", file):
         continue
     lines = list(map(id_mapper, lines))
     with open(fpath, "w") as wfile:
