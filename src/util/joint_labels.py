@@ -26,6 +26,6 @@ for file in os.listdir(ROOT_PTH):
         id_mapper = partial(change_id, id_map=foodseg103_map)
     if re.match(r"uec_.*", file):
         id_mapper = partial(change_id, id_map=uec_map)
-    lines = list(map(lines, id_mapper))
+    lines = list(map(id_mapper, lines))
     with open(fpath, "w") as wfile:
         wfile.writelines(lines)
