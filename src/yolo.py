@@ -315,7 +315,7 @@ def evaluate_pipeline():
     # Step 2: Use fine-tuned YOLO to extract patches for each dataset
 
     for ds in datasets:
-        ds.detect_patches(ds.val_path, ds.val_set, "best.pt")
+        ds.detect_patches(ds.test_path, ds.test_set, "best.pt")
 
     food201_dets = food201.get_patches("test", True)
     uecfoodpix_dets = uecfoodpix.get_patches("test", True)
