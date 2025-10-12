@@ -10,7 +10,7 @@ class UECFoodPix(SegDataset):
     def __init__(self, root: str):
         # where self.root = ".../food_datasets/uecfoodpix/UECFOODPIXCOMPLETE/data/UECFoodPIXCOMPLETE"
         self.name = "uecfoodpix"
-        self.val_path = "test"
+        self.test_path = "test"
         self.train_path = "train"
         self.root = root
         self.cmap = self.get_class_labels()
