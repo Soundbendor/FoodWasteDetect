@@ -30,7 +30,7 @@ class ImageCropper:
         )
         prev_total_crops = 0
         # WARN: Due to new changes, this interface is now incompatible with FoodX-251.
-        for idx, img_name in subset["images"].iterrows():
+        for img_name in subset["images"]:
             img_pth = os.path.join(ds_path, img_name)
             # load image
             img = cv2.imread(img_pth)
