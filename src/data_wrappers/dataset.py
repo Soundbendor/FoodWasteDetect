@@ -44,7 +44,9 @@ class Dataset:
             )
         )
 
-    def detect_patches(self, subset_pth: str, subset_loader: Callable) -> None:
+    def detect_patches(
+        self, subset_pth: str, subset_loader: Callable, model_pth: str
+    ) -> None:
         """
         Use ObjectCropper solution to extract patches from
         image classification dataset. Save in detected-patches directory
@@ -56,7 +58,7 @@ class Dataset:
             print("WARN: Patches already exist in this directory.")
             return
         os.makedirs(dets_pth, exist_ok=True)
-        cropper = ImageCropper(dataset=self, model="yolo11x.pt")
+        cropper = ImageCropper(dataset=self, model=model_pth)
         cropper.crop_dataset(subset_pth, subset_loader)
 
     def crop_patches(self, subset_pth: str) -> None:

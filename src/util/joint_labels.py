@@ -15,7 +15,7 @@ uec_map = pd.read_csv("uec_map.csv").to_dict("index")
 def change_id(line: str, id_map: pd.DataFrame) -> str:
     words = line.split()
     words[0] = str(id_map[int(words[0])]["new_id"])
-    return " ".join(words)
+    return " ".join(words) + "\n"
 
 
 for file in os.listdir(ROOT_PTH):

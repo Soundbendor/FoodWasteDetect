@@ -10,6 +10,8 @@ class UECFoodPix(SegDataset):
     def __init__(self, root: str):
         # where self.root = ".../food_datasets/uecfoodpix/UECFOODPIXCOMPLETE/data/UECFoodPIXCOMPLETE"
         self.name = "uecfoodpix"
+        self.val_path = "test"
+        self.train_path = "train"
         self.root = root
         self.cmap = self.get_class_labels()
 
@@ -17,11 +19,13 @@ class UECFoodPix(SegDataset):
     # WARN: Will break get_patches.
     def get_class_labels(self) -> dict:
         # Load category.txt
-        df = pd.read_csv(os.path.join(self.root, "category.txt"), sep="\t", index_col = "id")
+        df = pd.read_csv(
+            os.path.join(self.root, "category.txt"), sep="\t", index_col="id"
+        )
         return df.to_dict()["name"]
 
-    def val_set(self) -> pd.DataFrame:
-        return self._load_df("validation.csv")
+    def test_set(self) -> pd.DataFrame:
+        return self._load_df("test.csv")
 
     def train_set(self) -> pd.DataFrame:
         return self._load_df("train.csv")

@@ -10,6 +10,8 @@ class FoodSeg103(SegDataset):
     def __init__(self, root: str):
         # where self.root = ".../food_datasets/foodseg103/data
         self.name = "foodseg103"
+        self.val_path = "test"
+        self.train_path = "train"
         self.root = root
         self.cmap = self.get_class_labels()
 
@@ -19,10 +21,10 @@ class FoodSeg103(SegDataset):
         # Load id2label.json
         with open(os.path.join(self.root, "id2label.json"), "r") as label_map:
             labels = json.load(label_map)
-        return {int(k): v for k,v in labels.items()}
+        return {int(k): v for k, v in labels.items()}
 
-    def val_set(self) -> pd.DataFrame:
-        return self._load_df("validation.csv")
+    def test_set(self) -> pd.DataFrame:
+        return self._load_df("test.csv")
 
     def train_set(self) -> pd.DataFrame:
         return self._load_df("train.csv")

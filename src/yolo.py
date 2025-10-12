@@ -260,12 +260,9 @@ class ExperimentManager:
 def finetune_yolov11():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
-    foodseg103_pth = cfg["paths"]["foodseg103"]
-    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
-    food201_pth = cfg["paths"]["food201"]
+    combined_pth = cfg["paths"]["combined"]
     model = YOLO("yolv11x")
-
-    metrics = model.val(data=food201_pth)
+    metrics = model.train(data=os.path.join(combined_pth, "dataset.yaml"))
     print(metrics.box.map)
 
 
@@ -300,5 +297,55 @@ def experiment_combined_dataset():
     exp.evaluate_model(eval_set)
 
 
+def evaluate_pipeline():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    # Step 1: Load all 3 datasets
+
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+
+    food201 = Food201(root=food201_pth)
+    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
+    foodseg103 = FoodSeg103(root=foodseg103_pth)
+
+    datasets = [food201, uecfoodpix, foodseg103]
+
+    # Step 2: Use fine-tuned YOLO to extract patches for each dataset
+
+    for ds in datasets:
+        ds.detect_patches(ds.val_path, ds.val_set, "best.pt")
+
+    food201_dets = food201.get_patches("test", True)
+    uecfoodpix_dets = uecfoodpix.get_patches("test", True)
+    foodseg103_dets = foodseg103.get_patches("test", True)
+
+    # Step 3: Predict det categories using CLIP
+
+    exp = ExperimentManager(cfg)
+    eval_set = pd.concat(
+        [food201_dets, uecfoodpix_dets, foodseg103_dets],
+        ignore_index=True,
+    )
+    print(eval_set)
+
+    # Load patches.csv as well
+    # Group by image name
+    food201_test_patch = food201.get_patches("test", False)
+    uecfoodpix_test_patch = uecfoodpix.get_patches("test", False)
+    foodseg103_test_patch = foodseg103.get_patches("test", False)
+    labels = pd.concat(
+        [food201_test_patch, uecfoodpix_test_patch, foodseg103_test_patch],
+        ignore_index=True,
+    )
+    print(labels)
+
+    # Load all known boxes for each image
+    # For each patch for that image
+    # Classify the patch using CLIP
+    # If patch class exists in known boxes, count towards accuracy
+
+
 if __name__ == "__main__":
-    finetune_yolov11()
+    evaluate_pipeline()
