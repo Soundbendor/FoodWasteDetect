@@ -314,6 +314,10 @@ def evaluate_pipeline():
 
     # Step 2: Use fine-tuned YOLO to extract patches for each dataset
 
+    # Pre-load validation subsets
+    for ds in datasets:
+        ds.test_set()
+
     for ds in datasets:
         ds.detect_patches(ds.test_path, ds.test_set, "best.pt")
 
