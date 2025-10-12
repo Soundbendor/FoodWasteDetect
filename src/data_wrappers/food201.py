@@ -34,7 +34,7 @@ class Food201(SegDataset):
         return class_label
 
     def test_set(self):
-        self._load_df("test.csv")
+        return self._load_df("test.csv")
 
     def train_set(self):
-        self._load_df("train.csv")
+        return self._load_df("train.csv")
