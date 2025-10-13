@@ -12,7 +12,7 @@ class ImageCropper:
     def __init__(self, dataset, model: str) -> None:
         # TODO: Convert get_class_list to return list, rather than dataframe
         self.ds = dataset
-        self.classes = dataset.get_class_list()
+        self.classes = dataset.get_class_labels()
         self.model = solutions.ObjectCropper(model=model)
 
     def crop_dataset(self, subset_dirname: str, subset_loader: Callable):
