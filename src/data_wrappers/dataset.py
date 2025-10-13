@@ -21,7 +21,7 @@ class Dataset:
         self.root = ""
         self.cmap = self._get_classmap()
 
-    def get_class_list(self) -> List[str]:
+    def get_class_labels(self) -> pd.Series:
         raise NotImplementedError  # type: ignore
 
     def _get_classmap(self) -> pd.Series:

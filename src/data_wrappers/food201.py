@@ -13,11 +13,7 @@ class Food201(SegDataset):
         self.root = root
         self.cmap = self.get_class_labels()
 
-    def get_class_labels(self) -> list[str]:
-        """Get unindexed list of class labels."""
-        return self.get_class_list()["label"].tolist()
-
-    def get_class_list(self) -> pd.Series:
+    def get_class_labels(self) -> pd.Series:
         """Return list of class names as indexed series."""
         class_label = pd.read_csv(
             os.path.join(self.root, "food201", "pixel_annotations_map.csv"),
@@ -31,7 +27,7 @@ class Food201(SegDataset):
             class_label.loc[idx] = "Unknown"
         class_label = class_label.sort_index()
         class_label.to_csv("food201_class_labels.csv")
-        return class_label
+        return class_label["label"]
 
     def test_set(self):
         return self._load_df("test.csv")
