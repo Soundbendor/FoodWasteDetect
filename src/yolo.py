@@ -362,7 +362,11 @@ def evaluate_pipeline():
             # TODO: update patch patch to point to cropped-detections
             pth = row["patch_pth"]
             pth = pth.replace("patches", "cropped-detections")
-            query_vec = exp.embedder.get_embedding([pth])[0]
+            try:
+                query_vec = exp.embedder.get_embedding([pth])[0]
+            except FileNotFoundError:
+                print("Error! File not found.")
+                continue
             candidate_vecs = exp.db.query(None, query_vec)
             # todo: eval metric
             prediction = exp.db.vote_classification(candidate_vecs)
