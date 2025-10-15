@@ -103,6 +103,12 @@ class VectorDB:
             logging.info(rerank_pairs)
         return sorted(top10, key=lambda x: x.score, reverse=True)
 
+    def vote_classification(self, search_result: list[ScoredPoint]):
+        votes = Counter([x.payload["class"] for x in search_result])  # type: ignore
+        candidate = votes.most_common(1)[0]
+        category = candidate[0]
+        return category
+
     # Returns (Accuracy, Similarity) where acc is binary 1-0
     def score(
         self, search_result: list[ScoredPoint], label: str, strategy: str

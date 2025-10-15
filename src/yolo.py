@@ -345,10 +345,32 @@ def evaluate_pipeline():
     )
     print(labels)
 
+    # Each groupby: Dataframe of patches for a given image
+    eval_set.groupby("source_img")
+    # Each groupby: 
+    labels.groupby("src_img")
     # Load all known boxes for each image
     # For each patch for that image
     # Classify the patch using CLIP
     # If patch class exists in known boxes, count towards accuracy
+    acc_score = 0
+    total_patches = 0
+    for img_name, dets_df in labels[1000:]:
+        label_boxes = labels.get_group(img_name)
+        for _, row in dets_df.iterrows():
+        
+        query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
+        candidate_vecs = exp.db.query(None, query_vec)
+        # todo: eval metric
+        prediction = exp.db.vote_classification(candidate_vecs)
+        print(f"DEBUG: {prediction}")
+        # TODO: compute mAP@50
+        if prediction in label_boxes["class"]:
+            acc_score += 1
+        total_patches += 1
+    print(acc_score / total_patches)
+    
+        
 
 
 if __name__ == "__main__":
