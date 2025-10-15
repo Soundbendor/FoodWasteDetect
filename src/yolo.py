@@ -368,7 +368,7 @@ def evaluate_pipeline():
             prediction = exp.db.vote_classification(candidate_vecs)
             print(f"DEBUG: {prediction}")
             # TODO: compute mAP@50
-            if label_boxes["class"].str.contains(prediction):
+            if any(label_boxes["class"].str.contains(prediction)):
                 acc_score += 1
             total_patches += 1
         print(acc_score / total_patches)
