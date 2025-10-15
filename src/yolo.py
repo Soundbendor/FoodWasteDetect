@@ -2,6 +2,7 @@ import logging
 import os
 import uuid
 from itertools import chain
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -358,7 +359,10 @@ def evaluate_pipeline():
     for img_name, dets_df in eval_group:
         label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
         for _, row in dets_df.iterrows():
-            query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
+            # TODO: update patch patch to point to cropped-detections
+            pth = row["patch_pth"]
+            pth = pth.replace("patches", "cropped-detections")
+            query_vec = exp.embedder.get_embedding([pth])[0]
             candidate_vecs = exp.db.query(None, query_vec)
             # todo: eval metric
             prediction = exp.db.vote_classification(candidate_vecs)
