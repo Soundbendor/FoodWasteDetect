@@ -355,9 +355,9 @@ def evaluate_pipeline():
     # If patch class exists in known boxes, count towards accuracy
     acc_score = 0
     total_patches = 0
-    for img_name, dets_df in labels[1000:]:
+    for img_name, dets_df in labels:
         label_boxes = labels.get_group(img_name)
-        for _, row in dets_df.iterrows():
+        for _, row in dets_df.iterrows()[:1000]:
             query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
             candidate_vecs = exp.db.query(None, query_vec)
             # todo: eval metric
