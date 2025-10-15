@@ -346,7 +346,7 @@ def evaluate_pipeline():
     print(labels)
 
     # Each groupby: Dataframe of patches for a given image
-    eval_group = eval_set.groupby("source_img")
+    eval_group = eval_set[:1000].groupby("source_img")
     # Each groupby: 
     label_group = labels.groupby("src_img")
     # Load all known boxes for each image
@@ -355,7 +355,7 @@ def evaluate_pipeline():
     # If patch class exists in known boxes, count towards accuracy
     acc_score = 0
     total_patches = 0
-    for img_name, dets_df in eval_group[:1000]:
+    for img_name, dets_df in eval_group:
         label_boxes = label_group.get_group(img_name)
         for _, row in dets_df.iterrows():
             query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
@@ -367,6 +367,7 @@ def evaluate_pipeline():
             if prediction in label_boxes["class"]:
                 acc_score += 1
             total_patches += 1
+        print(acc_score / total_patches)
     print(acc_score / total_patches)
     
         
