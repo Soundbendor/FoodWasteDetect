@@ -358,16 +358,15 @@ def evaluate_pipeline():
     for img_name, dets_df in labels[1000:]:
         label_boxes = labels.get_group(img_name)
         for _, row in dets_df.iterrows():
-        
-        query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
-        candidate_vecs = exp.db.query(None, query_vec)
-        # todo: eval metric
-        prediction = exp.db.vote_classification(candidate_vecs)
-        print(f"DEBUG: {prediction}")
-        # TODO: compute mAP@50
-        if prediction in label_boxes["class"]:
-            acc_score += 1
-        total_patches += 1
+            query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
+            candidate_vecs = exp.db.query(None, query_vec)
+            # todo: eval metric
+            prediction = exp.db.vote_classification(candidate_vecs)
+            print(f"DEBUG: {prediction}")
+            # TODO: compute mAP@50
+            if prediction in label_boxes["class"]:
+                acc_score += 1
+            total_patches += 1
     print(acc_score / total_patches)
     
         
