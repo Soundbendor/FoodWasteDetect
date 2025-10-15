@@ -153,6 +153,7 @@ class SegDataset(Dataset):
         should have [img, class_id, mask, segment, box]
         """
         # Go to either train or test
+        # WARN: Order is not guaranteed here.
         path = os.path.join(self.root, split)
         dirs = [os.path.join(path, x) for x in os.listdir(path)]
         dirs = [x for x in dirs if os.path.isdir(x)]
@@ -169,7 +170,7 @@ class SegDataset(Dataset):
             #     for file in os.listdir("boxed_imgs"):
             #         fname = os.path.splitext(file)[0]
             #         if
-            df[basename] = os.listdir(dir)
+            df[basename] = sorted(os.listdir(dir))
         df.to_csv(os.path.join(self.root, f"{split}.csv"), index=False)
 
     def _load_df(self, fname: str):
