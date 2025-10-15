@@ -356,7 +356,7 @@ def evaluate_pipeline():
     acc_score = 0
     total_patches = 0
     for img_name, dets_df in eval_group:
-        label_boxes = label_group.get_group(img_name)
+        label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
         for _, row in dets_df.iterrows():
             query_vec = exp.embedder.get_embedding([row["patch_pth"]])[0]
             candidate_vecs = exp.db.query(None, query_vec)
