@@ -373,6 +373,7 @@ def evaluate_pipeline():
     for img_name, dets_df in eval_group:
         label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
         preds = []
+        top5_preds = []
         for _, row in dets_df.iterrows():
             pth = row["patch_pth"]
             pth = pth.replace("patches", "cropped-detections")
@@ -386,17 +387,21 @@ def evaluate_pipeline():
             prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
             print(f"DEBUG: {prediction}")
             preds.append(prediction)
-            if any([any(label_boxes["class"].str.contains(cls)) for cls in top5_classes]):
-                top5_acc_score += 1
+            top5_preds.append(top5_classes)
             total_patches += 1
         # compute accuracy score for this image
         for y in label_boxes["class"]:
-            for y_hat in preds:
+            for y_hat, top5 in zip(preds, top5_preds):
                 if y == y_hat:
                     acc_score += 1
+                    top5_acc_score += 1
                     # remove y from label_boxes
                     # this sucks, from an efficiency perspective.
                     preds.remove(y_hat)
+                    top5_preds.remove(top5)
+                elif y in top5_preds:
+                    top5_acc_score += 1
+                    top5_preds.remove(top5)
                     break
 
         print(f"Top 5 Score: {top5_acc_score / total_patches}")
