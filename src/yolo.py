@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from ultralytics import YOLO
+from PIL import Image
 
 from data_wrappers.dataset import Dataset
 from data_wrappers.food201 import Food201
@@ -206,7 +207,17 @@ class ExperimentManager:
             cfg["reranker_model"],
             cfg["embed_size"],
         )
-        self.BATCH_SIZE = 500
+        self.BATCH_SIZE = 50
+
+    def _check_img(self, img: Image) -> bool:
+        return all(i >= 20 for i in img.size)
+
+    def load_imgs(self, df: pd.DataFrame) -> pd.DataFrame:
+        # load all the images
+        df["img_files"] = df.apply(Image.open, df["patch_pths"])
+        valid_imgs = df["img_files"].apply(self._check_img, axis=1)
+        return df[valid_imgs]
+
 
     def update_vecdb(self, ds: Dataset, subset: str, start_idx: int) -> int:
         # Load patches for dataset
@@ -221,13 +232,15 @@ class ExperimentManager:
             if self.db.point_exists(patches.index[0]):
                 print("WARN: ID already exists, skipping...")
                 continue
-            patch_pths = [
+            patches["patch_pths"] = [
                 os.path.join(ds.root, subset, "patches", x)
                 for x in patches["patch_name"]
             ]
-            vectors = self.embedder.get_embedding(patch_pths)
+            # Filters out invalid images, returns updated dataframe
+            patches = self.load_imgs(patches)
+            vectors = self.embedder.get_embedding_from_preloaded(patches["img_files"])
             metadata = {
-                "img_path": pd.Series(patch_pths),
+                "img_path": pd.Series(patches["patch_pths"]),
                 "src_img": patches["src_img"].astype(object),
             }
 
