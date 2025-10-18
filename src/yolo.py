@@ -414,7 +414,7 @@ def evaluate_pipeline():
             total_patches += 1
         # compute accuracy score for this image
         acc_score += update_top1(label_boxes["class"], preds)
-        top5_acc_score += update_top5(label_boxes, top5_preds)
+        top5_acc_score += update_top5(label_boxes["class"], top5_preds)
         print(f"Top 5 Score: {top5_acc_score / total_patches}")
         print(f"Top 1 Score: {acc_score / total_patches}")
     print(top5_acc_score / total_patches)
