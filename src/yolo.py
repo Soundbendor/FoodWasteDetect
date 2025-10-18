@@ -331,9 +331,9 @@ def evaluate_pipeline():
     # Step 2: Use fine-tuned YOLO to extract patches for each dataset
 
     # Pre-load validation subsets
-    for ds in datasets:
-        ds.test_set()
-        ds.detect_patches(ds.test_path, ds.test_set, "best.pt")
+    # for ds in datasets:
+    #     ds.test_set()
+    #     ds.detect_patches(ds.test_path, ds.test_set, "best.pt")
 
     food201_dets = food201.get_patches("test", True)
     uecfoodpix_dets = uecfoodpix.get_patches("test", True)
@@ -410,4 +410,4 @@ def evaluate_pipeline():
 
 
 if __name__ == "__main__":
-    experiment_combined_dataset()
+    evaluate_pipeline()
