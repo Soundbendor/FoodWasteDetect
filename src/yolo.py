@@ -214,7 +214,7 @@ class ExperimentManager:
 
     def load_imgs(self, df: pd.DataFrame) -> pd.DataFrame:
         # load all the images
-        df["img_files"] = df.apply(Image.open, df["patch_pths"])
+        df["img_files"] = df["patch_pths"].apply(Image.open)
         valid_imgs = df["img_files"].apply(self._check_img, axis=1)
         return df[valid_imgs]
 
