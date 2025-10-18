@@ -399,7 +399,8 @@ def evaluate_pipeline():
                     # this sucks, from an efficiency perspective.
                     preds.remove(y_hat)
                     top5_preds.remove(top5)
-                elif y in top5_preds:
+                    break
+                elif y in top5:
                     top5_acc_score += 1
                     top5_preds.remove(top5)
                     break
