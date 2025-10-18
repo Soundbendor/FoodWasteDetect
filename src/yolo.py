@@ -329,8 +329,8 @@ def evaluate_pipeline():
         c = 0
         for y in labels:
             for y_hat in preds:
-                y_hat = [x.strip().lower() for x in y_hat]
-                if y.strip().lower() in y_hat:
+                y_hat_new = [x.strip().lower() for x in y_hat]
+                if y.strip().lower() in y_hat_new:
                     # Prediction matched once, remove from list
                     preds.remove(y_hat)
                     c += 1
