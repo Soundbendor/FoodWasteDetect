@@ -367,12 +367,13 @@ def evaluate_pipeline():
     # For each patch for that image
     # Classify the patch using CLIP
     # If patch class exists in known boxes, count towards accuracy
+    top5_acc_score = 0
     acc_score = 0
     total_patches = 1
     for img_name, dets_df in eval_group:
         label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
+        preds = []
         for _, row in dets_df.iterrows():
-            # TODO: update patch patch to point to cropped-detections
             pth = row["patch_pth"]
             pth = pth.replace("patches", "cropped-detections")
             try:
@@ -382,15 +383,25 @@ def evaluate_pipeline():
                 continue
             candidate_vecs = exp.db.query(None, query_vec)
             # todo: eval metric
-            prediction = exp.db.vote_classification(candidate_vecs)
+            prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
             print(f"DEBUG: {prediction}")
-            # TODO: compute mAP@50
-            # TODO: fix accuracy metric to improve accuracy
-            if any(label_boxes["class"].str.contains(prediction)):
-                acc_score += 1
+            preds.append(prediction)
+            if any([any(label_boxes["class"].str.contains(cls)) for cls in top5_classes]):
+                top5_acc_score += 1
             total_patches += 1
-        print(acc_score / total_patches)
-    print(acc_score / total_patches)
+        # compute accuracy score for this image
+        for y in label_boxes["class"]:
+            for y_hat in preds:
+                if y == y_hat:
+                    acc_score += 1
+                    # remove y from label_boxes
+                    # this sucks, from an efficiency perspective.
+                    preds.remove(y_hat)
+                    break
+
+        print(f"Top 5 Score: {top5_acc_score / total_patches}")
+        print(f"Top 1 Score: {acc_score / total_patches}")
+    print(top5_acc_score / total_patches)
 
 
 if __name__ == "__main__":

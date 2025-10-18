@@ -107,7 +107,8 @@ class VectorDB:
         votes = Counter([x.payload["class"] for x in search_result])  # type: ignore
         candidate = votes.most_common(1)[0]
         category = candidate[0]
-        return category
+        top5 = [x.payload["class"].strip() for x in search_result[:5]]
+        return category, top5
 
     # Returns (Accuracy, Similarity) where acc is binary 1-0
     def score(
