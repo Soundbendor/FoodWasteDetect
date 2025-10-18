@@ -280,10 +280,6 @@ def experiment_combined_dataset():
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
     datasets = [food201, uecfoodpix, foodseg103]
-    # Step 1: Get patches for all training datasets
-    ds_patches = []
-    for ds in datasets:
-        ds_patches.append(ds.get_patches("train", False))
 
     # Step 2: Compute instance embeddings
     exp = ExperimentManager(cfg)
