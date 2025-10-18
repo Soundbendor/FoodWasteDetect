@@ -279,9 +279,13 @@ def experiment_combined_dataset():
     uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
-    uecfoodpix.crop_patches("test")
-    foodseg103.crop_patches("validation")
+    datasets = [food201, uecfoodpix, foodseg103]
+    # Step 1: Get patches for all training datasets
+    ds_patches = []
+    for ds in datasets:
+        ds_patches.append(ds.get_patches("train", False))
 
+    # Step 2: Compute instance embeddings
     exp = ExperimentManager(cfg)
 
     start_id = 0
@@ -346,14 +350,14 @@ def evaluate_pipeline():
 
     # Each groupby: Dataframe of patches for a given image
     eval_group = eval_set[:1000].groupby("source_img")
-    # Each groupby: 
+    # Each groupby:
     label_group = labels.groupby("src_img")
     # Load all known boxes for each image
     # For each patch for that image
     # Classify the patch using CLIP
     # If patch class exists in known boxes, count towards accuracy
     acc_score = 0
-    total_patches = 0
+    total_patches = 1
     for img_name, dets_df in eval_group:
         label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
         for _, row in dets_df.iterrows():
@@ -375,9 +379,7 @@ def evaluate_pipeline():
             total_patches += 1
         print(acc_score / total_patches)
     print(acc_score / total_patches)
-    
-        
 
 
 if __name__ == "__main__":
-    evaluate_pipeline()
+    experiment_combined_dataset()
