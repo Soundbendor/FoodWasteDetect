@@ -215,6 +215,8 @@ class ExperimentManager:
         patch_df.index = patch_df.index.to_numpy() + start_idx
         # Split dataset into batches
         batches = np.array_split(patch_df, self.BATCH_SIZE)
+        # Confirm that database exists
+        self.db.make_collection()
         for patches in batches:
             if self.db.point_exists(patches.index[0]):
                 print("WARN: ID already exists, skipping...")
@@ -370,6 +372,7 @@ def evaluate_pipeline():
             prediction = exp.db.vote_classification(candidate_vecs)
             print(f"DEBUG: {prediction}")
             # TODO: compute mAP@50
+            # TODO: fix accuracy metric to improve accuracy
             if any(label_boxes["class"].str.contains(prediction)):
                 acc_score += 1
             total_patches += 1
