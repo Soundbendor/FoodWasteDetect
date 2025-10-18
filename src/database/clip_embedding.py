@@ -13,7 +13,7 @@ class CLIPEmbedding:
         )
 
     
-    def get_embedding_from_preloaded(self, imgs: List[Image]) -> torch.Tensor:
+    def get_embedding_from_preloaded(self, imgs: list) -> torch.Tensor:
         return self.model.encode(imgs)
 
     def get_embedding(self, img_names: List[str]) -> torch.Tensor:
