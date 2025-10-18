@@ -314,6 +314,29 @@ def experiment_combined_dataset():
 
 
 def evaluate_pipeline():
+    def update_top1(labels: list[str], preds: list[str]) -> int:
+        c = 0
+        for y in labels:
+            for y_hat in preds:
+                if y.strip().lower() == y_hat.strip().lower():
+                    # Prediction matched once, remove from list
+                    preds.remove(y_hat)
+                    c += 1
+                    break 
+        return c
+
+    def update_top5(labels: list[str], preds: list[list[str]]) -> int:
+        c = 0
+        for y in labels:
+            for y_hat in preds:
+                y_hat = [x.strip().lower() for x in y_hat]
+                if y.strip().lower() in y_hat:
+                    # Prediction matched once, remove from list
+                    preds.remove(y_hat)
+                    c += 1
+                    break 
+        return c
+
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # Step 1: Load all 3 datasets
@@ -390,21 +413,8 @@ def evaluate_pipeline():
             top5_preds.append(top5_classes)
             total_patches += 1
         # compute accuracy score for this image
-        for y in label_boxes["class"]:
-            for y_hat, top5 in zip(preds, top5_preds):
-                if y == y_hat:
-                    acc_score += 1
-                    top5_acc_score += 1
-                    # remove y from label_boxes
-                    # this sucks, from an efficiency perspective.
-                    preds.remove(y_hat)
-                    top5_preds.remove(top5)
-                    break
-                elif y in top5:
-                    top5_acc_score += 1
-                    top5_preds.remove(top5)
-                    break
-
+        acc_score += update_top1(label_boxes["class"], preds)
+        top5_acc_score = update_top5(label_boxes, top5_preds)
         print(f"Top 5 Score: {top5_acc_score / total_patches}")
         print(f"Top 1 Score: {acc_score / total_patches}")
     print(top5_acc_score / total_patches)
