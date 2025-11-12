@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from ultralytics import YOLO
 from PIL import Image
+from ultralytics import YOLO
 
 from data_wrappers.dataset import Dataset
 from data_wrappers.food201 import Food201
@@ -218,7 +218,6 @@ class ExperimentManager:
         valid_imgs = df["img_files"].apply(self._check_img)
         return df[valid_imgs]
 
-
     def update_vecdb(self, ds: Dataset, subset: str, start_idx: int) -> int:
         # Load patches for dataset
         patch_df = ds.get_patches(subset, False)
@@ -305,7 +304,7 @@ def experiment_combined_dataset():
 
     food201_test_patch = food201.get_patches("test", False)[:1000]
     uecfoodpix_test_patch = uecfoodpix.get_patches("test", False)[:1000]
-    foodseg103_test_patch = foodseg103.get_patches("validation", False)[:1000]
+    foodseg103_test_patch = foodseg103.get_patches("test", False)[:1000]
     eval_set = pd.concat(
         [food201_test_patch, uecfoodpix_test_patch, foodseg103_test_patch],
         ignore_index=True,
@@ -322,7 +321,7 @@ def evaluate_pipeline():
                     # Prediction matched once, remove from list
                     preds.remove(y_hat)
                     c += 1
-                    break 
+                    break
         return c
 
     def update_top5(labels: list[str], preds: list[list[str]]) -> int:
@@ -334,7 +333,7 @@ def evaluate_pipeline():
                     # Prediction matched once, remove from list
                     preds.remove(y_hat)
                     c += 1
-                    break 
+                    break
         return c
 
     args = parse_args()
