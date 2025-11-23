@@ -136,6 +136,6 @@ def visualize_annotations(ds_path: str):
 
 if __name__ == "__main__":
     args = parse_args()
-    visualize_annotations(args.dataset_path)
+    # visualize_annotations(args.dataset_path)
     # for ds_split in os.listdir(args.dataset_path):
-    #     main(os.path.join(args.dataset_path, ds_split))
+    main(args.dataset_path)

@@ -1,16 +1,19 @@
 llm: gemma3:27b
 embed_model: clip-vIT-B-32
-embed_size: 768
+embed_size: 512
 reranker_model: null
-qdrant_url: cn-m-1.hpc.engr.oregonstate.edu:6333
-collection_name: food_clip
+qdrant_url: dgx2-2.hpc.engr.oregonstate.edu:6333
+collection_name: food_clip_combined
 
 paths:
   intern: deps/InternVL2_5-8B-MPO
-  dataset: /nfs/stak/users/beerya/soundbendor/food_cap_datasets/FoodX-251
   embed_model_save_path: assets/embed_models/clip/final
   dictionary: assets/descriptor_dictionary.json
   anchor_path: assets/foodx251_captions.txt
+  food201: /nfs/stak/users/beerya/soundbendor/food_datasets/food201/data
+  combined: /nfs/stak/users/beerya/soundbendor/food_datasets/combined_food_seg
+  uecfoodpix: /nfs/stak/users/beerya/soundbendor/food_datasets/uecfoodpix/UECFOODPIXCOMPLETE/data/UECFoodPIXCOMPLETE
+  foodseg103: /nfs/stak/users/beerya/soundbendor/food_datasets/foodseg103/data
 
 settings:
   eval_samples: 1000

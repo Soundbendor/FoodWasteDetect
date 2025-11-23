@@ -237,7 +237,9 @@ class ExperimentManager:
             ]
             # Filters out invalid images, returns updated dataframe
             patches = self.load_imgs(patches)
-            vectors = self.embedder.get_embedding_from_preloaded(patches["img_files"])
+            vectors = self.embedder.get_embedding_from_preloaded(
+                list(patches["img_files"])
+            )
             metadata = {
                 "img_path": pd.Series(patches["patch_pths"]),
                 "src_img": patches["src_img"].astype(object),
@@ -255,7 +257,10 @@ class ExperimentManager:
     def evaluate_model(self, eval_set: pd.DataFrame) -> EvalMetric:
         metric = EvalMetric()
         for i, row in eval_set.iterrows():
-            query_vec = self.embedder.get_embedding([row["patch_pth"]])[0]
+            try:
+                query_vec = self.embedder.get_embedding([row["patch_pth"]])[0]
+            except Exception as e:
+                continue
             candidate_vecs = self.db.query(None, query_vec)
             score, confidence, prediction = self.db.score(
                 candidate_vecs, row["class"], "voting"
@@ -275,10 +280,31 @@ class ExperimentManager:
 def finetune_yolov11():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
-    combined_pth = cfg["paths"]["combined"]
-    model = YOLO("yolv11x")
-    metrics = model.train(data=os.path.join(combined_pth, "dataset.yaml"))
+    combined_pth = cfg["paths"]["dataset"]
+    model = YOLO("best.pt")
+    metrics = model.val(data=os.path.join(combined_pth, "dataset.yaml"))
     print(metrics.box.map)
+    print(metrics)
+
+
+def experiment_single_dataset():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    # ds_path = cfg["paths"]["foodseg103"]
+    ds_path = cfg["paths"]["uecfoodpix"]
+    # ds_path = cfg["paths"]["food201"]
+
+    # ds = Food201(root=ds_path)
+    ds = UECFoodPix(root=ds_path)
+    # ds = FoodSeg103(root=ds_path)
+    exp = ExperimentManager(cfg)
+
+    # Step 1: Generate training embeddings
+
+    eval_set = ds.get_patches("test", False)[:1000]
+
+    # exp.update_vecdb(ds, "train", 0)
+    exp.evaluate_model(eval_set)
 
 
 def experiment_combined_dataset():
@@ -300,7 +326,8 @@ def experiment_combined_dataset():
 
     start_id = 0
     for ds in [food201, uecfoodpix, foodseg103]:
-        start_id = exp.update_vecdb(ds, "train", start_id)
+        # start_id = exp.update_vecdb(ds, "train", start_id)
+        pass
 
     food201_test_patch = food201.get_patches("test", False)[:1000]
     uecfoodpix_test_patch = uecfoodpix.get_patches("test", False)[:1000]
@@ -348,24 +375,33 @@ def evaluate_pipeline():
     uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
-    datasets = [food201, uecfoodpix, foodseg103]
+    # TODO: here
+    # datasets = [food201, uecfoodpix, foodseg103]
+    datasets = [foodseg103]
 
     # Step 2: Use fine-tuned YOLO to extract patches for each dataset
 
+    exp = ExperimentManager(cfg)
+
+    start_id = 0
+    # for ds in [foodseg103]:
+    # start_id = exp.update_vecdb(ds, "train", start_id)
+
     # Pre-load validation subsets
     # for ds in datasets:
-    #     ds.test_set()
-    #     ds.detect_patches(ds.test_path, ds.test_set, "best.pt")
+    # ds.test_set()
+    # ds.detect_patches(ds.test_path, ds.test_set, "best.pt")
 
+    # TODO: here
     food201_dets = food201.get_patches("test", True)
-    uecfoodpix_dets = uecfoodpix.get_patches("test", True)
-    foodseg103_dets = foodseg103.get_patches("test", True)
+    # uecfoodpix_dets = uecfoodpix.get_patches("test", True)
+    # foodseg103_dets = foodseg103.get_patches("test", True)
 
     # Step 3: Predict det categories using CLIP
 
-    exp = ExperimentManager(cfg)
+    # TODO: here
     eval_set = pd.concat(
-        [food201_dets, uecfoodpix_dets, foodseg103_dets],
+        [food201_dets],
         ignore_index=True,
     )
     print(eval_set)
@@ -375,16 +411,20 @@ def evaluate_pipeline():
     food201_test_patch = food201.get_patches("test", False)
     uecfoodpix_test_patch = uecfoodpix.get_patches("test", False)
     foodseg103_test_patch = foodseg103.get_patches("test", False)
+    # TODO: here
     labels = pd.concat(
-        [food201_test_patch, uecfoodpix_test_patch, foodseg103_test_patch],
+        [food201_test_patch],
         ignore_index=True,
     )
     print(labels)
 
     # Each groupby: Dataframe of patches for a given image
-    eval_group = eval_set[:1000].groupby("source_img")
+    eval_set["source_img"] = eval_set["source_img"].astype(str)
+    eval_group = eval_set.sample(frac=1)[:1000].groupby("source_img")
     # Each groupby:
+    labels["src_img"] = labels["src_img"].astype(str)
     label_group = labels.groupby("src_img")
+    print(label_group.groups.keys())
     # Load all known boxes for each image
     # For each patch for that image
     # Classify the patch using CLIP
@@ -393,13 +433,18 @@ def evaluate_pipeline():
     acc_score = 0
     total_patches = 1
     for img_name, dets_df in eval_group:
-        label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
+        try:
+            label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
+        except Exception as e:
+            print("Key not found in label set")
+            continue
         preds = []
         top5_preds = []
         for _, row in dets_df.iterrows():
             pth = row["patch_pth"]
             pth = pth.replace("patches", "cropped-detections")
             try:
+                print(pth)
                 query_vec = exp.embedder.get_embedding([pth])[0]
             except FileNotFoundError:
                 print("Error! File not found.")

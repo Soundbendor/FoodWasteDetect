@@ -1,9 +1,8 @@
 #!/bin/bash
-#SBATCH -w cn-m-1
-#SBATCH -p soundbendor
-#SBATCH -A soundbendor
+#SBATCH -p dgx2
+#SBATCH -A eecs
 #SBATCH --job-name=qdrant_server
-#SBATCH -t 0
+#SBATCH -t 1-00:00:00
 #SBATCH -c 2
 #SBATCH --mem=20G
 #SBATCH --gres=gpu:1
