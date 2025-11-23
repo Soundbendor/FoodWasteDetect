@@ -431,7 +431,8 @@ def evaluate_pipeline():
     # If patch class exists in known boxes, count towards accuracy
     top5_acc_score = 0
     acc_score = 0
-    total_patches = 1
+    total_precision = 1
+    total_recall = 1
     for img_name, dets_df in eval_group:
         try:
             label_boxes = label_group.get_group(os.path.splitext(img_name)[0])
@@ -455,13 +456,15 @@ def evaluate_pipeline():
             print(f"DEBUG: {prediction}")
             preds.append(prediction)
             top5_preds.append(top5_classes)
-            total_patches += 1
         # compute accuracy score for this image
+        total_precision += len(dets_df)
+        total_recall += len(label_boxes)
         acc_score += update_top1(label_boxes["class"], preds)
         top5_acc_score += update_top5(label_boxes["class"], top5_preds)
-        print(f"Top 5 Score: {top5_acc_score / total_patches}")
-        print(f"Top 1 Score: {acc_score / total_patches}")
-    print(top5_acc_score / total_patches)
+        print(f"Top 5 Score: {top5_acc_score / total_precision}")
+        print(f"Top 1 Score: {acc_score / total_precision}")
+        print(f"Recall: {acc_score / total_recall}")
+    print(top5_acc_score / total_precision)
 
 
 if __name__ == "__main__":
