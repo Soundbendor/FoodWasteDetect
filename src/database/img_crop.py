@@ -28,7 +28,7 @@ class ImageCropper:
         self.model.crop_dir = os.path.join(
             os.path.dirname(ds_path), "cropped-detections"
         )
-        prev_total_crops = 0
+        prev_total_crops = 1
         # WARN: Due to new changes, this interface is now incompatible with FoodX-251.
         for img_name in subset["images"]:
             img_pth = os.path.join(ds_path, "images", img_name)
