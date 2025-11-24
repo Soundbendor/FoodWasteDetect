@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from pprint import pprint
 from typing import Callable
 
@@ -55,7 +56,9 @@ class ImageCropper:
                     cname = result.names[int(box.cls)]
                     basename = os.path.basename(result.path)
                     fname = os.path.join(crop_dir, f"{basename}_crop_{idx}_{cname}")
-                    save_one_box(box.xyxy, result.orig_img.copy(), file=fname, BGR=True)
+                    save_one_box(
+                        box.xyxy, result.orig_img.copy(), file=Path(fname), BGR=True
+                    )
                     record = {
                         "patch_name": fname,
                         "source_img": basename,
