@@ -38,13 +38,12 @@ class ImageCropper:
             os.path.join(ds_path, "images", img_name) for img_name in subset["images"]
         ]
         # result should be list of generators, each one representing a new batch
-        pred_generators = list(
-            map(lambda x: self.model(x, stream=True), np.array_split(img_pths, 100))
-        )
+        pred_generators = list(np.array_split(img_pths, 100))
 
         # TODO: Extract each patch given bounding box coords and save it locally.
         for batch in pred_generators:
-            for result in batch:
+            batch_results = self.model(batch, stream=True)
+            for result in batch_results:
                 # Save the annotated original image and text label.
                 result.save(filename=os.path.join(yolo_draws, result.path))
                 result.save_txt(filename=os.path.join(yolo_labels, result.path))
