@@ -2,9 +2,10 @@ import os
 from pprint import pprint
 from typing import Callable
 
-import cv2
+import numpy as np
 import pandas as pd
 from ultralytics import YOLO
+from ultralytics.utils.plotting import save_one_box
 
 
 class ImageCropper:
@@ -27,31 +28,43 @@ class ImageCropper:
         ds_path = os.path.join(self.ds.root, subset_dirname)
         # Update path to save crops
         crop_dir = os.path.join(os.path.dirname(ds_path), "cropped-detections")
+        yolo_draws = os.path.join(os.path.dirname(ds_path), "yolo-draws")
+        yolo_labels = os.path.join(os.path.dirname(ds_path), "yolo-txts")
+        os.makedirs(yolo_draws, exist_ok=True)
+        os.makedirs(yolo_labels, exist_ok=True)
 
         # TODO: Pass batch of image paths to YOLO
         img_pths = [
             os.path.join(ds_path, "images", img_name) for img_name in subset["images"]
         ]
-        results = self.model(img_pths, stream=True)
+        # result should be list of generators, each one representing a new batch
+        pred_generators = list(
+            map(lambda x: self.model(x, stream=True), np.array_split(img_pths, 100))
+        )
 
         # TODO: Extract each patch given bounding box coords and save it locally.
-        for result in results:
-            # Save the cropped predictions for figure creation.
-            result.save(filename="")
-            # Save the cropped detection
-            # TODO: figure out what the names of these cropped detections are
-            result.save_crop(crop_dir)
-            for box in result.boxes:
-                record = {
-                    "patch_name": "TODO.jpg",
-                    "source_img": result.path,
-                    "conf": box.conf,
-                    "xyxy": box.xyxy,
-                    # TODO: should we save class ID or string?
-                    "class_id": box.cls,
-                }
-                pprint(record)
-                records.append(record)
+        for batch in pred_generators:
+            for result in batch:
+                # Save the annotated original image and text label.
+                result.save(filename=os.path.join(yolo_draws, result.path))
+                result.save_txt(filename=os.path.join(yolo_labels, result.path))
+                # Save detections as separate cropped imgs
+                for idx, box in enumerate(result.boxes):
+                    # Save detection img in dets_pth
+                    cname = result.names[int(box.cls)]
+                    basename = os.path.basename(result.path)
+                    fname = os.path.join(crop_dir, f"{basename}_crop_{idx}_{cname}")
+                    save_one_box(box.xyxy, result.orig_img.copy(), file=fname, BGR=True)
+                    record = {
+                        "patch_name": fname,
+                        "source_img": basename,
+                        "conf": box.conf,
+                        "xyxy": box.xyxy,
+                        "class_id": box.cls,
+                        "class_name": cname,
+                    }
+                    pprint(record)
+                    records.append(record)
 
         # prev_total_crops = 1
         # # WARN: Due to new changes, this interface is now incompatible with FoodX-251.
@@ -72,6 +85,6 @@ class ImageCropper:
         #         records.append(record)
         #     prev_total_crops = self.model.crop_idx
         #     print(f"Cropped Images: {results.total_crop_objects}")
-        # df = pd.DataFrame.from_records(records)
+        df = pd.DataFrame.from_records(records)
         df_path = os.path.join(self.ds.root, subset_dirname, "dets.csv")
         df.to_csv(df_path)
