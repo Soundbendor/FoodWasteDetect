@@ -65,9 +65,9 @@ class ImageCropper:
                         "patch_name": os.path.basename(fpth),
                         "patch_pth": fpth,
                         "source_img": src_img,
-                        "conf": box.conf,
-                        "xyxy": box.xyxy,
-                        "class_id": box.cls,
+                        "conf": float(box.conf),
+                        "xyxy": box.xyxy.tolist(),
+                        "class_id": int(box.cls),
                         "class_name": cname,
                     }
                     pprint(record)
