@@ -46,22 +46,24 @@ class ImageCropper:
             batch_results = self.model(list(batch), stream=True)
             for result in batch_results:
                 # Save the annotated original image and text label.
-                result.save(filename=os.path.join(yolo_draws, result.path))
+                src_img = os.path.basename(result.path)
+                basename = os.path.splitext(src_img)[0]
+                result.save(filename=os.path.join(yolo_draws, basename))
                 result.save_txt(
-                    txt_file=os.path.join(yolo_labels, result.path), save_conf=True
+                    txt_file=os.path.join(yolo_labels, f"basename.txt"), save_conf=True
                 )
                 # Save detections as separate cropped imgs
                 for idx, box in enumerate(result.boxes):
                     # Save detection img in dets_pth
                     cname = result.names[int(box.cls)]
-                    basename = os.path.basename(result.path)
-                    fname = os.path.join(crop_dir, f"{basename}_crop_{idx}_{cname}")
+                    fpth = os.path.join(crop_dir, f"{basename}_crop_{idx}_{cname}.jpg")
                     save_one_box(
-                        box.xyxy, result.orig_img.copy(), file=Path(fname), BGR=True
+                        box.xyxy, result.orig_img.copy(), file=Path(fpth), BGR=True
                     )
                     record = {
-                        "patch_name": fname,
-                        "source_img": basename,
+                        "patch_name": os.path.basename(fpth),
+                        "patch_pth": fpth,
+                        "source_img": src_img,
                         "conf": box.conf,
                         "xyxy": box.xyxy,
                         "class_id": box.cls,
