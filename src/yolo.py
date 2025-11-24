@@ -467,5 +467,21 @@ def evaluate_pipeline():
     print(top5_acc_score / total_precision)
 
 
+def load_dets():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+
+    food201 = Food201(root=food201_pth)
+    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
+    foodseg103 = FoodSeg103(root=foodseg103_pth)
+
+    for ds in [food201]:
+        ds.detect_patches(ds.test_path, ds.test_set, model_pth="best.pt")
+
+
 if __name__ == "__main__":
-    evaluate_pipeline()
+    load_dets()
