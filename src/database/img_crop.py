@@ -48,9 +48,10 @@ class ImageCropper:
                 # Save the annotated original image and text label.
                 src_img = os.path.basename(result.path)
                 basename = os.path.splitext(src_img)[0]
-                result.save(filename=os.path.join(yolo_draws, basename, ".png"))
+                result.save(filename=os.path.join(yolo_draws, f"{basename}.jpg"))
                 result.save_txt(
-                    txt_file=os.path.join(yolo_labels, f"basename.txt"), save_conf=True
+                    txt_file=os.path.join(yolo_labels, f"{basename}.txt"),
+                    save_conf=True,
                 )
                 # Save detections as separate cropped imgs
                 for idx, box in enumerate(result.boxes):
