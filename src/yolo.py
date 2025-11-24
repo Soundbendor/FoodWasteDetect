@@ -376,8 +376,8 @@ def evaluate_pipeline():
     foodseg103 = FoodSeg103(root=foodseg103_pth)
 
     # TODO: here
-    # datasets = [food201, uecfoodpix, foodseg103]
-    datasets = [foodseg103]
+    datasets = [food201, uecfoodpix, foodseg103]
+    # datasets = [food201, uecfoodpix]
 
     # Step 2: Use fine-tuned YOLO to extract patches for each dataset
 
@@ -394,14 +394,14 @@ def evaluate_pipeline():
 
     # TODO: here
     food201_dets = food201.get_patches("test", True)
-    # uecfoodpix_dets = uecfoodpix.get_patches("test", True)
-    # foodseg103_dets = foodseg103.get_patches("test", True)
+    uecfoodpix_dets = uecfoodpix.get_patches("test", True)
+    foodseg103_dets = foodseg103.get_patches("test", True)
 
     # Step 3: Predict det categories using CLIP
 
     # TODO: here
     eval_set = pd.concat(
-        [food201_dets],
+        [uecfoodpix_dets, food201_dets, foodseg103_dets],
         ignore_index=True,
     )
     print(eval_set)
@@ -413,7 +413,7 @@ def evaluate_pipeline():
     foodseg103_test_patch = foodseg103.get_patches("test", False)
     # TODO: here
     labels = pd.concat(
-        [food201_test_patch],
+        [uecfoodpix_test_patch, food201_test_patch, foodseg103_test_patch],
         ignore_index=True,
     )
     print(labels)
