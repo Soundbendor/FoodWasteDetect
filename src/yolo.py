@@ -538,7 +538,7 @@ def baseline_yolo_experiment():
     print(label_group.groups.keys())
 
     # Initialize metrics class
-    n_classes = labels["class_id"].max()
+    n_classes = labels["class_id"][labels["class_id"].map(type) == int].max()
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
     precision, recall = metrics.get_pr()
