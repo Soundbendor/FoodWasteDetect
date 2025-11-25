@@ -504,10 +504,12 @@ def baseline_yolo_experiment():
     datasets = [food201, uecfoodpix, foodseg103]
 
     # Load detections from YOLO
-    preds_set = [ds.get_patches("test", True) for ds in datasets]
-    # TODO: set dataset as column value here
+    preds_set = []
+    for ds in datasets:
+        df = ds.get_patches("test", True)
+        df["source_img"] = df.apply(lambda x: f"{ds.name}_{x["src_img"]}")
+        preds_set.append(df)
 
-    # WARN: Not sure these are using the same class indices as the joint dataset
     preds = pd.concat(preds_set, ignore_index=True)
     print(preds)
 
@@ -519,6 +521,7 @@ def baseline_yolo_experiment():
         # Invert classmap to work as {name: id}
         cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
         df["dataset"] = ds.name
+        df["src_img"] = df.apply(lambda x: f"{ds.name}_{x["src_img"]}")
         df["class_id"] = df.apply(lambda x: cmap[x["class"]], axis=1)
         gt_set.append(df)
     labels = pd.concat(gt_set, ignore_index=True)
