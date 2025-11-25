@@ -132,7 +132,7 @@ class ExperimentResult:
             # WARN: We might be artificially inflating scores here
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
-            for idx, box in enumerate(gt_boxes.values()):
+            for idx, box in enumerate(gt_boxes.values):
                 gt.append([*box["box_coords"], label_ids[idx], 0, 0])
             for pred in preds_df:
                 preds.append([*pred["xyxy"], pred["class_id"], pred["conf"]])
