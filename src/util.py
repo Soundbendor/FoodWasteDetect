@@ -37,8 +37,8 @@ class ExperimentResult:
         self.truths = truths
         self.total_acc_count = 0
         self.ds_map = {
-            "foodseg103": pd.read_csv("util/foodseg103_map.csv", index_col=0),
-            "uecfoodpix": pd.read_csv("util/uec_map.csv", index_col=0),
+            "foodseg103": pd.read_csv("src/util/foodseg103_map.csv", index_col=0),
+            "uecfoodpix": pd.read_csv("src/util/uec_map.csv", index_col=0),
         }
 
     def map_class_index(self, class_id: int, ds_name: str) -> int:
