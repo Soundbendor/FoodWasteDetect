@@ -158,10 +158,10 @@ class ExperimentResult:
             for idx, pred in preds_df.iterrows():
                 # [x1, y1, x2, y2, label_id, confidence]
                 preds.append(
-                    [*ast.literal_eval(pred["xyxy"]), pred["class_id"], pred["conf"]]
+                    [*ast.literal_eval(pred["xyxy"])[0], pred["class_id"], pred["conf"]]
                 )
 
-            used = [False] * len(preds)
+            used = [False] * len(gt)
             for detection in preds:
                 matched = False
                 for idx, a in enumerate(gt):
