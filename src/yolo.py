@@ -517,7 +517,7 @@ def baseline_yolo_experiment():
     for ds in datasets:
         df = ds.get_patches("test", False)
         df["dataset"] = ds.name
-        df["class_id"] = df.apply(lambda x: ds.cmap[x["class_name"]])
+        df["class_id"] = df.apply(lambda x: ds.cmap[x["class"]], axis=0)
         gt_set.append(df)
     labels = pd.concat(gt_set, ignore_index=True)
     print(labels)
