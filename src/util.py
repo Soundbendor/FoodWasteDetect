@@ -90,9 +90,9 @@ class ExperimentResult:
             pred_classes = preds_df["class_id"]
             img_p, img_r = self._get_img_pr(list(gt_boxes["label_ids"]), pred_classes)
             print(f"DEBUG - Precision: {img_p}, Recall: {img_r}")
-            sum_p += img_p
-            sum_r += img_r
-        return (sum_p / len(self.preds), sum_r / len(self.preds))
+            sum_p += img_p / len(pred_classes)
+            sum_r += img_r / len(gt_boxes)
+        return (sum_p, sum_r)
 
     def get_map50(self) -> float:
         """
