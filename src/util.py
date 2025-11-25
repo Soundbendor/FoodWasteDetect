@@ -113,7 +113,7 @@ class ExperimentResult:
             sum_r.append(img_r)
         return (np.mean(sum_p), np.mean(sum_r))
 
-    def new_map50(self, iou_threshold=0.5) -> float:
+    def new_map50(self, iou_threshold=0.5) -> tuple[float, float, float]:
 
         def unpack_gt_box(coords: str) -> list[int]:
             return list(map(int, coords[1:-1].split()))
@@ -134,6 +134,8 @@ class ExperimentResult:
             return inter_area / union_area
 
         aps = []
+        pre = []
+        rec = []
         for img_name, preds_df in self.preds:
             tp = 0
             fp = 0
@@ -180,7 +182,13 @@ class ExperimentResult:
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0
             recall = tp / len(gt) if len(gt) > 0 else 0
             aps.append(precision * recall)
-        return float(np.mean(aps) if len(aps) > 0 else 0)
+            pre.append(precision)
+            rec.append(recall)
+        return (
+            float(np.mean(aps) if len(aps) > 0 else 0),
+            float(np.mean(pre)),
+            float(np.mean(rec)),
+        )
 
     # def get_map50(self) -> float:
     #     """
