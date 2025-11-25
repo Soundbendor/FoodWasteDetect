@@ -87,7 +87,7 @@ class ExperimentResult:
                 continue
 
             gt_boxes["label_ids"] = gt_boxes.apply(
-                lambda x: self.map_class_index(x["class_id"], x["dataset"])
+                lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=0
             )
             pred_classes = preds_df["class_id"]
             img_p, img_r = self._get_img_pr(list(gt_boxes["label_ids"]), pred_classes)

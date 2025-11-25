@@ -488,8 +488,6 @@ def load_dets():
 def baseline_yolo_experiment():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
-    # TODO: YOLO model config should be passed in via .yml conf
-    model = YOLO("best.pt")
     # load dataset
     args = parse_args()
     cfg = parse_cfg(args.config_file)
@@ -519,7 +517,7 @@ def baseline_yolo_experiment():
     for ds in datasets:
         df = ds.get_patches("test", False)
         df["dataset"] = ds.name
-        df["class_id"] = df.apply(lambda x: ds.cmap[x["class"]])
+        df["class_id"] = df.apply(lambda x: ds.cmap[x["class_name"]])
         gt_set.append(df)
     labels = pd.concat(gt_set, ignore_index=True)
     print(labels)
