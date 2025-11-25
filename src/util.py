@@ -40,7 +40,7 @@ class ExperimentResult:
         self.total_acc_count = 0
         self.ds_map = {
             "foodseg103": pd.read_csv("util/foodseg103_map.csv", index_col=0),
-            "uecfoodpix": pd.read_csv("util/uec_map.csv", index_col=0)
+            "uecfoodpix": pd.read_csv("util/uec_map.csv", index_col=0),
         }
 
     def map_class_index(self, class_id: int, ds_name: str) -> int:
@@ -49,7 +49,6 @@ class ExperimentResult:
         """
         if ds_name == "food201":
             return class_id
-        idx = 
         return self.ds_map[ds_name].iloc[class_id]["new_id"]
 
     def get_gts(self):
@@ -87,8 +86,10 @@ class ExperimentResult:
                 print(f"File {img_name} not found in the label set!")
                 continue
 
-            gt_boxes["label_ids"] = gt_boxes.apply(lambda x: self.map_class_index(x["class_id"], x["dataset"]))
-            pred_classes = preds_df["class_id"]  
+            gt_boxes["label_ids"] = gt_boxes.apply(
+                lambda x: self.map_class_index(x["class_id"], x["dataset"])
+            )
+            pred_classes = preds_df["class_id"]
             img_p, img_r = self._get_img_pr(list(gt_boxes["label_ids"]), pred_classes)
             print(f"DEBUG - Precision: {img_p}, Recall: {img_r}")
             sum_p += img_p
