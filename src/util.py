@@ -117,6 +117,15 @@ class ExperimentResult:
         """
         Calculate mAP-50 across all predictions
         """
+
+        def unpack_gt_box(coords: str) -> list[int]:
+            ret = []
+            for char in coords:
+                if char == "[" or char == "]" or char.isspace():
+                    continue
+                ret.append(int(char))
+            return ret
+
         gt = []
         preds = []
         for img_name, preds_df in self.preds:
@@ -134,7 +143,7 @@ class ExperimentResult:
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
             for idx, box in gt_boxes.iterrows():
-                gt.append([*ast.literal_eval(box["box_coords"]), label_ids[idx], 0, 0])
+                gt.append([*unpack_gt_box(box["box_coords"]), label_ids[idx], 0, 0])
             for idx, pred in preds_df.iterrows():
                 preds.append(
                     [*ast.literal_eval(pred["xyxy"]), pred["class_id"], pred["conf"]]
