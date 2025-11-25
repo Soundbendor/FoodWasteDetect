@@ -88,7 +88,9 @@ class ExperimentResult:
                 lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
             )
             pred_classes = preds_df["class_id"]
-            img_p, img_r = self._get_img_pr(list(gt_boxes["label_ids"]), pred_classes)
+            img_p, img_r = self._get_img_pr(
+                list(gt_boxes["label_ids"]), list(pred_classes)
+            )
             print(f"DEBUG - Precision: {img_p}, Recall: {img_r}")
             sum_p += img_p / len(pred_classes)
             sum_r += img_r / len(gt_boxes)
