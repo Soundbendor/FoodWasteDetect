@@ -521,7 +521,7 @@ def baseline_yolo_experiment():
         # Invert classmap to work as {name: id}
         cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
         df["dataset"] = ds.name
-        df["src_img"] = df.apply(lambda x: ds.name + "_" + x["src_img"])
+        df["src_img"] = df.apply(lambda x: ds.name + "_" + x["src_img"], axis=1)
         df["class_id"] = df.apply(lambda x: cmap[x["class"]], axis=1)
         gt_set.append(df)
     labels = pd.concat(gt_set, ignore_index=True)
