@@ -31,8 +31,6 @@ class EvalMetric:
 class ExperimentResult:
     # INFO: Expects preds, results saved in df, loaded and grouped by file name
     def __init__(self, preds: DataFrameGroupBy, truths: DataFrameGroupBy):
-        if not len(preds) == len(truths):
-            raise RuntimeError("Prediction and ground truth lists not of same size")
         # Each element of (preds, truths) represents 1 image
         # Contains
         self.preds = preds
