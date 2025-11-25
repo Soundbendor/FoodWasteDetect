@@ -58,6 +58,7 @@ class ExperimentResult:
 
     def _get_img_pr(self, labels: list[int], preds: list[int]) -> tuple[float, float]:
         c = 0
+        n_preds = len(preds)
         if len(preds) == 0:
             if len(labels) == 0:
                 return (1, 1)
@@ -71,7 +72,7 @@ class ExperimentResult:
                     break
 
         # precision: number of correct detections / number of total detections
-        p = c / len(preds)
+        p = c / n_preds
         # recall: number of correct detections / number of ground truth labels
         r = c / len(labels)
         return (p, r)
