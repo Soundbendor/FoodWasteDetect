@@ -15,7 +15,7 @@ class FoodSeg103(SegDataset):
         self.root = root
         self.cmap = self.get_class_labels()
 
-    def get_class_labels(self) -> dict:
+    def get_class_labels(self) -> pd.Series:
         # Load id2label.json
         with open(os.path.join(self.root, "id2label.json"), "r") as label_map:
             labels = json.load(label_map)

@@ -15,7 +15,7 @@ class UECFoodPix(SegDataset):
         self.root = root
         self.cmap = self.get_class_labels()
 
-    def get_class_labels(self) -> dict:
+    def get_class_labels(self) -> pd.Series:
         # Load category.txt
         df = pd.read_csv(
             os.path.join(self.root, "category.txt"), sep="\t", index_col="id"
