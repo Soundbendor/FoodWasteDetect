@@ -99,6 +99,7 @@ class ExperimentResult:
         """
         Calculate mAP-50 across all predictions
         """
+        pass
         # Needs list of detections with properties
         # bbox: List[xmin, ymin, xmax, ymax]
         # class_id:
