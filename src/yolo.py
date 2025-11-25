@@ -507,7 +507,7 @@ def baseline_yolo_experiment():
     preds_set = []
     for ds in datasets:
         df = ds.get_patches("test", True)
-        df["source_img"] = df.apply(lambda x: ds.name + "_" + x["src_img"], axis=1)
+        df["source_img"] = df.apply(lambda x: ds.name + "_" + x["source_img"], axis=1)
         preds_set.append(df)
 
     preds = pd.concat(preds_set, ignore_index=True)
