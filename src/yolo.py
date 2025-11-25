@@ -507,7 +507,9 @@ def baseline_yolo_experiment():
     preds_set = []
     for ds in datasets:
         df = ds.get_patches("test", True)
-        df["source_img"] = df.apply(lambda x: ds.name + "_" + x["source_img"], axis=1)
+        df["source_img"] = df.apply(
+            lambda x: ds.name + "_" + str(x["source_img"]), axis=1
+        )
         preds_set.append(df)
 
     preds = pd.concat(preds_set, ignore_index=True)
@@ -521,7 +523,7 @@ def baseline_yolo_experiment():
         # Invert classmap to work as {name: id}
         cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
         df["dataset"] = ds.name
-        df["src_img"] = df.apply(lambda x: ds.name + "_" + x["src_img"], axis=1)
+        df["src_img"] = df.apply(lambda x: ds.name + "_" + str(x["src_img"]), axis=1)
         df["class_id"] = df.apply(lambda x: cmap[x["class"]], axis=1)
         gt_set.append(df)
     labels = pd.concat(gt_set, ignore_index=True)
