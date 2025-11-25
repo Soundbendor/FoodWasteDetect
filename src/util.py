@@ -31,12 +31,15 @@ class EvalMetric:
 
 class ExperimentResult:
     # INFO: Expects preds, results saved in df, loaded and grouped by file name
-    def __init__(self, preds: DataFrameGroupBy, truths: DataFrameGroupBy):
+    def __init__(
+        self, preds: DataFrameGroupBy, truths: DataFrameGroupBy, n_classes: int
+    ):
         # Each element of (preds, truths) represents 1 image
         # Contains
         self.preds = preds
         self.truths = truths
         self.total_acc_count = 0
+        self.n_classes = n_classes
         self.ds_map = {
             "foodseg103": pd.read_csv("src/util/foodseg103_map.csv", index_col=0),
             "uecfoodpix": pd.read_csv("src/util/uec_map.csv", index_col=0),
@@ -94,10 +97,16 @@ class ExperimentResult:
             label_ids = gt_boxes.apply(
                 lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
             )
+            # WARN: We might be artificially inflating scores here
+            # by ignoring cases where YOLO incorrectly classifies a detection
+            # as a background result.
+            # Additionally, the presence of "unknown" classifications indicates an
+            # issue with our YOLO model.
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
             pred_classes = preds_df["class_id"]
             img_p, img_r = self._get_img_pr(list(label_ids), list(pred_classes))
+
             print(f"DEBUG - Precision: {img_p}, Recall: {img_r}")
             sum_p.append(img_p)
             sum_r.append(img_r)
@@ -107,11 +116,44 @@ class ExperimentResult:
         """
         Calculate mAP-50 across all predictions
         """
-        pass
-        # Needs list of detections with properties
-        # bbox: List[xmin, ymin, xmax, ymax]
-        # class_id:
-        # confidence
+        gt = []
+        preds = []
+        for img_name, preds_df in self.preds:
+            # Get matching ground truth boxes
+            try:
+                gt_boxes = self.truths.get_group(os.path.splitext(img_name)[0])
+            except Exception:
+                print(f"File {img_name} not found in the label set!")
+                continue
+
+            label_ids = gt_boxes.apply(
+                lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
+            )
+            # WARN: We might be artificially inflating scores here
+            if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
+                continue
+            for idx, box in enumerate(gt_boxes):
+                gt.append([*box["box_coords"], label_ids[idx], 0, 0])
+            for pred in preds_df:
+                preds.append([*pred["xyxy"], pred["class_id"], pred["conf"]])
+
+        metric_fn = MetricBuilder.build_evaluation_metric(
+            "map_2d", async_mode=True, num_classes=self.n_classes
+        )
+        metric_fn.add(np.array(preds), np.array(gt))
+        print(
+            f"VOC PASCAL mAP: {metric_fn.value(iou_thresholds=0.5, recall_thresholds=np.arange(0., 1.1, 0.1))['mAP']}"
+        )
+
+        # compute PASCAL VOC metric at the all points
+        print(
+            f"VOC PASCAL mAP in all points: {metric_fn.value(iou_thresholds=0.5)['mAP']}"
+        )
+
+        # compute metric COCO metric
+        print(
+            f"COCO mAP: {metric_fn.value(iou_thresholds=np.arange(0.5, 1.0, 0.05), recall_thresholds=np.arange(0., 1.01, 0.01), mpolicy='soft')['mAP']}"
+        )
 
 
 def parse_args() -> argparse.Namespace:
