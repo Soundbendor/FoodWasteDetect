@@ -119,12 +119,7 @@ class ExperimentResult:
         """
 
         def unpack_gt_box(coords: str) -> list[int]:
-            ret = []
-            for char in coords:
-                if char == "[" or char == "]" or char.isspace():
-                    continue
-                ret.append(int(char))
-            return ret
+            return list(map(int, coords[1:-1].split()))
 
         gt = []
         preds = []
