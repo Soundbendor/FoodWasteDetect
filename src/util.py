@@ -94,6 +94,8 @@ class ExperimentResult:
             label_ids = gt_boxes.apply(
                 lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
             )
+            if any(x == "Unknown" for x in gt_boxes["_id"]):
+                continue
             pred_classes = preds_df["class_id"]
             img_p, img_r = self._get_img_pr(list(label_ids), list(pred_classes))
             print(f"DEBUG - Precision: {img_p}, Recall: {img_r}")
