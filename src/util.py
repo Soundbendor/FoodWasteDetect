@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 
+import numpy as np
 import pandas as pd
 import yaml
 from mean_average_precision import MetricBuilder
@@ -57,6 +58,11 @@ class ExperimentResult:
 
     def _get_img_pr(self, labels: list[int], preds: list[int]) -> tuple[float, float]:
         c = 0
+        if len(preds) == 0:
+            if len(labels) == 0:
+                return (1, 1)
+            return (0, 0)
+
         for y in labels:
             for idx, y_hat in enumerate(preds):
                 if y == y_hat:
@@ -74,8 +80,8 @@ class ExperimentResult:
         """
         Returns (precision, recall) values
         """
-        sum_p = 0
-        sum_r = 0
+        sum_p = []
+        sum_r = []
         for img_name, preds_df in self.preds:
             # Get matching ground truth boxes
             try:
@@ -92,9 +98,9 @@ class ExperimentResult:
                 list(gt_boxes["label_ids"]), list(pred_classes)
             )
             print(f"DEBUG - Precision: {img_p}, Recall: {img_r}")
-            sum_p += img_p / len(pred_classes)
-            sum_r += img_r / len(gt_boxes)
-        return (sum_p, sum_r)
+            sum_p.append(img_p)
+            sum_r.append(img_r)
+        return (np.mean(sum_p), np.mean(sum_r))
 
     def get_map50(self) -> float:
         """
