@@ -20,7 +20,7 @@ class FoodSeg103(SegDataset):
         with open(os.path.join(self.root, "id2label.json"), "r") as label_map:
             labels = json.load(label_map)
         data = {"id": [int(k) for k in labels.keys()], "label": labels.values()}
-        return pd.DataFrame().from_dict(data)
+        return pd.Series(data)
 
     def test_set(self) -> pd.DataFrame:
         return self._load_df("test.csv")
