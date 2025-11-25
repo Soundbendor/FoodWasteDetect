@@ -159,6 +159,9 @@ class SegDataset(Dataset):
         dirs = [x for x in dirs if os.path.isdir(x)]
         basenames = [os.path.basename(x) for x in dirs]
         paths = zip(dirs, basenames)
+        # WARN: This is a bad way to build the training dataframe.
+        # If any folder in train/test dir is not equal to size of dataset,
+        # this throws an obscure error.
         df = pd.DataFrame(columns=basenames)
         for dir, basename in paths:
             # Explicitly ignore patches directory

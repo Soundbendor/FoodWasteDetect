@@ -17,7 +17,7 @@ from data_wrappers.uecfoodpix import UECFoodPix
 from database.clip_embedding import CLIPEmbedding
 from database.img_crop import ImageCropper
 from database.vecdb import VectorDB
-from util import EvalMetric, parse_args, parse_cfg
+from util import EvalMetric, ExperimentResult, parse_args, parse_cfg
 
 
 # Initialize a YOLO-World
@@ -384,6 +384,7 @@ def evaluate_pipeline():
     exp = ExperimentManager(cfg)
 
     start_id = 0
+    # INFO: Update vector database
     # for ds in [foodseg103]:
     # start_id = exp.update_vecdb(ds, "train", start_id)
 
@@ -483,5 +484,63 @@ def load_dets():
         ds.detect_patches(ds.test_path, ds.test_set, model_pth="best.pt")
 
 
+# TODO: Build toggle to enable switching between [food201, foodseg103, ..., combined]
+def baseline_yolo_experiment():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    # TODO: YOLO model config should be passed in via .yml conf
+    model = YOLO("best.pt")
+    # load dataset
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+
+    # Load all 3 datasets
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+
+    food201 = Food201(root=food201_pth)
+    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
+    foodseg103 = FoodSeg103(root=foodseg103_pth)
+
+    datasets = [food201, uecfoodpix, foodseg103]
+
+    # Load detections from YOLO
+    preds_set = [ds.get_patches("test", True) for ds in datasets]
+    # TODO: set dataset as column value here
+
+    # WARN: Not sure these are using the same class indices as the joint dataset
+    preds = pd.concat(preds_set, ignore_index=True)
+    print(preds)
+
+    # Load ground truth data
+    # WARN: patch_pth may get overwritten by legacy code here
+    gt_set = []
+    for ds in datasets:
+        df = ds.get_patches("test", False)
+        df["dataset"] = ds.name
+        df["class_id"] = df.apply(lambda x: ds.cmap[x["class"]])
+        gt_set.append(df)
+    labels = pd.concat(gt_set, ignore_index=True)
+    print(labels)
+
+    # Where each groupby is a Dataframe of ground truth objects for a given image
+    preds["source_img"] = preds["source_img"].astype(str)
+    preds_group = preds.sample(frac=1)[:1000].groupby("source_img")
+    # Each groupby:
+    labels["src_img"] = labels["src_img"].astype(str)
+    label_group = labels.groupby("src_img")
+    print(label_group.groups.keys())
+
+    # Initialize metrics class
+    metrics = ExperimentResult(preds_group, label_group)
+
+    precision, recall = metrics.get_pr()
+    print(f"Precision: {precision}")
+    print(f"Recall: {recall}")
+    # print(f"mAP-50: {map50}")
+    # TODO: save predictions as experiment CSV
+
+
 if __name__ == "__main__":
-    load_dets()
+    baseline_yolo_experiment()

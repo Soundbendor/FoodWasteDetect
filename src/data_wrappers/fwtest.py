@@ -13,3 +13,6 @@ class FwTest(Dataset):
 
     def get_class_labels(self) -> pd.Series:
         pass
+
+    def test_set(self):
+        return self._load_df("test.csv")
