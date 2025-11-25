@@ -1,4 +1,5 @@
 import argparse
+import ast
 import logging
 import os
 
@@ -133,9 +134,11 @@ class ExperimentResult:
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
             for idx, box in gt_boxes.iterrows():
-                gt.append([*box["box_coords"], label_ids[idx], 0, 0])
+                gt.append([*ast.literal_eval(box["box_coords"]), label_ids[idx], 0, 0])
             for idx, pred in preds_df.iterrows():
-                preds.append([*pred["xyxy"], pred["class_id"], pred["conf"]])
+                preds.append(
+                    [*ast.literal_eval(pred["xyxy"]), pred["class_id"], pred["conf"]]
+                )
 
         metric_fn = MetricBuilder.build_evaluation_metric(
             "map_2d", async_mode=True, num_classes=self.n_classes
