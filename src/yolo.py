@@ -542,10 +542,10 @@ def baseline_yolo_experiment():
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
     precision, recall = metrics.get_pr()
-    precision, recall = metrics.get_map50()
+    map50 = metrics.new_map50()
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
-    # print(f"mAP-50: {map50}")
+    print(f"mAP-50: {map50}")
     # TODO: save predictions as experiment CSV
 
 
