@@ -163,6 +163,7 @@ class ExperimentResult:
                     [*ast.literal_eval(pred["xyxy"])[0], pred["class_id"], pred["conf"]]
                 )
 
+            preds.sort(key=lambda x: x[5], reverse=True)
             used = [False] * len(gt)
             for detection in preds:
                 matched = False
