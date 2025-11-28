@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 from PIL import Image
 from ultralytics import YOLO
 
@@ -506,6 +507,7 @@ def clip_update_preds():
             # TODO: convert class name to idx
             candidate_vecs = exp.db.query(None, query_vec)
             prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
+            # WARN: needs full cmap, not dataset-specific one
             pred_ids.append(cmap[prediction.strip()])
             top5_ids.append([cmap[x.strip()] for x in top5_classes])
         df["class_id"] = pred_ids
@@ -527,9 +529,16 @@ def clip_update_preds():
     datasets = [food201, uecfoodpix, foodseg103]
     # Load detections from YOLO
     preds_set = []
+    # Load CMAP from YOLO combined dataset
+    cmap_pth = "/nfs/stak/users/beerya/soundbendor/food_datasets/combined_food_seg/dataset.yaml"
+    with open(cmap_pth, "r") as stream:
+        cmap = yaml.load(stream, Loader=yaml.Loader)["names"]
+        # TODO: invert from {id: name} to {name: id}
+        cmap = {v: k for k, v in cmap.items()}
+
     for ds in datasets:
         df = ds.get_patches("test", True)
-        cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
+        # cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
         df["source_img"] = df.apply(
             lambda x: ds.name + "_" + str(x["source_img"]), axis=1
         )
