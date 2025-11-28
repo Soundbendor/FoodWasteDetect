@@ -484,10 +484,95 @@ def load_dets():
         ds.detect_patches(ds.test_path, ds.test_set, model_pth="best.pt")
 
 
-# TODO: Build toggle to enable switching between [food201, foodseg103, ..., combined]
-def baseline_yolo_experiment():
+def clip_update_preds():
+    """
+    Create a new detection dataframe (and csv) with updated classifications from YOLO.
+    """
+
+    # load dataset
+    def get_clip_classifications(ds: Dataset, df: pd.DataFrame, cmap: pd.Series):
+        exp = ExperimentManager(cfg)
+        pred_ids = []
+        top5_ids = []
+        for idx, detection in df.iterrows():
+            pth = detection["patch_pth"]
+            try:
+                print(pth)
+                query_vec = exp.embedder.get_embedding([pth])[0]
+            except FileNotFoundError:
+                print("Error! File not found.")
+                continue
+            query_vec = exp.embedder.get_embedding([pth])[0]
+            # TODO: convert class name to idx
+            candidate_vecs = exp.db.query(None, query_vec)
+            prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
+            pred_ids.append(cmap[prediction.strip()])
+            top5_ids.append([cmap[x.strip()] for x in top5_classes])
+        df["class_id"] = pred_ids
+        df["top5_ids"] = top5_ids
+        return df
+
     args = parse_args()
     cfg = parse_cfg(args.config_file)
+
+    # Load all 3 datasets
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+
+    food201 = Food201(root=food201_pth)
+    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
+    foodseg103 = FoodSeg103(root=foodseg103_pth)
+
+    datasets = [food201, uecfoodpix, foodseg103]
+    # Load detections from YOLO
+    preds_set = []
+    for ds in datasets:
+        df = ds.get_patches("test", True)
+        cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
+        df["source_img"] = df.apply(
+            lambda x: ds.name + "_" + str(x["source_img"]), axis=1
+        )
+        df = get_clip_classifications(ds, df, cmap)
+        preds_set.append(df)
+
+    preds = pd.concat(preds_set, ignore_index=True)
+    print(preds)
+
+    gt_set = []
+    for ds in datasets:
+        df = ds.get_patches("test", False)
+        # Invert classmap to work as {name: id}
+        cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
+        df["dataset"] = ds.name
+        df["src_img"] = df.apply(lambda x: ds.name + "_" + str(x["src_img"]), axis=1)
+        df["class_id"] = df.apply(lambda x: cmap[x["class"]], axis=1)
+        gt_set.append(df)
+    labels = pd.concat(gt_set, ignore_index=True)
+    print(labels)
+
+    # Where each groupby is a Dataframe of ground truth objects for a given image
+    preds["source_img"] = preds["source_img"].astype(str)
+    preds_group = preds.sample(frac=1)[:1000].groupby("source_img")
+    # Each groupby:
+    labels["src_img"] = labels["src_img"].astype(str)
+    label_group = labels.groupby("src_img")
+    print(label_group.groups.keys())
+
+    # Initialize metrics class
+    n_classes = labels["class_id"][labels["class_id"].map(type) == int].max()
+    metrics = ExperimentResult(preds_group, label_group, n_classes)
+
+    precision, recall = metrics.get_pr()
+    precision, recall, map50 = metrics.new_map50()
+    print(f"Precision: {precision}")
+    print(f"Recall: {recall}")
+    print(f"mAP-50: {map50}")
+    # TODO: save predictions as experiment CSV
+
+
+# TODO: Build toggle to enable switching between [food201, foodseg103, ..., combined]
+def baseline_yolo_experiment():
     # load dataset
     args = parse_args()
     cfg = parse_cfg(args.config_file)
@@ -550,4 +635,4 @@ def baseline_yolo_experiment():
 
 
 if __name__ == "__main__":
-    baseline_yolo_experiment()
+    clip_update_preds()
