@@ -136,8 +136,6 @@ class ExperimentResult:
         tp = 0
         fp = 0
         for img_name, preds_df in self.preds:
-            tp = 0
-            fp = 0
             gt = []
             preds = []
             try:
