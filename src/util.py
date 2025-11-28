@@ -135,8 +135,8 @@ class ExperimentResult:
 
         tp = 0
         fp = 0
+        gt = 0
         for img_name, preds_df in self.preds:
-            gt = []
             preds = []
             try:
                 gt_boxes = self.truths.get_group(os.path.splitext(img_name)[0])
@@ -162,6 +162,7 @@ class ExperimentResult:
 
             preds.sort(key=lambda x: x[5], reverse=True)
             used = [False] * len(gt)
+            gt += len(label_ids)
             for detection in preds:
                 matched = False
                 for idx, a in enumerate(gt):
