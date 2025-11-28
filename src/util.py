@@ -133,9 +133,8 @@ class ExperimentResult:
             union_area = box1_area + box2_area - inter_area
             return inter_area / union_area
 
-        aps = []
-        pre = []
-        rec = []
+        tp = 0
+        fp = 0
         for img_name, preds_df in self.preds:
             tp = 0
             fp = 0
@@ -180,16 +179,10 @@ class ExperimentResult:
                 if not matched:
                     fp += 1
 
-            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-            recall = tp / len(gt) if len(gt) > 0 else 0
-            aps.append(precision * recall)
-            pre.append(precision)
-            rec.append(recall)
-        return (
-            float(np.mean(aps) if len(aps) > 0 else 0),
-            float(np.mean(pre)),
-            float(np.mean(rec)),
-        )
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / len(gt) if len(gt) > 0 else 0
+        aps = precision * recall
+        return aps, precision, recall
 
     # def get_map50(self) -> float:
     #     """
