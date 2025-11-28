@@ -109,11 +109,9 @@ class Dataset:
         df = pd.DataFrame.from_records(records)
         df.to_csv(os.path.join(os.path.join(self.root, subset_pth), "patches.csv"))
 
-    def get_patches(
-        self, subset: str, detections: bool, override=False
-    ) -> pd.DataFrame:
+    def get_patches(self, subset: str, detections: bool) -> pd.DataFrame:
         def update_sample_path(fname: str, subset: str, folder: str, root: str) -> str:
-            return os.path.join(root, subset, "patches", fname)
+            return os.path.join(root, subset, folder, fname)
 
         # 1) Check if patches directory exists
         if subset in ["train", "test", "val", "validation"]:
@@ -126,8 +124,6 @@ class Dataset:
             # 2) Check if patches.csv exists
             if os.path.isfile(df_path):
                 df = pd.read_csv(df_path)
-                if override:
-                    return df
                 df["patch_pth"] = df["patch_name"].apply(
                     lambda x: update_sample_path(x, subset, folder, self.root)
                 )
