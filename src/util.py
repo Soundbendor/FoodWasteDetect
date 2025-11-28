@@ -135,9 +135,10 @@ class ExperimentResult:
 
         tp = 0
         fp = 0
-        gt = 0
+        positives = 0
         for img_name, preds_df in self.preds:
             preds = []
+            gt = []
             try:
                 gt_boxes = self.truths.get_group(os.path.splitext(img_name)[0])
             except Exception:
@@ -162,7 +163,7 @@ class ExperimentResult:
 
             preds.sort(key=lambda x: x[5], reverse=True)
             used = [False] * len(gt)
-            gt += len(label_ids)
+            positives += len(gt)
             for detection in preds:
                 matched = False
                 for idx, a in enumerate(gt):
@@ -179,7 +180,7 @@ class ExperimentResult:
                     fp += 1
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / len(gt) if len(gt) > 0 else 0
+        recall = tp / positives if positives > 0 else 0
         aps = precision * recall
         return aps, precision, recall
 
