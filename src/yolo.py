@@ -528,7 +528,7 @@ def clip_update_preds():
     # Load detections from YOLO
     preds_set = []
     for ds in datasets:
-        df = ds.get_patches("test", True)
+        df = ds.get_patches("test", True, override=True)
         cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
         df["source_img"] = df.apply(
             lambda x: ds.name + "_" + str(x["source_img"]), axis=1
