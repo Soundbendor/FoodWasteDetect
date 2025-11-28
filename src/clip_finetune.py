@@ -1,4 +1,5 @@
 import os
+import random
 
 import pandas as pd
 from PIL import Image
@@ -19,11 +20,26 @@ def load_foodx251() -> tuple[str, pd.DataFrame]:
     return ds_path, ds.train_set()
 
 
-ds_path, model = SentenceTransformer("jinaai/jina-clip-v2")
-food201_train = load_foodx251()
+ds_path, model = SentenceTransformer("jinaai/jina-clip-v2", trust_remote_code=True)
+foodx251_train = load_foodx251()
 # Convert into Huggingface dataset
 food201_train["fpath"] = food201_train["fname"].apply(
     lambda x: os.path.join(ds_path, "train", "train_set", x)
 )
-food201_train["images"] = food201_train["fpath"].apply(lambda x: Image.open(x))
+# food201_train["images"] = food201_train["fpath"].apply(lambda x: Image.open(x))
 print(food201)
+
+# load model
+train_dataset = []
+for idx, row in food201_train.iterrows():
+    # TODO: fix label?
+    img = Image.open(row["fpath"])
+    caption = "An image of a " + row["class"]
+    train_dataset.append(InputExample(texts=[img, caption], label=1))
+    # Append five negative caption pairs
+    for i in range(5):
+        neg_caption = food201_train["class"][random.randint(0, len(food201_train))]
+        train_dataset.append(InputExample(texts=[img, neg_caption], label=0))
+
+train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=4)
+train_loss = losses.ContrastiveLoss(model=model)
