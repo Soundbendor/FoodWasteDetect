@@ -503,7 +503,6 @@ def clip_update_preds():
             except FileNotFoundError:
                 print("Error! File not found.")
                 continue
-            query_vec = exp.embedder.get_embedding([pth])[0]
             # TODO: convert class name to idx
             candidate_vecs = exp.db.query(None, query_vec)
             prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
