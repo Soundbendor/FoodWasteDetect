@@ -6,7 +6,7 @@ from sentence_transformers import (InputExample, SentenceTransformer, losses,
                                    util)
 from torch.utils.data import DataLoader
 
-from data_wrappers.FoodX251 import FoodX251
+from data_wrappers.foodx251 import FoodX251
 from util import parse_args, parse_cfg
 
 
