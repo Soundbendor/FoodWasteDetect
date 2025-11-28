@@ -148,7 +148,6 @@ class ExperimentResult:
             label_ids = gt_boxes.apply(
                 lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
             )
-            # WARN: We might be artificially inflating scores here
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
 
@@ -181,6 +180,9 @@ class ExperimentResult:
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / positives if positives > 0 else 0
+        # WARN: not accurate
+        # Use https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html
+        # Compute scores by class
         aps = precision * recall
         return aps, precision, recall
 
