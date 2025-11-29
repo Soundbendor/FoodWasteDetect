@@ -23,22 +23,22 @@ def load_foodx251() -> tuple[str, pd.DataFrame]:
 ds_path, model = SentenceTransformer("jinaai/jina-clip-v2", trust_remote_code=True)
 foodx251_train = load_foodx251()
 # Convert into Huggingface dataset
-food201_train["fpath"] = food201_train["fname"].apply(
+foodx251_train["fpath"] = foodx251_train["fname"].apply(
     lambda x: os.path.join(ds_path, "train", "train_set", x)
 )
-# food201_train["images"] = food201_train["fpath"].apply(lambda x: Image.open(x))
+# foodx251_train["images"] = foodx251_train["fpath"].apply(lambda x: Image.open(x))
 print(food201)
 
 # load model
 train_dataset = []
-for idx, row in food201_train.iterrows():
+for idx, row in foodx251_train.iterrows():
     # TODO: fix label?
     img = Image.open(row["fpath"])
     caption = "An image of a " + row["class"]
     train_dataset.append(InputExample(texts=[img, caption], label=1))
     # Append five negative caption pairs
     for i in range(5):
-        neg_caption = food201_train["class"][random.randint(0, len(food201_train))]
+        neg_caption = foodx251_train["class"][random.randint(0, len(foodx251_train))]
         train_dataset.append(InputExample(texts=[img, neg_caption], label=0))
 
 train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=4)
