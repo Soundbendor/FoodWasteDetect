@@ -21,7 +21,7 @@ def load_foodx251() -> tuple[str, pd.DataFrame]:
 
 
 ds_path, model = SentenceTransformer("jinaai/jina-clip-v2", trust_remote_code=True)
-foodx251_train = load_foodx251()
+ds_name, foodx251_train = load_foodx251()
 # Convert into Huggingface dataset
 foodx251_train["fpath"] = foodx251_train["fname"].apply(
     lambda x: os.path.join(ds_path, "train", "train_set", x)
