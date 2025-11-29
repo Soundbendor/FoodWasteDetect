@@ -133,6 +133,7 @@ class ExperimentResult:
         positives = 0
         class_conf = defaultdict(list)
         class_scores = defaultdict(list)
+        class_gt_count = {}
         for img_name, preds_df in self.preds:
             preds = []
             gt = []
@@ -150,7 +151,10 @@ class ExperimentResult:
 
             for idx, box in gt_boxes.iterrows():
                 # [x1, y1, x2, y2, label_id]
-                gt.append([*unpack_gt_box(box["box_coords"]), label_ids[idx]])
+                annot = [*unpack_gt_box(box["box_coords"]), label_ids[idx]]
+                class_gt_count[annot[-1]] += 1
+                gt.append(annot)
+
             for idx, pred in preds_df.iterrows():
                 # [x1, y1, x2, y2, label_id, confidence]
                 preds.append(
@@ -184,13 +188,13 @@ class ExperimentResult:
                 class_scores[pred_id].append(map_label)
 
                 ap_values = []
-        for cid in class_pred_scores.keys():
-            scores = np.array(class_pred_scores[cid])
-            labels = np.array(class_pred_labels[cid])
-
+        for cid in class_scores.keys():
             # If the class has no GTs, skip it (undefined AP)
             if class_gt_count.get(cid, 0) == 0:
                 continue
+
+            scores = np.array(class_scores[cid])
+            labels = np.array(class_scores[cid])
 
             # Average Precision (AP)
             ap = average_precision_score(labels, scores)
