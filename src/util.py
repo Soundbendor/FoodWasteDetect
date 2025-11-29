@@ -2,13 +2,14 @@ import argparse
 import ast
 import logging
 import os
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 import yaml
-from mean_average_precision import MetricBuilder
 from pandas.core.groupby import DataFrameGroupBy
 from qdrant_client.models import ScoredPoint
+from sklearn.metrics import average_precision_score
 
 from database.vecdb import VectorDB
 
@@ -53,12 +54,6 @@ class ExperimentResult:
         if ds_name == "food201":
             return class_id
         return self.ds_map[ds_name].iloc[class_id]["new_id"]
-
-    def get_gts(self):
-        """
-        Counts the number of correct bounding box predictions
-        """
-        pass
 
     def _get_img_pr(self, labels: list[int], preds: list[int]) -> tuple[float, float]:
         c = 0
@@ -136,6 +131,8 @@ class ExperimentResult:
         tp = 0
         fp = 0
         positives = 0
+        class_conf = defaultdict(list)
+        class_scores = defaultdict(list)
         for img_name, preds_df in self.preds:
             preds = []
             gt = []
@@ -163,28 +160,52 @@ class ExperimentResult:
             preds.sort(key=lambda x: x[5], reverse=True)
             used = [False] * len(gt)
             positives += len(gt)
+            # Used for keeping track of tp/fp for mAP score
+            map_label = 0
             for detection in preds:
+                pred_id = detection[4]
+                conf = detection[5]
                 matched = False
                 for idx, a in enumerate(gt):
+                    gt_id = a[4]
                     if used[idx]:
                         continue
 
                     iou = compute_iou(detection[:4], a[:4])
-                    if iou >= iou_threshold and a[4] == detection[4]:
+                    if iou >= iou_threshold and gt_id == pred_id:
                         tp += 1
                         used[idx] = True
                         matched = True
+                        map_label = 1
                         break
                 if not matched:
                     fp += 1
+                class_conf[pred_id].append(conf)
+                class_scores[pred_id].append(map_label)
+
+                ap_values = []
+        for cid in class_pred_scores.keys():
+            scores = np.array(class_pred_scores[cid])
+            labels = np.array(class_pred_labels[cid])
+
+            # If the class has no GTs, skip it (undefined AP)
+            if class_gt_count.get(cid, 0) == 0:
+                continue
+
+            # Average Precision (AP)
+            ap = average_precision_score(labels, scores)
+            ap_values.append(ap)
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / positives if positives > 0 else 0
-        # WARN: not accurate
-        # Use https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html
-        # Compute scores by class
-        aps = precision * recall
-        return aps, precision, recall
+        mAP50 = float(np.mean(ap_values)) if len(ap_values) else 0.0
+        return mAP50, precision, recall
+
+    def get_map50_95(self) -> float:
+        maps = []
+        for iou_threshold in np.arange(0.50, 1, step=0.05):
+            map, _, _ = self.new_map50(iou_threshold)
+        return np.mean(maps)
 
     # def get_map50(self) -> float:
     #     """

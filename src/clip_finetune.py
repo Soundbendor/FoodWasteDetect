@@ -20,7 +20,7 @@ def load_foodx251() -> tuple[str, pd.DataFrame]:
     return ds_path, ds.train_set()
 
 
-ds_path, model = SentenceTransformer("jinaai/jina-clip-v2", trust_remote_code=True)
+model = SentenceTransformer("jinaai/jina-clip-v2", trust_remote_code=True)
 ds_name, foodx251_train = load_foodx251()
 # Convert into Huggingface dataset
 foodx251_train["fpath"] = foodx251_train["fname"].apply(
@@ -37,9 +37,10 @@ for idx, row in foodx251_train.iterrows():
     caption = "An image of a " + row["class"]
     train_dataset.append(InputExample(texts=[img, caption], label=1))
     # Append five negative caption pairs
-    for i in range(5):
+    for i in range(2):
         neg_caption = foodx251_train["class"][random.randint(0, len(foodx251_train))]
         train_dataset.append(InputExample(texts=[img, neg_caption], label=0))
 
 train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=4)
 train_loss = losses.ContrastiveLoss(model=model)
+model.fit([(train_dataloader, train_loss)], epochs=5, show_progress_bar=True)
