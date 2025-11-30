@@ -93,7 +93,7 @@ class VectorDB:
         self, query_text: Union[None, str], query_vec: torch.Tensor
     ) -> List[ScoredPoint]:
         top10 = self.client.query_points(
-            collection_name=self.db_name, query_vector=query_vec, limit=10
+            collection_name=self.db_name, query=query_vec, limit=10
         )
         if self.reranker:
             rerank_pairs = [[query_text, doc.payload["description"]] for doc in top10]
