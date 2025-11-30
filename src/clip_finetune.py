@@ -23,7 +23,6 @@ def load_foodx251() -> tuple[str, pd.DataFrame]:
 
 def main():
     model = SentenceTransformer("jinaai/jina-clip-v2", trust_remote_code=True)
-    # model = SentenceTransformer("jinaai/jina-clip-v2", trust_remote_code=True)
     ds_path, foodx251_train = load_foodx251()
     # Convert into Huggingface dataset
     foodx251_train["fpath"] = foodx251_train["fname"].apply(

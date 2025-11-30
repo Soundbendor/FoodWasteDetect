@@ -102,6 +102,7 @@ class VectorDB:
             for idx in range(len(rerank_scores)):
                 top10[idx].score = rerank_scores[idx]
             logging.info(rerank_pairs)
+        top10 = top10.points
         return sorted(top10, key=lambda x: x.score, reverse=True)
 
     def vote_classification(self, search_result: list[ScoredPoint]):
