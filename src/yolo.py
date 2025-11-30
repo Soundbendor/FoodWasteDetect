@@ -500,7 +500,7 @@ def clip_update_preds():
             imgs = []
             for img_name in batch:
                 try:
-                    Image.open(img_name)
+                    imgs.append(Image.open(img_name))
                 except FileNotFoundError:
                     continue
             query_vecs.extend(exp.embedder.get_embedding_from_preloaded(imgs))
