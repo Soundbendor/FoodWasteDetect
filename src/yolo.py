@@ -583,7 +583,7 @@ def clip_update_preds():
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
     precision, recall = metrics.get_pr()
-    map50 = metrics.get_map50()
+    map50, map50_95 = metrics.get_map50()
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
     print(f"mAP-50: {map50}")
