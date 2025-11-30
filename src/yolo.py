@@ -572,14 +572,14 @@ def clip_update_preds():
 
     # Where each groupby is a Dataframe of ground truth objects for a given image
     preds["source_img"] = preds["source_img"].astype(str)
-    preds_group = preds.sample(frac=1)[:1000].groupby("source_img")
+    preds_group = preds.sample(frac=1).groupby("source_img")
     # Each groupby:
     labels["src_img"] = labels["src_img"].astype(str)
     label_group = labels.groupby("src_img")
     print(label_group.groups.keys())
 
     # Initialize metrics class
-    n_classes = labels["class_id"][labels["class_id"].map(type) == int].max()
+    n_classes = sum([len(ds.cmap) for ds in datasets])
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
     precision, recall = metrics.get_pr()
@@ -634,14 +634,14 @@ def baseline_yolo_experiment():
 
     # Where each groupby is a Dataframe of ground truth objects for a given image
     preds["source_img"] = preds["source_img"].astype(str)
-    preds_group = preds.sample(frac=1)[:1000].groupby("source_img")
+    preds_group = preds.sample(frac=1).groupby("source_img")
     # Each groupby:
     labels["src_img"] = labels["src_img"].astype(str)
     label_group = labels.groupby("src_img")
     print(label_group.groups.keys())
 
     # Initialize metrics class
-    n_classes = labels["class_id"][labels["class_id"].map(type) == int].max()
+    n_classes = sum([len(ds.cmap) for ds in datasets])
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
     precision, recall = metrics.get_pr()

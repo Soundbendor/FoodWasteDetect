@@ -135,7 +135,7 @@ class ExperimentResult:
     #         map, _, _ = self.new_map50(iou_threshold)
     #     return np.mean(maps)
 
-    def get_map50(self) -> float:
+    def get_map50(self) -> tuple[float, float]:
         """
         Calculate mAP-50 across all predictions
         """
@@ -161,26 +161,26 @@ class ExperimentResult:
                 )
             for idx, pred in preds_df.iterrows():
                 preds.append(
-                    [*ast.literal_eval(pred["xyxy"]), pred["class_id"], pred["conf"]]
+                    [*ast.literal_eval(pred["xyxy"])[0], pred["class_id"], pred["conf"]]
                 )
 
         metric_fn = MetricBuilder.build_evaluation_metric(
             "map_2d", async_mode=True, num_classes=self.n_classes
         )
         metric_fn.add(np.array(preds), np.array(gt))
-        print(
-            f"VOC PASCAL mAP: {metric_fn.value(iou_thresholds=0.5, recall_thresholds=np.arange(0., 1.1, 0.1))['mAP']}"
-        )
 
         # compute PASCAL VOC metric at the all points
-        print(
-            f"VOC PASCAL mAP in all points: {metric_fn.value(iou_thresholds=0.5)['mAP']}"
-        )
+        map50 = metric_fn.value(iou_thresholds=0.5)["mAP"]
+        map50_95 = metric_fn.value(
+            iou_thresholds=np.arange(0.5, 1.0, 0.05),
+            recall_thresholds=np.arange(0.0, 1.01, 0.01),
+            mpolicy="soft",
+        )["mAP"]
+        print(f"VOC PASCAL mAP in all points: {map50}")
 
         # compute metric COCO metric
-        print(
-            f"COCO mAP: {metric_fn.value(iou_thresholds=np.arange(0.5, 1.0, 0.05), recall_thresholds=np.arange(0., 1.01, 0.01), mpolicy='soft')['mAP']}"
-        )
+        print(f"COCO mAP: {map50_95}")
+        return map50, map50_95
 
 
 def parse_args() -> argparse.Namespace:
