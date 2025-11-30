@@ -133,7 +133,7 @@ class ExperimentResult:
         positives = 0
         class_conf = defaultdict(list)
         class_scores = defaultdict(list)
-        class_gt_count = {}
+        class_gt_count = defaultdict(int)
         for img_name, preds_df in self.preds:
             preds = []
             gt = []
