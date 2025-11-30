@@ -187,13 +187,13 @@ class ExperimentResult:
                 class_conf[pred_id].append(conf)
                 class_scores[pred_id].append(map_label)
 
-                ap_values = []
+        ap_values = []
         for cid in class_scores.keys():
             # If the class has no GTs, skip it (undefined AP)
             if class_gt_count.get(cid, 0) == 0:
                 continue
 
-            scores = np.array(class_scores[cid])
+            scores = np.array(class_conf[cid])
             labels = np.array(class_scores[cid])
 
             # Average Precision (AP)
