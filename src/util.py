@@ -152,7 +152,7 @@ class ExperimentResult:
             for idx, box in gt_boxes.iterrows():
                 # [x1, y1, x2, y2, label_id]
                 annot = [*unpack_gt_box(box["box_coords"]), label_ids[idx]]
-                class_gt_count[annot[-1]] += 1
+                class_gt_count[int(annot[-1])] += 1
                 gt.append(annot)
 
             for idx, pred in preds_df.iterrows():
