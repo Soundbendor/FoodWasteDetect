@@ -6,7 +6,8 @@ from typing import List, Optional, Union
 import requests
 import torch
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, ScoredPoint, VectorParams
+from qdrant_client.models import (Distance, PointStruct, ScoredPoint,
+                                  VectorParams)
 from sentence_transformers import CrossEncoder, SentenceTransformer, util
 
 
@@ -91,7 +92,7 @@ class VectorDB:
     def query(
         self, query_text: Union[None, str], query_vec: torch.Tensor
     ) -> List[ScoredPoint]:
-        top10 = self.client.search(
+        top10 = self.client.query_points(
             collection_name=self.db_name, query_vector=query_vec, limit=10
         )
         if self.reranker:
