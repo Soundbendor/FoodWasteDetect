@@ -12,12 +12,14 @@ class CLIPEmbedding:
             model_name, truncate_dim=vec_dim, trust_remote_code=True
         )
 
-    
     def get_embedding_from_preloaded(self, imgs: list) -> torch.Tensor:
         return self.model.encode(imgs)
 
     def get_embedding(self, img_names: List[str]) -> torch.Tensor:
         return self.model.encode([Image.open(filepath) for filepath in img_names])
+
+    def get_embeddings_from_imgs(self, imgs: List[Image]) -> torch.Tensor:
+        return self.model.encode(imgs)
 
     def get_text_embedding(self, labels: List[str]) -> torch.Tensor:
         return self.model.encode(labels)

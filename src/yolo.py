@@ -495,14 +495,18 @@ def clip_update_preds():
         exp = ExperimentManager(cfg)
         pred_ids = []
         top5_ids = []
+        query_vecs = []
+        for batch in np.array_split(df["patch_pth"], len(df) / 100):
+            imgs = []
+            for img_name in batch:
+                try:
+                    Image.open(img_name)
+                except FileNotFoundError:
+                    continue
+            query_vecs.extend(exp.embedder.get_embedding_from_preloaded(imgs))
+
         for idx, detection in df.iterrows():
-            pth = detection["patch_pth"]
-            try:
-                print(pth)
-                query_vec = exp.embedder.get_embedding([pth])[0]
-            except FileNotFoundError:
-                print("Error! File not found.")
-                continue
+            query_vec = query_vecs[idx]
             # TODO: convert class name to idx
             candidate_vecs = exp.db.query(None, query_vec)
             prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
