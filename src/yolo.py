@@ -491,8 +491,9 @@ def clip_update_preds():
     """
 
     # load dataset
-    def get_clip_classifications(ds: Dataset, df: pd.DataFrame, cmap: pd.Series):
-        exp = ExperimentManager(cfg)
+    def get_clip_classifications(
+        ds: Dataset, df: pd.DataFrame, cmap: pd.Series, exp: ExperimentManager
+    ):
         pred_ids = []
         top5_ids = []
         query_vecs = []
@@ -539,13 +540,19 @@ def clip_update_preds():
         # TODO: invert from {id: name} to {name: id}
         cmap = {v: k for k, v in cmap.items()}
 
+    """Generate vectors"""
+    exp = ExperimentManager(cfg)
+    start_id = 0
+    for ds in datasets:
+        start_id = exp.update_vecdb(ds, "train", start_id)
+
     for ds in datasets:
         df = ds.get_patches("test", True)
         # cmap = pd.Series(ds.cmap.index.values, index=ds.cmap)
         df["source_img"] = df.apply(
             lambda x: ds.name + "_" + str(x["source_img"]), axis=1
         )
-        df = get_clip_classifications(ds, df, cmap)
+        df = get_clip_classifications(ds, df, cmap, exp)
         preds_set.append(df)
 
     preds = pd.concat(preds_set, ignore_index=True)
