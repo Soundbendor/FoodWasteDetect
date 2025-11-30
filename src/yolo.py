@@ -583,11 +583,10 @@ def clip_update_preds():
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
     precision, recall = metrics.get_pr()
-    map50, precision, recall = metrics.new_map50()
+    map50 = metrics.get_map50()
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
     print(f"mAP-50: {map50}")
-    # TODO: save predictions as experiment CSV
 
 
 # TODO: Build toggle to enable switching between [food201, foodseg103, ..., combined]
@@ -645,12 +644,11 @@ def baseline_yolo_experiment():
     n_classes = labels["class_id"][labels["class_id"].map(type) == int].max()
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
-    map50, precision, recall = metrics.new_map50()
-    map50_95 = metrics.get_map50_95()
+    precision, recall = metrics.get_pr()
+    map50 = metrics.get_map50()
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
     print(f"mAP-50: {map50}")
-    print(f"mAP-[50-95]: {map50_95}")
     # TODO: save predictions as experiment CSV
 
 
