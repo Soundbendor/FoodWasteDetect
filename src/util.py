@@ -165,8 +165,8 @@ class ExperimentResult:
             used = [False] * len(gt)
             positives += len(gt)
             # Used for keeping track of tp/fp for mAP score
-            map_label = 0
             for detection in preds:
+                map_label = 0
                 pred_id = detection[4]
                 conf = detection[5]
                 matched = False
