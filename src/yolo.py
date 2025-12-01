@@ -223,7 +223,7 @@ class ExperimentManager:
     def add_label_vectors(self, ds: Dataset, start_idx: int):
         # Get class labels from dataset
         labels = ds.cmap
-        vectors = self.embedder.get_text_embedding(labels)
+        vectors = self.embedder.get_text_embedding(["An image of " + x for x in labels])
         metadata = {"label": labels}
         ids = list(range(start_idx, start_idx + len(labels)))
         self.db.add_records(labels, vectors, metadata, ids)
@@ -729,7 +729,7 @@ def final_experiment():
     # start_id = exp.update_vecdb(ds, "train", start_id)
 
     """Add label vectors"""
-    # start_id = exp.add_label_vectors(fw_test, start_id)
+    start_id = exp.add_label_vectors(fw_test, start_id)
 
     # Get YOLO extracted patches
     fw_test.train_set()
