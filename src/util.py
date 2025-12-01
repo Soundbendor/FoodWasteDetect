@@ -95,9 +95,10 @@ class ExperimentResult:
                 print(f"File {img_name} not found in the label set!")
                 continue
             # Re-map ground truth class IDs
-            label_ids = gt_boxes.apply(
-                lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
-            )
+            if not use_txt:
+                label_ids = gt_boxes.apply(
+                    lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
+                )
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
 
