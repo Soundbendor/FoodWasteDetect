@@ -2,6 +2,8 @@ import os
 
 import pandas as pd
 import yaml
+from PIL import Image
+from tqdm import tqdm
 
 from .dataset import SegDataset
 

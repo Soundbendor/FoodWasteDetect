@@ -733,7 +733,7 @@ def final_experiment():
 
     # Get YOLO extracted patches
     fw_test.crop_patches("train")
-    fw_test.detect_patches("train", ds.train_set, "best.pt")
+    fw_test.detect_patches("train", fw_test.train_set, "best.pt")
     pred_df = fw_test.get_patches("train", True)
     pred_df["source_img"] = pred_df.apply(
         lambda x: fw_test.name + "_" + str(x["source_img"]), axis=1
