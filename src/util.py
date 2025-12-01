@@ -184,12 +184,12 @@ class ExperimentResult:
             class_ids = {}
             n_ids = 0
             for idx, box in gt_boxes.iterrows():
-                box["class_name"] = box["class_name"].strip().lower()
+                box["class"] = box["class"].strip().lower()
                 # [x1, y1, x2, y2, label_id]
-                if box["class_name"] not in class_ids:
-                    class_ids[box["class_name"]] = n_ids
+                if box["class"] not in class_ids:
+                    class_ids[box["class"]] = n_ids
                     n_ids += 1
-                class_id = class_ids[box["class_name"]]
+                class_id = class_ids[box["class"]]
 
                 gt.append([*self._unpack_gt_box(box["box_coords"]), class_id])
 
