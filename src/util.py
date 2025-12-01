@@ -174,42 +174,47 @@ class ExperimentResult:
                 print(f"File {img_name} not found in the label set!")
                 continue
 
-            label_ids = gt_boxes.apply(
-                lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
-            )
+            if not use_txt:
+                label_ids = gt_boxes.apply(
+                    lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
+                )
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
+
+            class_ids = {}
+            n_ids = 0
             for idx, box in gt_boxes.iterrows():
+                box["class"] = box["class"].strip().lower()
                 # [x1, y1, x2, y2, label_id]
-                if use_txt:
-                    gt.append([*self._unpack_gt_box(box["box_coords"]), box["class"]])
-                else:
-                    gt.append([*self._unpack_gt_box(box["box_coords"]), label_ids[idx]])
+                if box["class"] not in class_ids:
+                    class_ids[box["class"]] = n_ids
+                    n_ids += 1
+                class_id = class_ids[box["class"]]
+
+                gt.append([*self._unpack_gt_box(box["box_coords"]), class_id])
 
             for idx, pred in preds_df.iterrows():
                 # [x1, y1, x2, y2, label_id, confidence]
-                if use_txt:
-                    preds.append(
-                        [
-                            *ast.literal_eval(pred["xyxy"])[0],
-                            pred["class"].strip().lower(),
-                            pred["conf"],
-                        ]
-                    )
-                else:
-                    preds.append(
-                        [
-                            *ast.literal_eval(pred["xyxy"])[0],
-                            pred["class_id"].strip().lower(),
-                            pred["conf"],
-                        ]
-                    )
+                pred["class"] = pred["class"].strip().lower()
+                if pred["class"] not in class_ids:
+                    class_ids[pred["class"]] = n_ids
+                    n_ids += 1
+                class_id = class_ids[pred["class"]]
+
+                preds.append(
+                    [
+                        *ast.literal_eval(pred["xyxy"])[0],
+                        class_id,
+                        pred["conf"],
+                    ]
+                )
         metric_fn = MetricBuilder.build_evaluation_metric(
             "map_2d", async_mode=True, num_classes=self.n_classes
         )
         # WARN: This will certainly not work
         # as we are passing text labels where integers are expected
         # We should do a pass over both arrays and convert text labels to integers
+
         metric_fn.add(np.array(preds), np.array(gt))
 
         # compute PASCAL VOC metric at the all points
