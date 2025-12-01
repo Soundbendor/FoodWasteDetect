@@ -206,6 +206,9 @@ class ExperimentResult:
         metric_fn = MetricBuilder.build_evaluation_metric(
             "map_2d", async_mode=True, num_classes=self.n_classes
         )
+        # WARN: This will certainly not work
+        # as we are passing text labels where integers are expected
+        # We should do a pass over both arrays and convert text labels to integers
         metric_fn.add(np.array(preds), np.array(gt))
 
         # compute PASCAL VOC metric at the all points

@@ -714,7 +714,6 @@ def final_experiment():
 
     datasets = [food201, uecfoodpix, foodseg103]
     # Load detections from YOLO
-    preds_set = []
     # Load CMAP from YOLO combined dataset
     cmap_pth = "/nfs/stak/users/beerya/soundbendor/food_datasets/combined_food_seg/dataset.yaml"
     with open(cmap_pth, "r") as stream:
@@ -726,12 +725,15 @@ def final_experiment():
     exp = ExperimentManager(cfg)
     start_id = 0
     for ds in datasets:
-        start_id = exp.update_vecdb(ds, "train", start_id)
+        pass
+    # start_id = exp.update_vecdb(ds, "train", start_id)
 
     """Add label vectors"""
-    start_id = exp.add_label_vectors(fw_test, start_id)
+    # start_id = exp.add_label_vectors(fw_test, start_id)
 
     # Get YOLO extracted patches
+    fw_test.crop_patches("train")
+    fw_test.detect_patches("train", ds.train_set(), "best.pt")
     pred_df = fw_test.get_patches("train", True)
     pred_df["source_img"] = pred_df.apply(
         lambda x: fw_test.name + "_" + str(x["source_img"]), axis=1
@@ -769,4 +771,4 @@ def final_experiment():
 
 
 if __name__ == "__main__":
-    clip_update_preds()
+    final_experiment()
