@@ -56,6 +56,19 @@ class ExperimentResult:
             return class_id
         return self.ds_map[ds_name].iloc[class_id]["new_id"]
 
+    def reverse_class_map(self, class_id: int, ds_name: str) -> int:
+        if ds_name == "food201":
+            return class_id
+        mp = self.ds_map[ds_name]
+        mp = pd.Series(mp.index.values, index=mp["new_id"])
+        print(mp)
+        print(class_id)
+        try:
+            return mp[int(class_id)]
+        # value was classified as something outside of label space
+        except Exception as e:
+            return 0
+
     def _unpack_gt_box(self, coords: str) -> list[int]:
         return list(map(int, coords[1:-1].split()))
 
@@ -150,24 +163,42 @@ class ExperimentResult:
                 print(f"File {img_name} not found in the label set!")
                 continue
 
+            # TODO: Bring everything in to the original label space
             label_ids = gt_boxes.apply(
                 lambda x: self.map_class_index(x["class_id"], x["dataset"]), axis=1
             )
+            # pred_ids = preds_df.apply(
+                # lambda x: self.reverse_class_map(x["class_id"], "foodseg103"), axis=1
+            # )
+
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
             for idx, box in gt_boxes.iterrows():
                 gt.append(
-                    [*self._unpack_gt_box(box["box_coords"]), label_ids[idx], 0, 0]
+                        # Original
+                    [*self._unpack_gt_box(box["box_coords"]), int(label_ids[idx]), 0, 0]
+                        # New
+                    # [*self._unpack_gt_box(box["box_coords"]), box["class_id"], 0, 0]
                 )
             for idx, pred in preds_df.iterrows():
                 preds.append(
+                        # Old (for combined)
                     [*ast.literal_eval(pred["xyxy"])[0], pred["class_id"], pred["conf"]]
+                        # New (for dataset-specific)
+                    # [*ast.literal_eval(pred["xyxy"])[0], int(pred_ids[idx]), pred["conf"]]
                 )
 
+
         metric_fn = MetricBuilder.build_evaluation_metric(
-            "map_2d", async_mode=True, num_classes=self.n_classes
+            "map_2d", async_mode=True, num_classes=414
         )
+        print(preds)
+        print(gt)
         metric_fn.add(np.array(preds), np.array(gt))
+        # Scale labels down to range
+        # should be such that min(label) - delta = 0
+        # delta is equal to -min(label)
+
 
         # compute PASCAL VOC metric at the all points
         map50 = metric_fn.value(iou_thresholds=0.5)["mAP"]

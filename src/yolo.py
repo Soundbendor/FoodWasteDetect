@@ -580,6 +580,7 @@ def clip_update_preds():
 
     # Initialize metrics class
     n_classes = sum([len(ds.cmap) for ds in datasets])
+    print(n_classes)
     metrics = ExperimentResult(preds_group, label_group, n_classes)
 
     precision, recall = metrics.get_pr()
@@ -641,11 +642,13 @@ def baseline_yolo_experiment():
     print(label_group.groups.keys())
 
     # Initialize metrics class
-    n_classes = sum([len(ds.cmap) for ds in datasets])
-    metrics = ExperimentResult(preds_group, label_group, n_classes)
+    # n_classes = max(labels["class_id"])
+    print(preds_group)
+    print(label_group)
+    metrics = ExperimentResult(preds_group, label_group, 0)
 
     precision, recall = metrics.get_pr()
-    map50 = metrics.get_map50()
+    map50, map50_95 = metrics.get_map50()
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
     print(f"mAP-50: {map50}")
@@ -653,4 +656,4 @@ def baseline_yolo_experiment():
 
 
 if __name__ == "__main__":
-    clip_update_preds()
+    baseline_yolo_experiment()
