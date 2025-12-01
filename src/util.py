@@ -195,11 +195,11 @@ class ExperimentResult:
 
             for idx, pred in preds_df.iterrows():
                 # [x1, y1, x2, y2, label_id, confidence]
-                pred["class"] = pred["class"].strip().lower()
-                if pred["class"] not in class_ids:
-                    class_ids[pred["class"]] = n_ids
+                pred["class_name"] = pred["class_name"].strip().lower()
+                if pred["class_name"] not in class_ids:
+                    class_ids[pred["class_name"]] = n_ids
                     n_ids += 1
-                class_id = class_ids[pred["class"]]
+                class_id = class_ids[pred["class_name"]]
 
                 preds.append(
                     [
