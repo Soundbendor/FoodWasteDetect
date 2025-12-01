@@ -732,6 +732,7 @@ def final_experiment():
     # start_id = exp.add_label_vectors(fw_test, start_id)
 
     # Get YOLO extracted patches
+    fw_test.train_set()
     fw_test.crop_patches("train")
     fw_test.detect_patches("train", fw_test.train_set, "best.pt")
     pred_df = fw_test.get_patches("train", True)
