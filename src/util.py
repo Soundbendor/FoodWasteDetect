@@ -64,7 +64,7 @@ class ExperimentResult:
         return self.ds_map[ds_name].iloc[class_id]["new_id"]
 
     def _unpack_gt_box(self, coords: str) -> list[int]:
-        return list(map(int, coords[1:-1].split()))
+        return list(map(float, coords[1:-1].split()))
 
     def get_pr(self, iou_threshold=0.5, use_txt=False) -> tuple[float, float]:
 
