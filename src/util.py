@@ -115,7 +115,7 @@ class ExperimentResult:
                     preds.append(
                         [
                             *ast.literal_eval(pred["xyxy"])[0],
-                            pred["class"].strip().lower(),
+                            pred["class_name"].strip().lower(),
                             pred["conf"],
                         ]
                     )
@@ -141,7 +141,7 @@ class ExperimentResult:
                         continue
 
                     iou = compute_iou(detection[:4], a[:4])
-                    if iou >= iou_threshold and gt_id == pred_id:
+                    if gt_id == pred_id:
                         tp += 1
                         used[idx] = True
                         matched = True

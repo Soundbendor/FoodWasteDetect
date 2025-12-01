@@ -672,8 +672,6 @@ def final_experiment():
         ds: Dataset, df: pd.DataFrame, cmap: pd.Series, exp: ExperimentManager
     ):
         pred_names = []
-        pred_ids = []
-        top5_ids = []
         query_vecs = []
         for batch in np.array_split(df["patch_pth"], len(df) / 100):
             imgs = []
@@ -690,11 +688,7 @@ def final_experiment():
             candidate_vecs = exp.db.query(None, query_vec)
             prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
             # WARN: needs full cmap, not dataset-specific one
-            pred_ids.append(cmap[prediction.strip()])
-            top5_ids.append([cmap[x.strip()] for x in top5_classes])
             pred_names.append(prediction.strip())
-        df["class_id"] = pred_ids
-        df["top5_ids"] = top5_ids
         df["class_name"] = pred_names
         return df
 
