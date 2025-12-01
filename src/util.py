@@ -35,7 +35,11 @@ class EvalMetric:
 class ExperimentResult:
     # INFO: Expects preds, results saved in df, loaded and grouped by file name
     def __init__(
-        self, preds: DataFrameGroupBy, truths: DataFrameGroupBy, n_classes: int
+        self,
+        preds: DataFrameGroupBy,
+        truths: DataFrameGroupBy,
+        n_classes: int,
+        cmap: pd.DataFrame,
     ):
         # Each element of (preds, truths) represents 1 image
         # Contains
@@ -47,6 +51,9 @@ class ExperimentResult:
             "foodseg103": pd.read_csv("src/util/foodseg103_map.csv", index_col=0),
             "uecfoodpix": pd.read_csv("src/util/uec_map.csv", index_col=0),
         }
+        self.cmap = cmap
+        # TODO: How should we map ids to text labels?
+        #
 
     def map_class_index(self, class_id: int, ds_name: str) -> int:
         """
@@ -59,7 +66,7 @@ class ExperimentResult:
     def _unpack_gt_box(self, coords: str) -> list[int]:
         return list(map(int, coords[1:-1].split()))
 
-    def get_pr(self, iou_threshold=0.5) -> tuple[float, float]:
+    def get_pr(self, iou_threshold=0.5, use_txt=False) -> tuple[float, float]:
 
         def compute_iou(box1, box2):
             x1, y1, x2, y2 = box1
@@ -96,13 +103,29 @@ class ExperimentResult:
 
             for idx, box in gt_boxes.iterrows():
                 # [x1, y1, x2, y2, label_id]
-                gt.append([*self._unpack_gt_box(box["box_coords"]), label_ids[idx]])
+                if use_txt:
+                    gt.append([*self._unpack_gt_box(box["box_coords"]), box["class"]])
+                else:
+                    gt.append([*self._unpack_gt_box(box["box_coords"]), label_ids[idx]])
 
             for idx, pred in preds_df.iterrows():
                 # [x1, y1, x2, y2, label_id, confidence]
-                preds.append(
-                    [*ast.literal_eval(pred["xyxy"])[0], pred["class_id"], pred["conf"]]
-                )
+                if use_txt:
+                    preds.append(
+                        [
+                            *ast.literal_eval(pred["xyxy"])[0],
+                            pred["class"].strip().lower(),
+                            pred["conf"],
+                        ]
+                    )
+                else:
+                    preds.append(
+                        [
+                            *ast.literal_eval(pred["xyxy"])[0],
+                            pred["class_id"].strip().lower(),
+                            pred["conf"],
+                        ]
+                    )
 
             preds.sort(key=lambda x: x[5], reverse=True)
             used = [False] * len(gt)
@@ -135,7 +158,7 @@ class ExperimentResult:
     #         map, _, _ = self.new_map50(iou_threshold)
     #     return np.mean(maps)
 
-    def get_map50(self) -> tuple[float, float]:
+    def get_map50(self, use_txt=False) -> tuple[float, float]:
         """
         Calculate mAP-50 across all predictions
         """
@@ -156,14 +179,30 @@ class ExperimentResult:
             if any(type(x) == pd.Series for x in gt_boxes["class_id"]):
                 continue
             for idx, box in gt_boxes.iterrows():
-                gt.append(
-                    [*self._unpack_gt_box(box["box_coords"]), label_ids[idx], 0, 0]
-                )
-            for idx, pred in preds_df.iterrows():
-                preds.append(
-                    [*ast.literal_eval(pred["xyxy"])[0], pred["class_id"], pred["conf"]]
-                )
+                # [x1, y1, x2, y2, label_id]
+                if use_txt:
+                    gt.append([*self._unpack_gt_box(box["box_coords"]), box["class"]])
+                else:
+                    gt.append([*self._unpack_gt_box(box["box_coords"]), label_ids[idx]])
 
+            for idx, pred in preds_df.iterrows():
+                # [x1, y1, x2, y2, label_id, confidence]
+                if use_txt:
+                    preds.append(
+                        [
+                            *ast.literal_eval(pred["xyxy"])[0],
+                            pred["class"].strip().lower(),
+                            pred["conf"],
+                        ]
+                    )
+                else:
+                    preds.append(
+                        [
+                            *ast.literal_eval(pred["xyxy"])[0],
+                            pred["class_id"].strip().lower(),
+                            pred["conf"],
+                        ]
+                    )
         metric_fn = MetricBuilder.build_evaluation_metric(
             "map_2d", async_mode=True, num_classes=self.n_classes
         )

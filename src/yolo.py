@@ -14,6 +14,7 @@ from data_wrappers.dataset import Dataset
 from data_wrappers.food201 import Food201
 from data_wrappers.foodseg103 import FoodSeg103
 from data_wrappers.foodx251 import FoodX251
+from data_wrappers.fwtest import FwTest
 from data_wrappers.uecfoodpix import UECFoodPix
 from database.clip_embedding import CLIPEmbedding
 from database.img_crop import ImageCropper
@@ -218,6 +219,15 @@ class ExperimentManager:
         df["img_files"] = df["patch_pths"].apply(Image.open)
         valid_imgs = df["img_files"].apply(self._check_img)
         return df[valid_imgs]
+
+    def add_label_vectors(self, ds: Dataset, start_idx: int):
+        # Get class labels from dataset
+        labels = ds.cmap
+        vectors = self.embedder.get_text_embedding(labels)
+        metadata = {"label": labels}
+        ids = list(range(start_idx, start_idx + len(labels)))
+        self.db.add_records(labels, vectors, metadata, ids)
+        return ids[-1]
 
     def update_vecdb(self, ds: Dataset, subset: str, start_idx: int) -> int:
         # Load patches for dataset
@@ -650,6 +660,112 @@ def baseline_yolo_experiment():
     print(f"Recall: {recall}")
     print(f"mAP-50: {map50}")
     # TODO: save predictions as experiment CSV
+
+
+def final_experiment():
+    """
+    Create a new detection dataframe (and csv) with updated classifications from YOLO.
+    """
+
+    # load dataset
+    def get_clip_classifications(
+        ds: Dataset, df: pd.DataFrame, cmap: pd.Series, exp: ExperimentManager
+    ):
+        pred_names = []
+        pred_ids = []
+        top5_ids = []
+        query_vecs = []
+        for batch in np.array_split(df["patch_pth"], len(df) / 100):
+            imgs = []
+            for img_name in batch:
+                try:
+                    imgs.append(Image.open(img_name))
+                except FileNotFoundError:
+                    continue
+            query_vecs.extend(exp.embedder.get_embedding_from_preloaded(imgs))
+
+        for idx, detection in df.iterrows():
+            query_vec = query_vecs[idx]
+            # TODO: convert class name to idx
+            candidate_vecs = exp.db.query(None, query_vec)
+            prediction, top5_classes = exp.db.vote_classification(candidate_vecs)
+            # WARN: needs full cmap, not dataset-specific one
+            pred_ids.append(cmap[prediction.strip()])
+            top5_ids.append([cmap[x.strip()] for x in top5_classes])
+            pred_names.append(prediction.strip())
+        df["class_id"] = pred_ids
+        df["top5_ids"] = top5_ids
+        df["class_name"] = pred_names
+        return df
+
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+
+    # Load all food compost dataset
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uecfoodpix_pth = cfg["paths"]["uecfoodpix"]
+    food201_pth = cfg["paths"]["food201"]
+    fw_pth = cfg["paths"]["fw_test"]
+
+    food201 = Food201(root=food201_pth)
+    uecfoodpix = UECFoodPix(root=uecfoodpix_pth)
+    foodseg103 = FoodSeg103(root=foodseg103_pth)
+    fw_test = FwTest(root=fw_pth)
+
+    datasets = [food201, uecfoodpix, foodseg103]
+    # Load detections from YOLO
+    preds_set = []
+    # Load CMAP from YOLO combined dataset
+    cmap_pth = "/nfs/stak/users/beerya/soundbendor/food_datasets/combined_food_seg/dataset.yaml"
+    with open(cmap_pth, "r") as stream:
+        cmap = yaml.load(stream, Loader=yaml.Loader)["names"]
+        # TODO: invert from {id: name} to {name: id}
+        cmap = {v: k for k, v in cmap.items()}
+
+    """Generate vectors"""
+    exp = ExperimentManager(cfg)
+    start_id = 0
+    for ds in datasets:
+        start_id = exp.update_vecdb(ds, "train", start_id)
+
+    """Add label vectors"""
+    start_id = exp.add_label_vectors(fw_test, start_id)
+
+    # Get YOLO extracted patches
+    pred_df = fw_test.get_patches("train", True)
+    pred_df["source_img"] = pred_df.apply(
+        lambda x: fw_test.name + "_" + str(x["source_img"]), axis=1
+    )
+    pred_df = get_clip_classifications(fw_test, pred_df, cmap, exp)
+
+    # Get ground truth
+    gt_df = fw_test.get_patches("train", False)
+    # Invert classmap to work as {name: id}
+    cmap = pd.Series(fw_test.cmap.index.values, index=fw_test.cmap)
+    gt_df["dataset"] = fw_test.name
+    gt_df["src_img"] = gt_df.apply(
+        lambda x: fw_test.name + "_" + str(x["src_img"]), axis=1
+    )
+    gt_df["class_id"] = gt_df.apply(lambda x: cmap[x["class"]], axis=1)
+
+    # Where each groupby is a Dataframe of ground truth objects for a given image
+    pred_df["source_img"] = pred_df["source_img"].astype(str)
+    preds_group = pred_df.sample(frac=1).groupby("source_img")
+    # Each groupby:
+    gt_df["src_img"] = gt_df["src_img"].astype(str)
+    label_group = gt_df.groupby("src_img")
+    print(label_group.groups.keys())
+
+    # Initialize metrics class
+    n_classes = sum([len(ds.cmap) for ds in datasets])
+    metrics = ExperimentResult(preds_group, label_group, n_classes, cmap)
+
+    # WARN: metrics class currently compares class IDs
+    precision, recall = metrics.get_pr(use_txt=True)
+    map50, map50_95 = metrics.get_map50(use_txt=True)
+    print(f"Precision: {precision}")
+    print(f"Recall: {recall}")
+    print(f"mAP-50: {map50}")
 
 
 if __name__ == "__main__":
