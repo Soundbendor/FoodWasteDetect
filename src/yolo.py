@@ -292,19 +292,21 @@ def experiment_single_dataset():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     # ds_path = cfg["paths"]["foodseg103"]
-    ds_path = cfg["paths"]["uecfoodpix"]
+    # ds_path = cfg["paths"]["uecfoodpix"]
+    ds_path = cfg["paths"]["foodx251"]
     # ds_path = cfg["paths"]["food201"]
 
     # ds = Food201(root=ds_path)
-    ds = UECFoodPix(root=ds_path)
+    # ds = UECFoodPix(root=ds_path)
     # ds = FoodSeg103(root=ds_path)
+    ds = FoodX251(root=ds_path)
     exp = ExperimentManager(cfg)
 
     # Step 1: Generate training embeddings
 
     eval_set = ds.get_patches("test", False)[:1000]
 
-    # exp.update_vecdb(ds, "train", 0)
+    exp.update_vecdb(ds, "train", 0)
     exp.evaluate_model(eval_set)
 
 
@@ -656,4 +658,4 @@ def baseline_yolo_experiment():
 
 
 if __name__ == "__main__":
-    baseline_yolo_experiment()
+    experiment_single_dataset()
