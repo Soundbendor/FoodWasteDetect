@@ -1,8 +1,6 @@
 import logging
 import os
-import uuid
 from itertools import chain
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -17,42 +15,9 @@ from data_wrappers.foodx251 import FoodX251
 from data_wrappers.fwtest import FwTest
 from data_wrappers.uecfoodpix import UECFoodPix
 from database.clip_embedding import CLIPEmbedding
-from database.img_crop import ImageCropper
 from database.vecdb import VectorDB
+from experiment_manager import ExperimentManager
 from util import EvalMetric, ExperimentResult, parse_args, parse_cfg
-
-
-# Initialize a YOLO-World
-# TODO: evaluation metric
-def main():
-    args = parse_args()
-    cfg = parse_cfg(args.config_file)
-    ds_path = cfg["paths"]["dataset"]
-    ds = FoodX251(ds_path)
-    model = YOLOWorld(
-        "yolov8x-worldv2.pt"
-    )  # or select yolov8m/l-world.pt for different sizes
-    model.set_classes(ds.cmap["label"])
-
-    val_set = ds.val_set()
-    metric = EvalMetric()
-
-    n_samples = int(cfg["settings"]["eval_samples"])
-    if n_samples != 0:
-        val_set = val_set.sample(n=n_samples, random_state=42)
-
-    acc = 0
-    for i, row in val_set.iterrows():
-        results = model.predict(f"{ds_path}/val/val_set/{row['fname']}")
-        preds = list(chain.from_iterable([x.boxes.cls.tolist() for x in results]))
-        preds = [int(x) for x in preds]
-        ground_truth = ds.cmap.index[ds.cmap["label"] == row["class"]].tolist()[0]
-        if ground_truth in preds:
-            acc += 1
-        logging.info(results)
-        logging.info(f"Ground Truth Label: {row['class']}")
-        logging.info(f"Predicted Labels: {[ds.cmap.iloc[x] for x in preds]}")
-    print(f"ACCURACY: {acc / n_samples}")
 
 
 def eval_food201():
@@ -194,98 +159,6 @@ def build_patch_db():
 
         ids = [get_id(pth) for pth in patch_pths]
         db.add_records(list(patches["class"]), vectors, metadata, ids)
-
-
-class ExperimentManager:
-    def __init__(self, cfg: dict):
-        self.embedder = CLIPEmbedding(
-            cfg["embed_model"],
-            cfg["paths"]["embed_model_save_path"],
-            cfg["embed_size"],
-        )
-        self.db = VectorDB(
-            cfg["qdrant_url"],
-            cfg["collection_name"],
-            cfg["reranker_model"],
-            cfg["embed_size"],
-        )
-        self.BATCH_SIZE = 50
-
-    def _check_img(self, img: Image) -> bool:
-        return all(i >= 20 for i in img.size)
-
-    def load_imgs(self, df: pd.DataFrame) -> pd.DataFrame:
-        # load all the images
-        df["img_files"] = df["patch_pths"].apply(Image.open)
-        valid_imgs = df["img_files"].apply(self._check_img)
-        return df[valid_imgs]
-
-    def add_label_vectors(self, ds: Dataset, start_idx: int):
-        # Get class labels from dataset
-        labels = ds.cmap
-        vectors = self.embedder.get_text_embedding(["An image of " + x for x in labels])
-        metadata = {"label": labels}
-        ids = list(range(start_idx, start_idx + len(labels)))
-        self.db.add_records(labels, vectors, metadata, ids)
-        return ids[-1]
-
-    def update_vecdb(self, ds: Dataset, subset: str, start_idx: int) -> int:
-        # Load patches for dataset
-        patch_df = ds.get_patches(subset, False)
-        # Update index to start from desired database ID position
-        patch_df.index = patch_df.index.to_numpy() + start_idx
-        # Split dataset into batches
-        batches = np.array_split(patch_df, self.BATCH_SIZE)
-        # Confirm that database exists
-        self.db.make_collection()
-        for patches in batches:
-            if self.db.point_exists(patches.index[0]):
-                print("WARN: ID already exists, skipping...")
-                continue
-            patches["patch_pths"] = [
-                os.path.join(ds.root, subset, "patches", x)
-                for x in patches["patch_name"]
-            ]
-            # Filters out invalid images, returns updated dataframe
-            patches = self.load_imgs(patches)
-            vectors = self.embedder.get_embedding_from_preloaded(
-                list(patches["img_files"])
-            )
-            metadata = {
-                "img_path": pd.Series(patches["patch_pths"]),
-                "src_img": patches["src_img"].astype(object),
-            }
-
-            self.db.add_records(
-                list(patches["class"]),
-                vectors,
-                metadata,
-                list(map(int, patches.index)),
-            )
-        # For subsequent calls, return the max ID value placed in dataset
-        return patch_df.index[-1]
-
-    def evaluate_model(self, eval_set: pd.DataFrame) -> EvalMetric:
-        metric = EvalMetric()
-        for i, row in eval_set.iterrows():
-            try:
-                query_vec = self.embedder.get_embedding([row["patch_pth"]])[0]
-            except Exception as e:
-                continue
-            candidate_vecs = self.db.query(None, query_vec)
-            score, confidence, prediction = self.db.score(
-                candidate_vecs, row["class"], "voting"
-            )
-            top5_score, _, _ = self.db.score(candidate_vecs, row["class"], "top5")
-            metric.update_scores(candidate_vecs, self.db, row["class"])
-            logging.info(f"Predicted Label: {prediction}")
-            logging.info(f"True label: {row['class']}")
-            logging.info(f"In Top 5? {top5_score}")
-            logging.info(f"Current Accuracies: {metric.compute_accuracies()}")
-
-        scores = metric.compute_accuracies()
-        print(scores)
-        return metric
 
 
 def finetune_yolov11():

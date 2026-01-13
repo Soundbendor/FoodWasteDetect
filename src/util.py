@@ -32,6 +32,8 @@ class EvalMetric:
         return self.scores / self.len
 
 
+# WARN: Should deprecate. Out of date, buggy, brittle interface.
+# Should replace with ExperimentReport() going forward.
 class ExperimentResult:
     # INFO: Expects preds, results saved in df, loaded and grouped by file name
     def __init__(

@@ -22,8 +22,10 @@ class UECFoodPix(SegDataset):
         )
         return df["name"]
 
+    # TODO: Should deprecate this interface, prefer directly calling load_df
     def test_set(self) -> pd.DataFrame:
         return self._load_df("test.csv")
 
+    # TODO: Should deprecate this interface, prefer directly calling load_df
     def train_set(self) -> pd.DataFrame:
         return self._load_df("train.csv")

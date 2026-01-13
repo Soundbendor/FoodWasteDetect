@@ -1,8 +1,10 @@
+import itertools
 import os
 from typing import Callable, List
 
 import numpy as np
 import pandas as pd
+from pandas.core.groupby import DataFrameGroupBy
 from PIL import Image
 from tqdm import tqdm
 from ultralytics.utils.ops import xywhn2xyxy
@@ -131,6 +133,7 @@ class Dataset:
             raise FileNotFoundError()
         raise ValueError("Must use train, test, or val")
 
+    # WARN: This should not be a part of the Dataset interface, as it is incompatible with classification datasets.
     def get_boxes(self, subset: str) -> str:
         """
         Given test, train, or val subset, return the path to bounding boxes for this set.
@@ -184,3 +187,39 @@ class SegDataset(Dataset):
             subset = os.path.splitext(fname)[0]
             self._build_df(subset)
         return pd.read_csv(csv_pth)
+
+    def get_box_dataset(self, split: str) -> DataFrameGroupBy:
+        """
+        Given a dataset split, return a GroupBy object
+        Data is grouped by image
+        Each dataframe in the GroupBy contains one or multiple bounding boxes and labels
+        keys: ["label": int,"boxes": list[int] ]
+        """
+
+        def load_boxes(row: pd.Series) -> list[tuple[int, list[float]]]:
+            # Get file path of label file
+            box_pth = os.path.join(self.root, "boxes", row["boxes"])
+            # Read coordinates from box file
+            with open(box_pth, "r") as file:
+                raw_labels = file.readlines()
+            # Get filename of original image
+            fname = row["images"]
+            # Convert List[str] to List[float]
+            labels = []
+            for l in raw_labels:
+                class_id = int(l[0])
+                box_id = [float(x) for x in l[1:]]
+                labels.append((fname, class_id, box_id))
+            return labels
+
+        # load dataframe for the assosciated split
+        imgs_df = self._load_df(f"{split}.csv")
+        dets = list(
+            itertools.chain.from_iterable(
+                [load_boxes(row) for _, row in imgs_df.iterrows()]
+            )
+        )
+        dets_df = pd.DataFrame.from_records(dets, columns=["fname", "class_id", "box"])
+        return dets_df.groupby("fname")
+
+        # for each image, load bounding boxes

@@ -22,8 +22,10 @@ class FoodSeg103(SegDataset):
         data = {"id": [int(k) for k in labels.keys()], "label": labels.values()}
         return pd.DataFrame().from_dict(data)["label"]
 
+    # TODO: Should deprecate this interface, prefer directly calling load_df
     def test_set(self) -> pd.DataFrame:
         return self._load_df("test.csv")
 
+    # TODO: Should deprecate this interface, prefer directly calling load_df
     def train_set(self) -> pd.DataFrame:
         return self._load_df("train.csv")

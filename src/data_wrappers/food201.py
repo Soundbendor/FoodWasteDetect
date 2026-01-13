@@ -29,8 +29,10 @@ class Food201(SegDataset):
         class_label.to_csv("food201_class_labels.csv")
         return class_label["label"]
 
+    # TODO: Should deprecate this interface, prefer directly calling load_df
     def test_set(self):
         return self._load_df("test.csv")
 
+    # TODO: Should deprecate this interface, prefer directly calling load_df
     def train_set(self):
         return self._load_df("train.csv")
