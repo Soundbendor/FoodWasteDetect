@@ -188,38 +188,34 @@ class SegDataset(Dataset):
             self._build_df(subset)
         return pd.read_csv(csv_pth)
 
-    def get_box_dataset(self, split: str) -> DataFrameGroupBy:
+    def get_box_dataset(self, split: str) -> dict[str, pd.DataFrame]:
         """
         Given a dataset split, return a GroupBy object
-        Data is grouped by image
+
+        Returns {"label", DataFrame}
         Each dataframe in the GroupBy contains one or multiple bounding boxes and labels
-        keys: ["label": int,"boxes": list[int] ]
+        Dataframe keys: ["label": int,"boxes": list[int] ]
         """
 
-        def load_boxes(row: pd.Series) -> list[tuple[int, list[float]]]:
+        def read_box_annot(row: pd.Series) -> pd.DataFrame:
+            """
+            Given a row from a Dataset representing an image,
+            extract all of the bounding box labels assosciated with that image.
+            """
             # Get file path of label file
             box_pth = os.path.join(self.root, "boxes", row["boxes"])
             # Read coordinates from box file
             with open(box_pth, "r") as file:
                 raw_labels = file.readlines()
-            # Get filename of original image
-            fname = row["images"]
             # Convert List[str] to List[float]
             labels = []
             for l in raw_labels:
                 class_id = int(l[0])
                 box_id = [float(x) for x in l[1:]]
-                labels.append((fname, class_id, box_id))
-            return labels
+                labels.append((class_id, box_id))
+            return pd.DataFrame.from_records(labels, columns=["class_id", "box"])
 
         # load dataframe for the assosciated split
         imgs_df = self._load_df(f"{split}.csv")
-        dets = list(
-            itertools.chain.from_iterable(
-                [load_boxes(row) for _, row in imgs_df.iterrows()]
-            )
-        )
-        dets_df = pd.DataFrame.from_records(dets, columns=["fname", "class_id", "box"])
-        return dets_df.groupby("fname")
+        return {str(row["images"]): read_box_annot(row) for _, row in imgs_df.iterrows()}
 
-        # for each image, load bounding boxes
