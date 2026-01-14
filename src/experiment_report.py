@@ -24,7 +24,7 @@ class ExperimentReport:
         union_area = box1_area + box2_area - inter_area
         return inter_area / union_area
 
-    def get_pr(self, iou_threshold: float = 0.50) -> tuple[float, float]:
+    def get_pr(self, iou_threshold: float = 0.00) -> tuple[float, float]:
         """
         At the end of an experiment, calculate the classwise precision and recall
         """
