@@ -39,12 +39,12 @@ class ExperimentReport:
             # Total number of positives is equal to the number of ground truth labels in the dataset
             total_positive += len(truths)
             # To compute p/r, we only compute IOU in cases of matching class IDs
-            # Sort predictons  by confidence 
+            # Sort predictons  by confidence
             preds = preds.sort_values(by="conf")
             for _, pred in preds.iterrows():
                 matched = False
                 # For each remaining detection
-                for gt_idx, gt in truths:
+                for gt_idx, gt in truths.iterrows():
                     if pred["class_id"] == gt["class_id"]:
                         iou = self.compute_iou(pred["box"], gt["box"])
                         if iou >= iou_threshold:
@@ -63,9 +63,3 @@ class ExperimentReport:
     def get_map50(self) -> float:
         # TODO: Implement map50 calculation
         pass
-
-
-
-                            
-
-                
