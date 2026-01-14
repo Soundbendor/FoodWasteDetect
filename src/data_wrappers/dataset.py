@@ -197,13 +197,13 @@ class SegDataset(Dataset):
         Dataframe keys: ["label": int,"boxes": list[int] ]
         """
 
-        def read_box_annot(row: pd.Series) -> pd.DataFrame:
+        def read_box_annot(row: pd.Series, subset: str) -> pd.DataFrame:
             """
             Given a row from a Dataset representing an image,
             extract all of the bounding box labels assosciated with that image.
             """
             # Get file path of label file
-            box_pth = os.path.join(self.root, "boxes", row["boxes"])
+            box_pth = os.path.join(self.root, subset, "boxes", row["boxes"])
             # Read coordinates from box file
             with open(box_pth, "r") as file:
                 raw_labels = file.readlines()
@@ -217,5 +217,7 @@ class SegDataset(Dataset):
 
         # load dataframe for the assosciated split
         imgs_df = self._load_df(f"{split}.csv")
-        return {str(row["images"]): read_box_annot(row) for _, row in imgs_df.iterrows()}
-
+        return {
+            str(row["images"]): read_box_annot(row, split)
+            for _, row in imgs_df.iterrows()
+        }
