@@ -61,3 +61,7 @@ def get_predicted_detections(results: Results) -> pd.DataFrame:
     boxes = results.boxes.xywhn.tolist()  # type: ignore
     confs = results.boxes.conf.tolist()
     return pd.DataFrame.from_dict({"class_id": class_ids, "box": boxes, "conf": confs})
+
+
+if __name__ == "__main__":
+    main()
