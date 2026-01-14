@@ -13,6 +13,33 @@ from util import parse_args, parse_cfg
 SUBSET = "test"
 
 
+def convert_food201_class_idx(
+    dataset: dict[str, pd.DataFrame], class_names: list[str]
+) -> tuple[dict[str, pd.DataFrame], list[str]]:
+    """
+    Remove "Unknown" vales from Food201 dataset class labels
+    To avoid introducing noise into the label space
+    """
+    food201_class_conversion = {}
+    new_idx = 0
+    new_class_labels = []
+    for original_idx, class_name in enumerate(class_names):
+        if class_name == "Unknown":
+            food201_class_conversion[original_idx] = -1
+        else:
+            food201_class_conversion[original_idx] = new_idx
+            new_idx += 1
+            new_class_labels.append(class_name)
+
+    # Convert all class indices to new scheme
+    for img_name, img_df in dataset.items():
+        img_df["class_id"] = img_df["class_id"].apply(
+            lambda x: food201_class_conversion[x]
+        )
+
+    return dataset, new_class_labels
+
+
 # Initialize a YOLO-World
 # TODO: evaluation metric
 def main():
@@ -23,13 +50,18 @@ def main():
     model = YOLOWorld(
         "yolov8x-worldv2.pt"
     )  # or select yolov8m/l-world.pt for different sizes
-    class_names = list(ds.get_class_labels())
-    model.set_classes(class_names)
 
     # Get ground truth boxes for metrics class
+    class_names = list(ds.get_class_labels())
     gt_dataset = ds.get_box_dataset(SUBSET)
+    gt_dataset, class_names = convert_food201_class_idx(gt_dataset, class_names)
+    # Remove all "Unknown" values from dataset
+
+    # Step 1: Make a new class map
+    # Where each key is an old index [0...207], values are new values
     pred_ds = {}
 
+    model.set_classes(class_names)
     # Each dataframe represent one image.
     ds_img_keys = pd.Series(gt_dataset.keys())
 
