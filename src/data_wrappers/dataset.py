@@ -210,6 +210,7 @@ class SegDataset(Dataset):
             # Convert List[str] to List[float]
             labels = []
             for l in raw_labels:
+                l = l.split()
                 class_id = int(l[0])
                 box_id = [float(x) for x in l[1:]]
                 labels.append((class_id, box_id))
