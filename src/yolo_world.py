@@ -41,6 +41,7 @@ def main():
     for img_name in ds_img_keys:
         img_pth = os.path.join(ds_path, SUBSET, "images", img_name)
         results = model.predict(img_pth)
+        print(results)
         pred_ds[img_name] = get_predicted_detections(results)
 
     # Initialize metrics
