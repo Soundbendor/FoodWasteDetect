@@ -230,7 +230,9 @@ class EvalMetric:
     #         return map50, map50_95
     #
     #
-    # def parse_args() -> argparse.Namespace:
+
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
     parser.add_argument("--config_file", help="Path to experiment config")
     parser.add_argument("--partition", type=int)
