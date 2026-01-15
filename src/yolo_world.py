@@ -40,9 +40,8 @@ def convert_food201_class_idx(
     return dataset, new_class_labels
 
 
-# Initialize a YOLO-World
-# TODO: evaluation metric
-def main():
+# Initialize a YOLO-World model
+def eval_yolo_world():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     ds_path = cfg["paths"]["dataset"]
@@ -82,6 +81,31 @@ def main():
     print(f"Recall: {recall}")
 
 
+def train_yolo_world():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    ds_path = cfg["paths"]["dataset"]
+    ds = Food201(ds_path)
+    model = YOLOWorld(
+        "yolov8x-worldv2.pt"
+    )  # or select yolov8m/l-world.pt for different sizes
+
+    # Get ground truth boxes for metrics class
+    class_names = list(ds.get_class_labels())
+    gt_dataset = ds.get_box_dataset(SUBSET)
+
+    # WARN: We're preserving the "Unknown" values for now, to see how they impact training YOLO-World.
+    # Should remove in future runs.
+
+    # TODO: Should validate that bounding box conversions saved in these files are valid and YOLO-compliant
+    # gt_dataset, class_names = convert_food201_class_idx(gt_dataset, class_names)
+    # Remove all "Unknown" values from dataset
+
+    # Path to dataset.yaml for converted Food201
+    training_ds = cfg["paths"]["food201_yolo"]
+    model.train(data=training_ds, epochs=100)
+
+
 def get_predicted_detections(results: Results) -> pd.DataFrame:
     """
     Convert YOLO predictions to DataFrame
@@ -96,4 +120,4 @@ def get_predicted_detections(results: Results) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    main()
+    train_yolo_world()
