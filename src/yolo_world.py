@@ -79,6 +79,9 @@ def eval_yolo_world():
     precision, recall = metrics.get_pr()
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
+    metrics = metrics.get_map50()
+    print(f"mAP50: {metrics["map_50"]}")
+    print(f"mAP50-95: {metrics["map"]}")
 
 
 def train_yolo_world():

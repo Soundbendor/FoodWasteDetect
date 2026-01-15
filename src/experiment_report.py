@@ -1,4 +1,6 @@
+import numpy as np
 import pandas as pd
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 
 class ExperimentReport:
@@ -40,16 +42,19 @@ class ExperimentReport:
             total_positive += len(truths)
             # To compute p/r, we only compute IOU in cases of matching class IDs
             # Sort predictons  by confidence
-            preds = preds.sort_values(by="conf")
+            preds = preds.sort_values(by="conf", ascending=False)
             for _, pred in preds.iterrows():
                 matched = False
+                matched_dets = set()
                 # For each remaining detection
                 for gt_idx, gt in truths.iterrows():
+                    if gt_idx in matched_dets:
+                        continue
                     if pred["class_id"] == gt["class_id"]:
                         iou = self.compute_iou(pred["box"], gt["box"])
                         if iou >= iou_threshold:
                             true_positive += 1
-                            truths.drop(gt_idx)
+                            matched_dets.add(gt_idx)
                             matched = True
                             break
                 # If none of the ground truths match this prediction, it is a false detection.
@@ -60,6 +65,41 @@ class ExperimentReport:
         recall = true_positive / total_positive
         return precision, recall
 
-    def get_map50(self) -> float:
+    def get_results_tensor(
+        self, dataset: dict[str, pd.DataFrame], is_pred: bool
+    ) -> list[dict]:
+        """
+        From a Dataset of predictions, reformat into a TorchMetrics compliant list.
+
+        Should contain list of dicts, where each dict represents an image.
+            boxes: {n x 4} dimension matrix, where n is number of detections
+            scores: {n} dimension vector, confidence scores for each det.
+            labels: {n} dimension vector, 0-indexed class labels for each det.
+        """
+        preds = []
+        for img_name, img_df in dataset.items():
+            result = {
+                "boxes": np.array(img_df["box"]),
+                "labels": img_df["class_id"].to_numpy(),
+            }
+            if is_pred:
+                result["scores"] = img_df["conf"].to_numpy()
+            preds.append(result)
+        return preds
+
+    def get_map50(self) -> dict:
+        """
+        Use TorchMetrics to get Mean Average Precision and Mean Average Recall
+        """
         # TODO: Implement map50 calculation
-        pass
+        # INFO: Box type set to cxcywh to comply with YOLO bounding box formats
+        # INFO: MAP also supports 'segm' iou type for instance segmentation evaluation
+        metric = MeanAveragePrecision(
+            iou_type="bbox", box_format="cxcywh", class_metrics=True
+        )
+        preds = self.get_results_tensor(self.pred, is_pred=True)
+        targets = self.get_results_tensor(self.actual, is_pred=False)
+
+        metric.update(preds, targets)
+        results = metric.compute()
+        return results
