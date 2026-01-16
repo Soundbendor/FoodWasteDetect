@@ -83,7 +83,9 @@ class ExperimentReport:
                 "boxes": torch.from_numpy(
                     np.array(img_df["box"].tolist()).astype(np.float64)
                 ),
-                "labels": torch.from_numpy(img_df["class_id"].to_numpy()),
+                "labels": torch.from_numpy(
+                    img_df["class_id"].to_numpy().astype(np.int64)
+                ),
             }
             if is_pred:
                 result["scores"] = torch.from_numpy(img_df["conf"].to_numpy())
