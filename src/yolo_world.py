@@ -59,6 +59,7 @@ def eval_yolo_world():
     # Step 1: Make a new class map
     # Where each key is an old index [0...207], values are new values
     pred_ds = {}
+    gt_subset = {}
 
     model.set_classes(class_names)
     # Each dataframe represent one image.
@@ -73,9 +74,10 @@ def eval_yolo_world():
         img_pth = os.path.join(ds_path, SUBSET, "images", img_name)
         results = model.predict(img_pth)[0]
         pred_ds[img_name] = get_predicted_detections(results)
+        gt_subset[img_name] = gt_dataset[img_name]
 
     # Initialize metrics
-    metrics = ExperimentReport(pred_ds, gt_dataset)
+    metrics = ExperimentReport(pred_ds, gt_subset)
     precision, recall = metrics.get_pr()
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
