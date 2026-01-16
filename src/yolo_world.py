@@ -125,4 +125,4 @@ def get_predicted_detections(results: Results) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    train_yolo_world()
+    eval_yolo_world()
