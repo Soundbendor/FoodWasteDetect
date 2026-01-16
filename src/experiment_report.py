@@ -80,7 +80,9 @@ class ExperimentReport:
         preds = []
         for img_name, img_df in dataset.items():
             result = {
-                "boxes": torch.from_numpy(np.array(img_df["box"]).astype(np.float64)),
+                "boxes": torch.from_numpy(
+                    np.array(img_df["box"].tolist()).astype(np.float64)
+                ),
                 "labels": torch.from_numpy(img_df["class_id"].to_numpy()),
             }
             if is_pred:
