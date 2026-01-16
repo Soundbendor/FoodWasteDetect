@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import torch
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 
@@ -79,11 +80,11 @@ class ExperimentReport:
         preds = []
         for img_name, img_df in dataset.items():
             result = {
-                "boxes": np.array(img_df["box"]),
-                "labels": img_df["class_id"].to_numpy(),
+                "boxes": torch.from_numpy(np.array(img_df["box"])),
+                "labels": torch.from_numpy(img_df["class_id"].to_numpy()),
             }
             if is_pred:
-                result["scores"] = img_df["conf"].to_numpy()
+                result["scores"] = torch.from_numpy(img_df["conf"].to_numpy())
             preds.append(result)
         return preds
 
