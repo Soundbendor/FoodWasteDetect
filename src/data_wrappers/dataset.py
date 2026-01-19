@@ -156,7 +156,8 @@ class SegDataset(Dataset):
         should have [img, class_id, mask, segment, box]
         """
         # Go to either train or test
-        # WARN: Order is not guaranteed here.
+
+        valid_dirs = ["xyxy_boxes, boxes, images, labels, masks"]
         path = os.path.join(self.root, split)
         dirs = [os.path.join(path, x) for x in os.listdir(path)]
         dirs = [x for x in dirs if os.path.isdir(x)]
@@ -167,8 +168,8 @@ class SegDataset(Dataset):
         # this throws an obscure error.
         df = pd.DataFrame(columns=basenames)
         for dir, basename in paths:
-            # Explicitly ignore patches directory
-            if basename == "patches":
+            # Explicitly ignore irrelevant directories
+            if basename not in valid_dirs:
                 continue
             # We need a special handler for boxes, to fix missing files
             # TODO: complete or delete
