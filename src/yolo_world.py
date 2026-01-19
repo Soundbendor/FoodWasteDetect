@@ -5,6 +5,7 @@ from ultralytics import YOLOWorld
 from ultralytics.engine.results import Results
 
 from data_wrappers.food201 import Food201
+from data_wrappers.fwtest import FwTest
 from experiment_report import ExperimentReport
 from util.util import parse_args, parse_cfg
 
@@ -43,7 +44,7 @@ def eval_yolo_world():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     ds_path = cfg["paths"]["dataset"]
-    ds = Food201(ds_path)
+    ds = FwTest(ds_path)
     model = YOLOWorld(
         "yolov8x-worldv2.pt"
     )  # or select yolov8m/l-world.pt for different sizes
