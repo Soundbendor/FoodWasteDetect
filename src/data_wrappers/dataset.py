@@ -157,7 +157,7 @@ class SegDataset(Dataset):
         """
         # Go to either train or test
 
-        valid_dirs = ["xyxy_boxes, boxes, images, labels, masks"]
+        valid_dirs = ["xyxy_boxes", "boxes", "images", "labels", "masks"]
         path = os.path.join(self.root, split)
         dirs = [os.path.join(path, x) for x in os.listdir(path)]
         dirs = [x for x in dirs if os.path.isdir(x)]
