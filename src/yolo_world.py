@@ -1,6 +1,4 @@
-import logging
 import os
-from itertools import chain
 
 import pandas as pd
 from ultralytics import YOLOWorld
@@ -8,7 +6,8 @@ from ultralytics.engine.results import Results
 
 from data_wrappers.food201 import Food201
 from experiment_report import ExperimentReport
-from util import parse_args, parse_cfg
+
+from .util import parse_args, parse_cfg
 
 SUBSET = "test"
 
@@ -123,5 +122,5 @@ def get_predicted_detections(results: Results) -> pd.DataFrame:
     return pd.DataFrame.from_dict({"class_id": class_ids, "box": boxes, "conf": confs})
 
 
-if __name__ == "__main__":
+def main():
     eval_yolo_world()

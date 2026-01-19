@@ -17,6 +17,7 @@ build_clip_db = "app:build_img_vdb"
 test_clip = "app:eval_img_vdb"
 test_yolo = "yolo:main"
 seg_to_boxes = "util.seg_to_boxes:main"
+yolo_world = "yolo_world:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
