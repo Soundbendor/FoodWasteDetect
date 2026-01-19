@@ -1,7 +1,6 @@
 import argparse
 import functools
 import os
-import random
 from typing import List
 
 import matplotlib.pyplot as plt
@@ -78,11 +77,17 @@ def coco_to_yolo(coco_box: List[float], img_w: int, img_h: int) -> List[float]:
     return [x_center / img_w, y_center / img_h, box_w / img_w, box_h / img_h]
 
 
+# Three main goals
+# 1) Move current "labels" to "seg_labels"
+# 2) Generate cxywhn boxes in labels/
+# 3) Generate xyxy boxes in
 def main(ds_split: str):
     seg_path = os.path.join(ds_split, "labels")
     outdir = os.path.join(ds_split, "boxes")
+    xyxy_outdir = os.path.join(ds_split, "xyxy_boxes")
     box_dir = os.path.join(ds_split, "boxed_imgs")
     os.makedirs(outdir, exist_ok=True)
+    os.makedirs(xyxy_outdir, exist_ok=True)
     os.makedirs(box_dir, exist_ok=True)
     print("Generating bounding boxes...")
     for fname in tqdm(os.listdir(seg_path)):
@@ -103,7 +108,9 @@ def main(ds_split: str):
                 coco_boxes = xyxy2xywh(np.array(bboxes))
             except Exception as e:
                 print(e)
-                with open(os.path.join(outdir, f"{os.path.splitext(fname)[0]}_NAN.txt"), "w") as box_file:
+                with open(
+                    os.path.join(outdir, f"{os.path.splitext(fname)[0]}_NAN.txt"), "w"
+                ) as box_file:
                     box_file.write("Empty")
                 continue
 
@@ -116,6 +123,13 @@ def main(ds_split: str):
                 for idx, label in enumerate(labels.keys()):
                     label_string = (
                         f"{int(label)} {' '.join([str(x) for x in yolo_boxes[idx]])}\n"
+                    )
+                    box_file.write(label_string)
+            # Write xyxy coordinates to a new file
+            with open(os.path.join(xyxy_outdir, fname), "w") as box_file:
+                for idx, label in enumerate(labels.keys()):
+                    label_string = (
+                        f"{int(label)} {' '.join([str(x) for x in bboxes[idx]])}\n"
                     )
                     box_file.write(label_string)
 

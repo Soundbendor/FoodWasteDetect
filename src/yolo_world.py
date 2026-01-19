@@ -69,7 +69,6 @@ def eval_yolo_world():
     if n_samples != 0:
         ds_img_keys = ds_img_keys.sample(n=n_samples, random_state=42)
 
-    # TODO: Set up YOLO-World to report precision/recall
     for img_name in ds_img_keys:
         img_pth = os.path.join(ds_path, SUBSET, "images", img_name)
         results = model.predict(img_pth)[0]

@@ -9,6 +9,7 @@ class ExperimentReport:
         self.pred = pred
         self.actual = actual
 
+    # WARN: This IoU computation is not compatible with xywhn center-xy coordinates.
     def compute_iou(self, box1, box2):
         """
         Given two boxes, compute the IOU.
@@ -96,7 +97,6 @@ class ExperimentReport:
         """
         Use TorchMetrics to get Mean Average Precision and Mean Average Recall
         """
-        # TODO: Implement map50 calculation
         # INFO: Box type set to cxcywh to comply with YOLO bounding box formats
         # INFO: MAP also supports 'segm' iou type for instance segmentation evaluation
         metric = MeanAveragePrecision(
