@@ -166,7 +166,7 @@ class SegDataset(Dataset):
         # WARN: This is a bad way to build the training dataframe.
         # If any folder in train/test dir is not equal to size of dataset,
         # this throws an obscure error.
-        df = pd.DataFrame(columns=basenames)
+        df = pd.DataFrame(columns=valid_dirs)
         for dir, basename in paths:
             # Explicitly ignore irrelevant directories
             if basename not in valid_dirs:
