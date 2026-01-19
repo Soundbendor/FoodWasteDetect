@@ -81,7 +81,7 @@ def coco_to_yolo(coco_box: List[float], img_w: int, img_h: int) -> List[float]:
 # 1) Move current "labels" to "seg_labels"
 # 2) Generate cxywhn boxes in labels/
 # 3) Generate xyxy boxes in
-def main(ds_split: str):
+def convert_boxes(ds_split: str):
     seg_path = os.path.join(ds_split, "labels")
     outdir = os.path.join(ds_split, "boxes")
     xyxy_outdir = os.path.join(ds_split, "xyxy_boxes")
@@ -148,8 +148,8 @@ def visualize_annotations(ds_path: str):
         plt.savefig(f"{basename}.jpg")
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
     # visualize_annotations(args.dataset_path)
     # for ds_split in os.listdir(args.dataset_path):
-    main(args.dataset_path)
+    convert_boxes(args.dataset_path)
