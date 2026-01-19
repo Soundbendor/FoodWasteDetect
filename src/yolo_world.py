@@ -116,9 +116,11 @@ def get_predicted_detections(results: Results) -> pd.DataFrame:
     Uses xywhn YOLOv8 compliant boxes
     """
     class_ids = results.boxes.cls.tolist()  # type: ignore
-    boxes = results.boxes.xywhn.tolist()  # type: ignore
+    boxes = results.boxes.xyxy.tolist()  # type: ignore
     confs = results.boxes.conf.tolist()
-    return pd.DataFrame.from_dict({"class_id": class_ids, "box": boxes, "conf": confs})
+    return pd.DataFrame.from_dict(
+        {"class_id": class_ids, "xyxy_box": boxes, "conf": confs}
+    )
 
 
 def main():
