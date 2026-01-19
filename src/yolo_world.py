@@ -6,8 +6,7 @@ from ultralytics.engine.results import Results
 
 from data_wrappers.food201 import Food201
 from experiment_report import ExperimentReport
-
-from .util import parse_args, parse_cfg
+from util.util import parse_args, parse_cfg
 
 SUBSET = "test"
 
