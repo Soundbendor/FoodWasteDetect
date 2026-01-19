@@ -82,7 +82,7 @@ class ExperimentReport:
         for img_name, img_df in dataset.items():
             result = {
                 "boxes": torch.from_numpy(
-                    np.array(img_df["box"].tolist()).astype(np.float64)
+                    np.array(img_df["xyxy_box"].tolist()).astype(np.float64)
                 ),
                 "labels": torch.from_numpy(
                     img_df["class_id"].to_numpy().astype(np.int64)
@@ -100,7 +100,7 @@ class ExperimentReport:
         # INFO: Box type set to cxcywh to comply with YOLO bounding box formats
         # INFO: MAP also supports 'segm' iou type for instance segmentation evaluation
         metric = MeanAveragePrecision(
-            iou_type="bbox", box_format="cxcywh", class_metrics=True
+            iou_type="bbox", box_format="xyxy", class_metrics=True
         )
         preds = self.get_results_tensor(self.pred, is_pred=True)
         targets = self.get_results_tensor(self.actual, is_pred=False)

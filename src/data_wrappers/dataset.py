@@ -166,7 +166,7 @@ class SegDataset(Dataset):
         # WARN: This is a bad way to build the training dataframe.
         # If any folder in train/test dir is not equal to size of dataset,
         # this throws an obscure error.
-        df = pd.DataFrame(columns=valid_dirs)
+        df = pd.DataFrame(columns=basenames)
         for dir, basename in paths:
             # Explicitly ignore irrelevant directories
             if basename not in valid_dirs:
@@ -198,6 +198,19 @@ class SegDataset(Dataset):
         Dataframe keys: ["label": int,"boxes": list[int] ]
         """
 
+        def read_labels(fpath: str) -> tuple[list[int], list]:
+            # Read coordinates from box file
+            with open(fpath, "r") as file:
+                raw_labels = file.readlines()
+            # Convert List[str] to List[float]
+            class_ids = []
+            box_coordinates = []
+            for l in raw_labels:
+                l = l.split()
+                class_ids.append(int(l[0]))
+                box_coordinates.append([float(x) for x in l[1:]])
+            return class_ids, box_coordinates
+
         def read_box_annot(row: pd.Series, subset: str) -> pd.DataFrame:
             """
             Given a row from a Dataset representing an image,
@@ -205,17 +218,12 @@ class SegDataset(Dataset):
             """
             # Get file path of label file
             box_pth = os.path.join(self.root, subset, "boxes", row["boxes"])
+            xyxy_box_pth = os.path.join(self.root, subset, "xyxy_boxes", row["boxes"])
             # Read coordinates from box file
-            with open(box_pth, "r") as file:
-                raw_labels = file.readlines()
-            # Convert List[str] to List[float]
-            labels = []
-            for l in raw_labels:
-                l = l.split()
-                class_id = int(l[0])
-                box_id = [float(x) for x in l[1:]]
-                labels.append((class_id, box_id))
-            return pd.DataFrame.from_records(labels, columns=["class_id", "box"])
+            class_ids, yolo_boxes = read_labels(box_pth)
+            _, xyxy_boxes = read_labels(xyxy_box_pth)
+            data = zip(class_ids, yolo_boxes, xyxy_boxes)
+            return pd.DataFrame(data, columns=["class_id", "box", "xyxy_box"])
 
         # load dataframe for the assosciated split
         imgs_df = self._load_df(f"{split}.csv")
