@@ -10,7 +10,7 @@ from tqdm import tqdm
 from ultralytics.data.utils import visualize_image_annotations
 from ultralytics.utils.ops import xyxy2xywh
 
-from data_wrappers.food201 import Food201
+from .data_wrappers.food201 import Food201
 
 # for each file in /labels directory
 # open file
