@@ -46,7 +46,7 @@ def eval_yolo_e():
     ds_path = cfg["paths"]["food201"]
     ds = Food201(ds_path)
     model = YOLOE(
-        "yoloe-26l-seg.pt"
+        "yoloe-26x-seg.pt"
     )  # or select yolov8m/l-world.pt for different sizes
 
     # Get ground truth boxes for metrics class
