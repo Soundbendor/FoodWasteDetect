@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from ultralytics import YOLOE, YOLOWorld
 from ultralytics.engine.results import Results
-from ultralytics.models.yolo.yoloe import YOLOEPETrainer
+from ultralytics.models.yolo.yoloe import YOLOEPESegTrainer
 
 from data_wrappers.food201 import Food201
 from data_wrappers.fwtest import FwTest
@@ -57,7 +57,7 @@ def eval_yolo_e():
     model.set_classes(class_names)
 
     results = model.train(
-        data=cfg["paths"]["food201_yolo"], epochs=10, trainer=YOLOEPETrainer
+        data=cfg["paths"]["food201_yolo"], epochs=10, trainer=YOLOEPESegTrainer
     )
     print(results)
     metrics = model.val()
