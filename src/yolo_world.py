@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from ultralytics import YOLOE, YOLOWorld
 from ultralytics.engine.results import Results
+from ultralytics.models.yolo.yoloe import YOLOEPETrainer
 
 from data_wrappers.food201 import Food201
 from data_wrappers.fwtest import FwTest
@@ -42,7 +43,7 @@ def convert_food201_class_idx(
 def eval_yolo_e():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
-    ds_path = cfg["paths"]["dataset"]
+    ds_path = cfg["paths"]["food201"]
     ds = Food201(ds_path)
     model = YOLOE(
         "yoloe-26l-seg.pt"
@@ -54,7 +55,12 @@ def eval_yolo_e():
     gt_dataset = ds.get_box_dataset(SUBSET)
     gt_dataset, class_names = convert_food201_class_idx(gt_dataset, class_names)
     model.set_classes(class_names)
-    metrics = model.val(data=cfg["paths"]["food201_yolo"])
+
+    results = model.train(
+        data=cfg["paths"]["food201_yolo"], epochs=10, trainer=YOLOEPETrainer
+    )
+    print(results)
+    metrics = model.val()
     print(metrics)
 
 
@@ -99,8 +105,8 @@ def eval_yolo_world():
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
     metrics = metrics.get_map50()
-    print(f"mAP50: {metrics["map_50"]}")
-    print(f"mAP50-95: {metrics["map"]}")
+    # print(f"mAP50: {metrics["map_50"]}")
+    # print(f"mAP50-95: {metrics["map"]}")
 
 
 def train_yolo_world():
