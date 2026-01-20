@@ -1,7 +1,7 @@
 import os
 
 import pandas as pd
-from ultralytics import YOLOWorld
+from ultralytics import YOLOE, YOLOWorld
 from ultralytics.engine.results import Results
 
 from data_wrappers.food201 import Food201
@@ -37,6 +37,25 @@ def convert_food201_class_idx(
         )
 
     return dataset, new_class_labels
+
+
+def eval_yolo_e():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    ds_path = cfg["paths"]["dataset"]
+    ds = Food201(ds_path)
+    model = YOLOE(
+        "yoloe-26l-seg.pt"
+    )  # or select yolov8m/l-world.pt for different sizes
+
+    # Get ground truth boxes for metrics class
+    class_names = list(ds.get_class_labels())
+    # Remove all "Unknown" values from dataset
+    gt_dataset = ds.get_box_dataset(SUBSET)
+    gt_dataset, class_names = convert_food201_class_idx(gt_dataset, class_names)
+    model.set_classes(class_names)
+    metrics = model.val(data=cfg["paths"]["food201_yolo"])
+    print(metrics)
 
 
 # Initialize a YOLO-World model
