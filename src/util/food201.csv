@@ -1,0 +1,210 @@
+newID,oldID,class_name
+0,-1,background
+1,0, apple pie
+2,1, arugula
+3,2, asparagus
+4,3, au jus
+5,4, avocado
+6,5, baby back ribs
+7,6, bacon
+8,7, baked potato
+9,8, baklava
+10,9, basil
+11,10, bean sprouts
+12,11, beans
+13,12, beef
+14,13, beef carpaccio
+15,14, beef tartare
+16,15, beer
+17,16, beet salad
+18,17, beignets
+19,18, berries
+20,19, bibimbap
+21,20, black beans
+22,21, blackberries
+23,22, blueberries
+24,23, bread
+0,24, Unknown
+25,25, bread pudding
+26,26, breakfast burrito
+27,27, broccoli
+28,28, bruschetta
+29,29, bun
+30,30, butter
+31,31, cabbage
+32,32, caesar salad
+33,33, cake
+34,34, cannoli
+35,35, caprese salad
+0,36, Unknown
+36,37, carrot cake
+37,38, carrots
+38,39, celery
+39,40, ceviche
+40,41, cheese
+41,42, cheese plate
+42,43, cheeseburger
+43,44, cheesecake
+44,45, chicken
+45,46, chicken curry
+46,47, chicken quesadilla
+47,48, chicken wings
+48,49, chives
+49,50, chocolate cake
+50,51, chocolate mousse
+51,52, chocolate sauce
+52,53, churros
+53,54, cilantro
+54,55, clam chowder
+55,56, club sandwich
+56,57, cocktail sauce
+57,58, coffee
+58,59, coleslaw
+59,60, corn
+0,61, Unknown
+60,62, crab cakes
+61,63, crackers
+62,64, cream
+63,65, creme brulee
+64,66, croque madame
+65,67, croutons
+66,68, cucumber slice
+67,69, cup cakes
+0,70, Unknown
+68,71, deviled eggs
+69,72, dipping sauce
+70,73, donuts
+71,74, dumplings
+72,75, edamame
+73,76, eggs
+74,77, eggs benedict
+75,78, escargots
+76,79, falafel
+77,80, filet mignon
+78,81, fish
+79,82, fish and chips
+80,83, foie gras
+81,84, french fries
+82,85, french onion soup
+83,86, french toast
+84,87, fried calamari
+85,88, fried egg
+86,89, fried rice
+87,90, frosting
+88,91, frozen yogurt
+89,92, garlic bread
+90,93, garnish
+91,94, ginger
+92,95, gnocchi
+93,96, grapes
+94,97, gravy
+95,98, greek salad
+96,99, green beans
+97,100, green onions
+98,101, greens
+99,102, grilled cheese sandwich
+100,103, grilled salmon
+101,104, guacamole
+102,105, gyoza
+103,106, ham
+104,107, hamburger
+105,108, hash browns
+106,109, home fries
+107,110, hot and sour soup
+108,111, hot dog
+109,112, huevos rancheros
+110,113, hummus
+111,114, ice cream
+112,115, ketchup
+113,116, lasagna
+114,117, lemon slice
+115,118, lettuce
+116,119, lime slice
+117,120, lobster bisque
+118,121, lobster roll sandwich
+119,122, macaroni and cheese
+120,123, macarons
+0,124, Unknown
+121,125, mashed potatoes
+122,126, mint
+123,127, miso soup
+124,128, mixed fruit
+125,129, mixed greens
+126,130, mixed vegetables
+127,131, mushrooms
+128,132, mussels
+129,133, mustard
+0,134, Unknown
+130,135, nachos
+131,136, noodles
+132,137, nuts
+133,138, olives
+134,139, omelette
+135,140, onion rings
+136,141, onions
+137,142, orange slice
+0,143, Unknown
+138,144, oysters
+139,145, pad thai
+140,146, paella
+141,147, pancakes
+142,148, panna cotta
+143,149, parmesan cheese
+144,150, parsley
+145,151, peas
+146,152, peking duck
+147,153, peppers
+148,154, pho
+149,155, pickles
+150,156, pita bread
+151,157, pizza
+152,158, pork chop
+153,159, potato chips
+154,160, potatoes
+155,161, poutine
+156,162, powdered sugar
+157,163, prime rib
+158,164, pulled pork sandwich
+159,165, ramen
+160,166, raspberries
+161,167, ravioli
+162,168, red velvet cake
+163,169, rice
+164,170, risotto
+165,171, salad
+166,172, salsa
+167,173, samosa
+168,174, sashimi
+169,175, sauce
+170,176, sausage
+171,177, scallops
+172,178, seaweed salad
+173,179, shrimp
+174,180, shrimp and grits
+175,181, soup
+176,182, sour cream
+177,183, soy sauce
+178,184, spaghetti bolognese
+179,185, spaghetti carbonara
+180,186, spinach
+181,187, spring rolls
+182,188, steak
+183,189, strawberries
+184,190, strawberry shortcake
+185,191, sushi
+186,192, syrup
+187,193, tacos
+188,194, takoyaki
+189,195, tartar sauce
+190,196, tiramisu
+191,197, toast
+192,198, tomato sauce
+193,199, tomato slice
+194,200, tortilla
+195,201, tortilla chips
+196,202, tuna tartare
+197,203, waffles
+198,204, wasabi
+199,205, whipped cream
+200,206, wine
+201,207, chocolate

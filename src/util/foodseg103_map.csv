@@ -1,105 +1,105 @@
-old_id,new_id,lable
-0,311,background
-1,312,candy
-2,313,egg tart
-3,314,french fries
-4,315,chocolate
-5,316,biscuit
-6,317,popcorn
-7,318,pudding
-8,319,ice cream
-9,320,cheese butter
-10,321,cake
-11,322,wine
-12,323,milkshake
-13,324,coffee
-14,325,juice
-15,326,milk
-16,327,tea
-17,328,almond
-18,329,red beans
-19,330,cashew
-20,331,dried cranberries
-21,332,soy
-22,333,walnut
-23,334,peanut
-24,335,egg
-25,336,apple
-26,337,date
-27,338,apricot
-28,339,avocado
-29,340,banana
-30,341,strawberry
-31,342,cherry
-32,343,blueberry
-33,344,raspberry
-34,345,mango
-35,346,olives
-36,347,peach
-37,348,lemon
-38,349,pear
-39,350,fig
-40,351,pineapple
-41,352,grape
-42,353,kiwi
-43,354,melon
-44,355,orange
-45,356,watermelon
-46,357,steak
-47,358,pork
-48,359,chicken duck
-49,176,sausage
-50,361,fried meat
-51,362,lamb
-52,363,sauce
-53,364,crab
-54,365,fish
-55,366,shellfish
-56,367,shrimp
-57,368,soup
-58,369,bread
-59,370,corn
-60,371,hamburg
-61,157,pizza
-62,373, hanamaki baozi
-63,374,wonton dumplings
-64,375,pasta
-65,376,noodles
-66,169,rice
-67,378,pie
-68,379,tofu
-69,380,eggplant
-70,381,potato
-71,382,garlic
-72,383,cauliflower
-73,384,tomato
-74,385,kelp
-75,386,seaweed
-76,387,spring onion
-77,388,rape
-78,389,ginger
-79,390,okra
-80,391,lettuce
-81,392,pumpkin
-82,393,cucumber
-83,394,white radish
-84,395,carrot
-85,396,asparagus
-86,397,bamboo shoots
-87,398,broccoli
-88,399,celery stick
-89,400,cilantro mint
-90,401,snow peas
-91,31, cabbage
-92,403,bean sprouts
-93,404,onion
-94,405,pepper
-95,406,green beans
-96,407,French beans
-97,408,king oyster mushroom
-98,409,shiitake
-99,410,enoki mushroom
-100,411,oyster mushroom
-101,412,white button mushroom
-102,413,salad
-103,414,other ingredients
+newID,oldID,class_name
+202,0,background
+203,1,candy
+204,2,egg tart
+81,3,french fries
+201,4,chocolate
+205,5,biscuit
+206,6,popcorn
+207,7,pudding
+111,8,ice cream
+208,9,cheese butter
+33,10,cake
+200,11,wine
+209,12,milkshake
+57,13,coffee
+210,14,juice
+211,15,milk
+212,16,tea
+213,17,almond
+214,18,red beans
+215,19,cashew
+216,20,dried cranberries
+217,21,soy
+218,22,walnut
+219,23,peanut
+220,24,egg
+221,25,apple
+222,26,date
+223,27,apricot
+5,28,avocado
+224,29,banana
+225,30,strawberry
+226,31,cherry
+227,32,blueberry
+228,33,raspberry
+229,34,mango
+133,35,olives
+230,36,peach
+231,37,lemon
+232,38,pear
+233,39,fig
+234,40,pineapple
+235,41,grape
+236,42,kiwi
+237,43,melon
+238,44,orange
+239,45,watermelon
+182,46,steak
+240,47,pork
+241,48,chicken duck
+170,49,sausage
+242,50,fried meat
+243,51,lamb
+169,52,sauce
+244,53,crab
+78,54,fish
+245,55,shellfish
+173,56,shrimp
+175,57,soup
+24,58,bread
+59,59,corn
+246,60,hamburg
+151,61,pizza
+247,62, hanamaki baozi
+248,63,wonton dumplings
+249,64,pasta
+131,65,noodles
+163,66,rice
+250,67,pie
+251,68,tofu
+252,69,eggplant
+253,70,potato
+254,71,garlic
+255,72,cauliflower
+256,73,tomato
+257,74,kelp
+258,75,seaweed
+259,76,spring onion
+260,77,rape
+91,78,ginger
+261,79,okra
+115,80,lettuce
+262,81,pumpkin
+263,82,cucumber
+264,83,white radish
+265,84,carrot
+3,85,asparagus
+266,86,bamboo shoots
+27,87,broccoli
+267,88,celery stick
+268,89,cilantro mint
+269,90,snow peas
+31,91, cabbage
+11,92,bean sprouts
+270,93,onion
+271,94,pepper
+96,95,green beans
+272,96,French beans
+273,97,king oyster mushroom
+274,98,shiitake
+275,99,enoki mushroom
+276,100,oyster mushroom
+277,101,white button mushroom
+165,102,salad
+0,103,other ingredients
