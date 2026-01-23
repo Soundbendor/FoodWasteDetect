@@ -235,6 +235,11 @@ class EvalMetric:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Intern-FW Experiment Pipeline")
     parser.add_argument("--config_file", help="Path to experiment config")
+    parser.add_argument(
+        "--dataset",
+        help="Name of dataset to use. Valid options: [foodseg103, food201, uecfoodpix, unified]",
+    )
+    parser.add_argument("--model", help="Variant of YOLO model to use")
     parser.add_argument("--partition", type=int)
     return parser.parse_args()
 
