@@ -1,104 +1,104 @@
 newID,oldID,class_name
 202,0, background
 163,1, rice
-280,2, eels on rice
-281,3, pilaf
-282,4, chicken-'n'-egg on rice
-283,5, pork cutlet on rice
-284,6, beef curry
+278,2, eels on rice
+279,3, pilaf
+280,4, chicken-'n'-egg on rice
+281,5, pork cutlet on rice
+282,6, beef curry
 185,7, sushi
-285,8, chicken rice
+283,8, chicken rice
 86,9, fried rice
-286,10, tempura bowl
+284,10, tempura bowl
 20,11, bibimbap
 191,12, toast
-287,13, croissant
-288,14, roll bread
-289,15, raisin bread
-290,16, chip butty
+285,13, croissant
+286,14, roll bread
+287,15, raisin bread
+288,16, chip butty
 104,17, hamburger
 151,18, pizza
-291,19, sandwiches
-292,20, udon noodle
-293,21, tempura udon
-294,22, soba noodle
-295,23, ramen noodle
-296,24, beef noodle
-297,25, tensin noodle
-298,26, fried noodle
-299,27, spaghetti
-300,28, Japanese-style pancake
+289,19, sandwiches
+290,20, udon noodle
+291,21, tempura udon
+292,22, soba noodle
+293,23, ramen noodle
+294,24, beef noodle
+295,25, tensin noodle
+296,26, fried noodle
+297,27, spaghetti
+298,28, Japanese-style pancake
 188,29, takoyaki
-301,30, gratin
-302,31, sauteed vegetables
-303,32, croquette
-304,33, grilled eggplant
-305,34, sauteed spinach
-306,35, vegetable tempura
+299,30, gratin
+300,31, sauteed vegetables
+301,32, croquette
+302,33, grilled eggplant
+303,34, sauteed spinach
+304,35, vegetable tempura
 123,36, miso soup
-307,37, potage
+305,37, potage
 170,38, sausage
-308,39, oden
-309,40, omelet
-310,41, ganmodoki
-311,42, jiaozi
-312,43, stew
-313,44, teriyaki grilled fish
-314,45, fried fish
+306,39, oden
+307,40, omelet
+308,41, ganmodoki
+309,42, jiaozi
+310,43, stew
+311,44, teriyaki grilled fish
+312,45, fried fish
 100,46, grilled salmon
-315,47, salmon meuniere
+313,47, salmon meuniere
 168,48, sashimi
-316,49, grilled pacific saury
-317,50, sukiyaki
-318,51, sweet and sour pork
-319,52, lightly roasted fish
-320,53, steamed egg hotchpotch
-321,54, tempura
-322,55, fried chicken
-323,56, sirloin cutlet
-324,57, nanbanzuke
-325,58, boiled fish
-326,59, seasoned beef with potatoes
-327,60, hambarg steak
-328,61, beef steak
-329,62, dried fish
-330,63, ginger pork saute
-331,64, spicy chili-flavored tofu
-332,65, yakitori
-333,66, cabbage roll
-334,67, rolled omelet
-335,68, egg sunny-side up
-336,69, fermented soybeans
-337,70, cold tofu
-338,71, egg roll
-339,72, chilled noodle
-340,73, stir-fried beef and peppers
-341,74, simmered pork
-342,75, boiled chicken and vegetables
-343,76, sashimi bowl
-344,77, sushi bowl
-345,78, fish-shaped pancake with bean jam
-346,79, shrimp with chill source
-347,80, roast chicken
-348,81, steamed meat dumpling
-349,82, omelet with fried rice
-350,83, cutlet curry
-351,84, spaghetti meat sauce
-352,85, fried shrimp
-353,86, potato salad
+314,49, grilled pacific saury
+315,50, sukiyaki
+316,51, sweet and sour pork
+317,52, lightly roasted fish
+318,53, steamed egg hotchpotch
+319,54, tempura
+320,55, fried chicken
+321,56, sirloin cutlet
+322,57, nanbanzuke
+323,58, boiled fish
+324,59, seasoned beef with potatoes
+325,60, hambarg steak
+326,61, beef steak
+327,62, dried fish
+328,63, ginger pork saute
+329,64, spicy chili-flavored tofu
+330,65, yakitori
+331,66, cabbage roll
+332,67, rolled omelet
+333,68, egg sunny-side up
+334,69, fermented soybeans
+335,70, cold tofu
+336,71, egg roll
+337,72, chilled noodle
+338,73, stir-fried beef and peppers
+339,74, simmered pork
+340,75, boiled chicken and vegetables
+341,76, sashimi bowl
+342,77, sushi bowl
+343,78, fish-shaped pancake with bean jam
+344,79, shrimp with chill source
+345,80, roast chicken
+346,81, steamed meat dumpling
+347,82, omelet with fried rice
+348,83, cutlet curry
+349,84, spaghetti meat sauce
+350,85, fried shrimp
+351,86, potato salad
 165,87, green salad
-354,88, macaroni salad
-355,89, Japanese tofu and vegetable chowder
+352,88, macaroni salad
+353,89, Japanese tofu and vegetable chowder
 123,90, pork miso soup
-356,91, chinese soup
-357,92, beef bowl
-358,93, kinpira-style sauteed burdock
-359,94, rice ball
-360,95, pizza toast
-361,96, dipping noodles
+354,91, chinese soup
+355,92, beef bowl
+356,93, kinpira-style sauteed burdock
+357,94, rice ball
+358,95, pizza toast
+359,96, dipping noodles
 108,97, hot dog
 81,98, french fries
-362,99, mixed rice
-363,100, goya chanpuru
+360,99, mixed rice
+361,100, goya chanpuru
 0,101, others
-365,102, beverage
+362,102, beverage
