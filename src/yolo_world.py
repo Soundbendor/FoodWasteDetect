@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import yaml
 from ultralytics import YOLO, YOLOE, YOLOWorld
+from ultralytics.data.converter import yolo_bbox2segment
 from ultralytics.engine.results import Results
 from ultralytics.models.yolo.yoloe import YOLOEPESegTrainer
 
@@ -41,6 +42,13 @@ def convert_food201_class_idx(
     return dataset, new_class_labels
 
 
+def box_to_seg():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    ds_path = cfg["paths"]["fw-test"]
+    yolo_bbox2segment(im_dir=os.path.join(ds_path, "images"), sam_model="sam3.pt")
+
+
 def eval_yolo_26_seg():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
@@ -52,8 +60,9 @@ def eval_yolo_26_seg():
     metrics = model.val()
     print(metrics)
 
+
 def extract_vocabulary(pth: str) -> list[str]:
-    with open(pth, 'r') as file:
+    with open(pth, "r") as file:
         dataset = yaml.safe_load(file)
 
     return dataset["names"]
@@ -71,7 +80,6 @@ def eval_yolo_new():
     # food201_names = extract_vocabulary(food201_pth).values()
     # foodseg103_names = extract_vocabulary(uec)
 
-
     food201_results = model.val(data=food201_pth)
     foodseg103_results = model.val(data=foodseg103_pth)
     uec_results = model.val(data=uec_pth)
@@ -82,7 +90,6 @@ def eval_yolo_new():
     print(foodseg103_results)
     print(f"\n\n\n UECFOODPIX \n\n\n")
     print(uec_results)
-
 
 
 def eval_yolo_e():
