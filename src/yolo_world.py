@@ -1,6 +1,7 @@
 import os
 
 import pandas as pd
+import yaml
 from ultralytics import YOLO, YOLOE, YOLOWorld
 from ultralytics.engine.results import Results
 from ultralytics.models.yolo.yoloe import YOLOEPESegTrainer
@@ -50,6 +51,38 @@ def eval_yolo_26_seg():
     print(results)
     metrics = model.val()
     print(metrics)
+
+def extract_vocabulary(pth: str) -> list[str]:
+    with open(pth, 'r') as file:
+        dataset = yaml.safe_load(file)
+
+    return dataset["names"]
+
+
+def eval_yolo_new():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    food201_pth = cfg["paths"]["food201"]
+    foodseg103_pth = cfg["paths"]["foodseg103"]
+    uec_pth = cfg["paths"]["uecfoodpix"]
+    unified = cfg["paths"]["unified"]
+    model = YOLOE(args.model)  # or select yolov8m/l-world.pt for different sizes
+
+    # food201_names = extract_vocabulary(food201_pth).values()
+    # foodseg103_names = extract_vocabulary(uec)
+
+
+    food201_results = model.val(data=food201_pth)
+    foodseg103_results = model.val(data=foodseg103_pth)
+    uec_results = model.val(data=uec_pth)
+
+    print(f"\n\n\n FOOD201 \n\n\n")
+    print(food201_results)
+    print(f"\n\n\n FOODSEG103 \n\n\n")
+    print(foodseg103_results)
+    print(f"\n\n\n UECFOODPIX \n\n\n")
+    print(uec_results)
+
 
 
 def eval_yolo_e():

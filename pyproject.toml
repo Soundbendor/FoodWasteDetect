@@ -19,7 +19,8 @@ test_yolo = "yolo:main"
 seg_to_boxes = "util.seg_to_boxes:main"
 yolo_world = "yolo_world:main"
 yolo_e = "yolo_world:eval_yolo_e"
-yolo_26 = "yolo_world:eval_yolo_26"
+yolo_26 = "yolo_world:eval_yolo_26_seg"
+yolo_eval = "yolo_world:eval_yolo_new"
 
 [tool.setuptools.packages.find]
 where = ["src"]
