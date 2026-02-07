@@ -69,7 +69,8 @@ class ExperimentReport:
         recall = true_positive / total_positive
         return precision, recall
 
-    def get_results_tensor(
+    # WARN: Deprecated, relies on old dataframe-based interface
+    def _get_results_tensor_from_df(
         self, dataset: dict[str, pd.DataFrame], is_pred: bool
     ) -> list[dict]:
         """
@@ -83,6 +84,7 @@ class ExperimentReport:
         preds = []
         for img_name, img_df in dataset.items():
             result = {
+                # WARN: should be "masks"
                 "boxes": torch.from_numpy(
                     np.array(img_df["xyxy_box"].tolist()).astype(np.float64)
                 ),
@@ -95,18 +97,16 @@ class ExperimentReport:
             preds.append(result)
         return preds
 
-    def get_map50(self) -> dict:
+    def get_map50(self, pred: dict, gt: dict) -> dict:
         """
         Use TorchMetrics to get Mean Average Precision and Mean Average Recall
         """
         # INFO: Box type set to cxcywh to comply with YOLO bounding box formats
         # INFO: MAP also supports 'segm' iou type for instance segmentation evaluation
-        metric = MeanAveragePrecision(
-            iou_type="bbox", box_format="xyxy", class_metrics=True
-        )
-        preds = self.get_results_tensor(self.pred, is_pred=True)
-        targets = self.get_results_tensor(self.actual, is_pred=False)
+        metric = MeanAveragePrecision(iou_type="segm", class_metrics=True)
+        # preds = self.get_results_tensor(self.pred, is_pred=True)
+        # targets = self.get_results_tensor(self.actual, is_pred=False)
 
-        metric.update(preds, targets)
+        metric.update(pred, gt)
         results = metric.compute()
         return results

@@ -1,6 +1,9 @@
+import copy
 import os
 
+import numpy as np
 import pandas as pd
+import torch
 import yaml
 from ultralytics import YOLO, YOLOE, YOLOWorld
 from ultralytics.data.converter import yolo_bbox2segment
@@ -93,6 +96,58 @@ def eval_yolo_new():
 
 
 def eval_yolo_e():
+    args = parse_args()
+    cfg = parse_cfg(args.config_file)
+    ds_path = cfg["paths"][args.dataset]
+    model = YOLOE(
+        "yoloe-26x-seg.pt"
+    )  # or select yolov8m/l-world.pt for different sizes
+
+    # TODO: Load test set from data path
+    # For each sample, load ground truth
+    test_path = os.path.join(ds_path, "test")
+    test_imgs = sorted(os.listdir(os.path.join(test_path, "images")))
+    test_labels = sorted(os.listdir(os.path.join(test_path, "labels")))
+
+    test_ds = {}
+    for img_pth, label_pth in zip(test_imgs, test_labels):
+        basename = os.path.splitext(os.path.basename(img_pth))[0]
+        # open label file
+        class_labels = []
+        # seggs!!!
+        segs = []
+        with open(label_pth, "r") as label_file:
+            for annot in label_file.readlines():
+                # first digit is class label, all proceeding are seg coordinates
+                annot = annot.split()
+                class_labels.append(int(annot[0]))
+                segs.append(np.array(annot[1:], dtype=float))
+
+        test_ds[basename] = {
+            "masks": torch.from_numpy(np.array(segs)),
+            "labels": torch.from_numpy(np.array(class_labels)),
+            "img_pth": img_pth,
+        }
+
+    test_preds = copy.deepcopy(test_ds)
+    # run inference on test dataframe
+    for sample_name, targets_dict in test_ds.values():
+        results = model.predict(targets_dict["img_pth"])
+        masks = []
+        labels = []
+        for result in results:
+            # INFO: is xy the right format for pixel-wise masks?
+            masks.append(result.masks.xy)
+            labels.append(result.boxes.cls)
+        test_preds[sample_name]["masks"] = torch.from_numpy(np.array(masks))
+        test_preds[sample_name]["labels"] = torch.from_numpy(np.array(labels))
+    # WARN: The interface for ExperimentReport expects a Pandas GroupBy
+    # We are providing dictionaries
+    metrics = ExperimentReport(None, None)
+    metrics.get_map50(test_preds, test_df)
+
+
+def train_yolo_e():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     ds_path = cfg["paths"][args.dataset]
