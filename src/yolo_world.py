@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
+from tqdm import tqdm
 from ultralytics import YOLO, YOLOE, YOLOWorld
 from ultralytics.data.converter import yolo_bbox2segment
 from ultralytics.data.utils import polygon2mask
@@ -110,7 +111,8 @@ def eval_yolo_e():
     test_labels = sorted(os.listdir(os.path.join(test_path, "labels")))
 
     test_ds = {}
-    for img_name, label_name in zip(test_imgs, test_labels):
+    print("Loading label files...")
+    for img_name, label_name in tqdm(zip(test_imgs, test_labels)):
         basename = os.path.splitext(img_name)[0]
         class_labels = []
         masks = []
@@ -144,7 +146,8 @@ def eval_yolo_e():
 
     test_preds = copy.deepcopy(test_ds)
     # run inference on test dataframe
-    for sample_name, targets_dict in test_ds.values():
+    print("Running inference...")
+    for sample_name, targets_dict in tqdm(test_ds.items()):
         results = model.predict(targets_dict["img_pth"])
         masks = []
         labels = []
