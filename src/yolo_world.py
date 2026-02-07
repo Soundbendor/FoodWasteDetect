@@ -114,8 +114,8 @@ def eval_yolo_e():
         class_labels = []
         # seggs!!!
         segs = []
-        label_pth = os.path.join(test_path, "images", label_name)
-        img_pth = os.path.join(test_path, "labels", img_name)
+        label_pth = os.path.join(test_path, "labels", label_name)
+        img_pth = os.path.join(test_path, "images", img_name)
         with open(label_pth, "r") as label_file:
             for annot in label_file.readlines():
                 # first digit is class label, all proceeding are seg coordinates
