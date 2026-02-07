@@ -1,12 +1,14 @@
 import copy
 import os
 
+import cv2
 import numpy as np
 import pandas as pd
 import torch
 import yaml
 from ultralytics import YOLO, YOLOE, YOLOWorld
 from ultralytics.data.converter import yolo_bbox2segment
+from ultralytics.data.utils import polygon2mask
 from ultralytics.engine.results import Results
 from ultralytics.models.yolo.yoloe import YOLOEPESegTrainer
 
@@ -110,21 +112,32 @@ def eval_yolo_e():
     test_ds = {}
     for img_name, label_name in zip(test_imgs, test_labels):
         basename = os.path.splitext(img_name)[0]
-        # open label file
         class_labels = []
-        # seggs!!!
-        segs = []
+        masks = []
         label_pth = os.path.join(test_path, "labels", label_name)
         img_pth = os.path.join(test_path, "images", img_name)
+        # Open image and get width/height
+        img = cv2.imread(img_pth)
+        w, h, _ = img.shape
+        # open label file
         with open(label_pth, "r") as label_file:
             for annot in label_file.readlines():
                 # first digit is class label, all proceeding are seg coordinates
                 annot = annot.split()
                 class_labels.append(int(annot[0]))
-                segs.append(np.array(annot[1:], dtype=float))
+                # Convert xyn coordinates to bianry image mask
+                # 1) Scale coordinates from xyn to xy
+                xyn_coords = np.array(annot[1:], dtype=float).reshape(-1, 2)
+                xy_coords = xyn_coords
+                xy_coords[:, 0] *= w
+                xy_coords[:, 1] *= h
+                bin_mask = polygon2mask(
+                    (w, h), [xy_coords], color=255, downsample_ratio=1
+                )
+                masks.append(bin_mask)
 
         test_ds[basename] = {
-            "masks": torch.from_numpy(np.array(segs)),
+            "masks": torch.from_numpy(np.array(masks)),
             "labels": torch.from_numpy(np.array(class_labels)),
             "img_pth": img_pth,
         }
@@ -136,8 +149,10 @@ def eval_yolo_e():
         masks = []
         labels = []
         for result in results:
-            # INFO: is xy the right format for pixel-wise masks?
-            masks.append(result.masks.xy)
+            # WARN: This might need to be reshaped to (N, 2)
+            seg = result.masks.xy
+            mask = polygon2mask(result.orig_shape, [seg], color=255, downsample_ratio=1)
+            masks.append(mask)
             labels.append(result.boxes.cls)
         test_preds[sample_name]["masks"] = torch.from_numpy(np.array(masks))
         test_preds[sample_name]["labels"] = torch.from_numpy(np.array(labels))
