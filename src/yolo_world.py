@@ -99,9 +99,7 @@ def eval_yolo_e():
     args = parse_args()
     cfg = parse_cfg(args.config_file)
     ds_path = cfg["paths"][args.dataset]
-    model = YOLOE(
-        "yoloe-26x-seg.pt"
-    )  # or select yolov8m/l-world.pt for different sizes
+    model = YOLOE(args.model)  # or select yolov8m/l-world.pt for different sizes
 
     # TODO: Load test set from data path
     # For each sample, load ground truth
@@ -110,12 +108,14 @@ def eval_yolo_e():
     test_labels = sorted(os.listdir(os.path.join(test_path, "labels")))
 
     test_ds = {}
-    for img_pth, label_pth in zip(test_imgs, test_labels):
-        basename = os.path.splitext(os.path.basename(img_pth))[0]
+    for img_name, label_name in zip(test_imgs, test_labels):
+        basename = os.path.splitext(img_name)[0]
         # open label file
         class_labels = []
         # seggs!!!
         segs = []
+        label_pth = os.path.join(test_path, label_name)
+        img_pth = os.path.join(test_path, img_name)
         with open(label_pth, "r") as label_file:
             for annot in label_file.readlines():
                 # first digit is class label, all proceeding are seg coordinates
@@ -144,7 +144,7 @@ def eval_yolo_e():
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
     # We are providing dictionaries
     metrics = ExperimentReport(None, None)
-    metrics.get_map50(test_preds, test_df)
+    metrics.get_map50(test_preds, test_ds)
 
 
 def train_yolo_e():
