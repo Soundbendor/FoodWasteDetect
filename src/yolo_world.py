@@ -144,16 +144,19 @@ def eval_yolo_e():
             "img_pth": img_pth,
         }
 
-    test_preds = copy.deepcopy(test_ds)
+    # test_preds = copy.deepcopy(test_ds)
+    test_preds = {}
     # run inference on test dataframe
     print("Running inference...")
     for sample_name, targets_dict in tqdm(test_ds.items()):
         result = model.predict(targets_dict["img_pth"])[0]
         # INFO: Each result should represent one image
+        pred = {}
         if result:
-            test_preds[sample_name]["masks"] = result.masks.data
-            test_preds[sample_name]["labels"] = result.boxes.cls
-            test_preds[sample_name]["scores"] = result.boxes.conf
+            pred["masks"] = result.masks.data
+            pred["labels"] = result.boxes.cls
+            pred["scores"] = result.boxes.conf
+            test_preds[sample_name] = pred
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
     # We are providing dictionaries
     metrics = ExperimentReport(None, None)
