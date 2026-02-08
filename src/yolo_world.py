@@ -150,8 +150,9 @@ def eval_yolo_e():
     for sample_name, targets_dict in tqdm(test_ds.items()):
         result = model.predict(targets_dict["img_pth"])[0]
         # INFO: Each result should represent one image
-        test_preds[sample_name]["masks"] = result.masks.data
-        test_preds[sample_name]["labels"] = result.boxes.cls
+        if result:
+            test_preds[sample_name]["masks"] = result.masks.data
+            test_preds[sample_name]["labels"] = result.boxes.cls
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
     # We are providing dictionaries
     metrics = ExperimentReport(None, None)
