@@ -156,7 +156,7 @@ def eval_yolo_e():
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
     # We are providing dictionaries
     metrics = ExperimentReport(None, None)
-    metrics.get_map50(test_preds, test_ds)
+    metrics.get_map50(test_preds.values(), test_ds.values())
 
 
 def train_yolo_e():
