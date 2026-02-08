@@ -153,6 +153,7 @@ def eval_yolo_e():
         if result:
             test_preds[sample_name]["masks"] = result.masks.data
             test_preds[sample_name]["labels"] = result.boxes.cls
+            test_preds[sample_name]["scores"] = result.boxes.conf
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
     # We are providing dictionaries
     metrics = ExperimentReport(None, None)
