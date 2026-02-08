@@ -148,17 +148,10 @@ def eval_yolo_e():
     # run inference on test dataframe
     print("Running inference...")
     for sample_name, targets_dict in tqdm(test_ds.items()):
-        results = model.predict(targets_dict["img_pth"])
-        masks = []
-        labels = []
-        for result in results:
-            # WARN: This might need to be reshaped to (N, 2)
-            seg = result.masks.xy
-            mask = polygon2mask(result.orig_shape, [seg], color=255, downsample_ratio=1)
-            masks.append(mask)
-            labels.append(result.boxes.cls)
-        test_preds[sample_name]["masks"] = torch.from_numpy(np.array(masks))
-        test_preds[sample_name]["labels"] = labels
+        result = model.predict(targets_dict["img_pth"])[0]
+        # INFO: Each result should represent one image
+        test_preds[sample_name]["masks"] = result.masks.data
+        test_preds[sample_name]["labels"] = result.boxes.cls
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
     # We are providing dictionaries
     metrics = ExperimentReport(None, None)
