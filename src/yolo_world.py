@@ -158,7 +158,7 @@ def eval_yolo_e():
             masks.append(mask)
             labels.append(result.boxes.cls)
         test_preds[sample_name]["masks"] = torch.from_numpy(np.array(masks))
-        test_preds[sample_name]["labels"] = torch.from_numpy(np.array(labels))
+        test_preds[sample_name]["labels"] = labels
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
     # We are providing dictionaries
     metrics = ExperimentReport(None, None)
