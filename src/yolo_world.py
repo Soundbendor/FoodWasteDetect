@@ -158,9 +158,9 @@ def eval_yolo_e():
             pred["scores"] = result.boxes.conf
         # INFO: Test case
         else:
-            pred["masks"] = torch.zeros((0,))
-            pred["labels"] = torch.zeros((0,))
-            pred["scores"] = torch.zeros((0,))
+            pred["masks"] = torch.zeros((0,)).to("cuda")
+            pred["labels"] = torch.zeros((0,)).to("cuda")
+            pred["scores"] = torch.zeros((0,)).to("cuda")
         test_preds[sample_name] = pred
 
     # WARN: The interface for ExperimentReport expects a Pandas GroupBy
