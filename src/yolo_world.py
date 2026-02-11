@@ -153,7 +153,7 @@ def eval_yolo_e():
         # INFO: Each result should represent one image
         pred = {}
         if result:
-            pred["masks"] = result.masks.data
+            pred["masks"] = result.masks.datacolorImage_2024-07-07-18-44-33_jpg.rf.4ddcf432027ebfb5d15af8b9cb1d646e.txt
             pred["labels"] = result.boxes.cls
             pred["scores"] = result.boxes.conf
         # INFO: Test case
