@@ -35,7 +35,8 @@ def train_yoloe():
     #   yolo_data:
     #     - lvis.yaml
 
-    model = YOLOE("yoloe-26x-seg.pt")
+    runtime_model = YOLOE("yoloe-26x-seg.pt")
+    model = runtime_model.model
 
     # freeze all layers
     model.eval
@@ -56,7 +57,7 @@ def train_yoloe():
             model.model[-1].cv3[2][2]
         ).requires_grad_(True)
 
-    model.train(
+    runtime_model.train(
         data=data,  # or data="yoloe_data.yaml" if using YAML file
         batch=128,
         epochs=30,
@@ -68,7 +69,6 @@ def train_yoloe():
         momentum=0.9,
         workers=4,
         trainer=YOLOESegTrainerFromScratch,
-        device="0,1,2,3,4,5,6,7",
     )
 
 
