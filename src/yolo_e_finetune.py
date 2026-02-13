@@ -1,5 +1,5 @@
 import os
-from copy import deeepcopy
+from copy import deepcopy
 
 from ultralytics import YOLOE
 from ultralytics.models.yolo.yoloe import YOLOESegTrainerFromScratch
