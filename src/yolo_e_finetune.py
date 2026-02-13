@@ -1,4 +1,5 @@
 import os
+from copy import deeepcopy
 
 from ultralytics import YOLOE
 from ultralytics.models.yolo.yoloe import YOLOESegTrainerFromScratch
@@ -15,7 +16,7 @@ def train_yoloe():
     # these datasets should auto-download
     data = dict(
         train=dict(
-            yolo_data=[os.path.join(ds_root, "Objects365.yaml")],
+            yolo_data=[os.path.join(ds_root, "lvis.yaml")],
             # INFO: can we get away without any grounding data?
         ),
         val=dict(yolo_data=["lvis.yaml"]),
@@ -35,6 +36,26 @@ def train_yoloe():
     #     - lvis.yaml
 
     model = YOLOE("yoloe-26x-seg.pt")
+
+    # freeze all layers
+    model.eval
+
+    # unfreeze select weights
+    model.model[-1].cv3[0][2] = deepcopy(model.model[-1].cv3[0][2]).requires_grad_(True)
+    model.model[-1].cv3[1][2] = deepcopy(model.model[-1].cv3[1][2]).requires_grad_(True)
+    model.model[-1].cv3[2][2] = deepcopy(model.model[-1].cv3[2][2]).requires_grad_(True)
+
+    if getattr(model.model[-1], "one2one_cv3", None) is not None:
+        model.model[-1].one2one_cv3[0][2] = deepcopy(
+            model.model[-1].cv3[0][2]
+        ).requires_grad_(True)
+        model.model[-1].one2one_cv3[1][2] = deepcopy(
+            model.model[-1].cv3[1][2]
+        ).requires_grad_(True)
+        model.model[-1].one2one_cv3[2][2] = deepcopy(
+            model.model[-1].cv3[2][2]
+        ).requires_grad_(True)
+
     model.train(
         data=data,  # or data="yoloe_data.yaml" if using YAML file
         batch=128,
