@@ -111,7 +111,9 @@ behavior.
 
 Use `internvl` or `python -m internvl` with `caption-images`,
 `generate-descriptions`, `build-db`, `evaluate`, `finetune-embeddings`,
-`merge-captions`, or `convert-captions`. Model workflows take `--config_file`;
+`merge-captions`, `convert-captions`, or `download_model MODEL_NAME`.
+The download command reads `cfg/experiment_config_internvl.yml` from the working
+directory without a config flag. Other model workflows take `--config_file`;
 captioning also takes `--partition`. The configuration is
 `cfg/experiment_config_internvl.yml`. The old text console commands and imports
 under `vlm`, `llm`, and `database.embedding` have no compatibility aliases.
@@ -125,9 +127,19 @@ Its context manager cleans up only the server it started, including on startup
 failure. The constructor receives `cfg["ollama"]`, requiring `llm`, `binary_path`, `host`,
 `startup_timeout`, and `request_timeout` without defaults or environment fallback.
 Existing Ollama endpoints are rejected with an error naming the full host;
-servers not started by this instance are never stopped.
-Do not invoke real server startup as part of a smoke test. Scripts under `src/internvl/scripts`
-retain historical local-path and model assumptions.
+servers not started by this instance are never stopped. Before probing or launching,
+startup validates `ollama.binary_path` as an executable file, expands `~`, and
+resolves relative paths against the working directory without PATH discovery.
+Missing/invalid installations and OS launch errors point to README.md: Ollama setup.
+No automatic binary or model installation is performed.
+Do not invoke real server startup as part of a smoke test.
+`internvl download_model MODEL_NAME` reads the binary and host from the experiment
+YAML, starts an owned server, pulls the positional model through `Client.pull(stream=True)` with visible progress,
+and cleans up on success, failure, or Ctrl-C. It rejects occupied endpoints and
+does not change `ollama.llm` or the YAML. Run from the repository root with the
+Python environment activated and Ollama installed; optional `OLLAMA_MODELS` is
+inherited. Use an approved cluster allocation; Slurm handles forced termination. The historical
+`start_deepseek.sh` retains its local-path assumptions.
 
 ### Evaluation and known limitations
 
