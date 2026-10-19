@@ -17,12 +17,11 @@ test_query = "They are delicate, pastel-pink macarons featuring crisp almond-flo
 
 def generate_descriptions(cfg: dict) -> None:
     from data_wrappers.foodx251 import FoodX251
-    from .descriptors import DescriberLLM
+    from .generate_descriptors import DescriberLLM
 
-    llm = DescriberLLM(cfg["llm"])
-    llm.start_server()
-    dataset = FoodX251(cfg["paths"]["dataset"])
-    llm.generate_descriptors(dataset, cfg["paths"]["dictionary"])
+    with DescriberLLM(cfg["ollama"]) as llm:
+        dataset = FoodX251(cfg["paths"]["dataset"])
+        llm.generate_descriptors(dataset, cfg["paths"]["dictionary"])
 
 
 def test_classification(cfg: dict) -> None:

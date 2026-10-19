@@ -1,4 +1,9 @@
-llm: gemma3:27b
+ollama:
+  llm: gemma3:27b
+  binary_path: deps/ollama/bin/ollama
+  host: http://127.0.0.1:11434
+  startup_timeout: 120
+  request_timeout: 600
 embed_model: BAAI/bge-large-en-v1.5
 embed_size: 1024
 reranker_model: cross-encoder/ms-marco-MiniLM-L6-v2

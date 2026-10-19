@@ -99,7 +99,7 @@ behavior.
 ### Package ownership and commands
 
 - `src/internvl/model.py` owns the existing `InternVLM` and image preprocessing.
-- `src/internvl/descriptors.py` owns `DescriberLLM` and `FoodDescriptor`.
+- `src/internvl/generate_descriptors.py` owns `DescriberLLM` and `FoodDescriptor`.
 - `src/internvl/embeddings.py` owns text embedding, training, and triplet evaluation.
 - `src/internvl/workflows.py` owns the text workflows formerly mixed into `app.py`.
   Functions receive configuration dictionaries; captioning also receives a
@@ -119,8 +119,14 @@ The image commands `build_clip_db`, `test_clip`, and `test_yolo` retain their na
 
 Package import and CLI help must not load models, open datasets, start subprocesses,
 or contact services. Concrete backend modules are imported by the selected
-workflow. Existing Ollama startup behavior is retained inside descriptor generation;
-do not invoke it as part of a smoke test. Scripts under `src/internvl/scripts`
+workflow. Descriptor generation now probes Ollama readiness and, for unavailable
+endpoints, launches the configured binary directly with bounded polling.
+Its context manager cleans up only the server it started, including on startup
+failure. The constructor receives `cfg["ollama"]`, requiring `llm`, `binary_path`, `host`,
+`startup_timeout`, and `request_timeout` without defaults or environment fallback.
+Existing Ollama endpoints are rejected with an error naming the full host;
+servers not started by this instance are never stopped.
+Do not invoke real server startup as part of a smoke test. Scripts under `src/internvl/scripts`
 retain historical local-path and model assumptions.
 
 ### Evaluation and known limitations
