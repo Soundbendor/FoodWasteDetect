@@ -5,9 +5,6 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 from tqdm import tqdm
-from ultralytics.utils.ops import xywhn2xyxy
-
-from database.img_crop import ImageCropper
 
 
 class Dataset:
@@ -52,6 +49,8 @@ class Dataset:
         image classification dataset. Save in detected-patches directory
         and make patches_dets.csv.
         """
+        from database.img_crop import ImageCropper
+
         imgs_pth = os.path.join(self.root, subset_pth, "images")
         dets_pth = os.path.join(self.root, subset_pth, "cropped-detections")
         if os.path.isdir(os.path.join(imgs_pth, "cropped-detections")):
@@ -67,6 +66,8 @@ class Dataset:
         Crop each image according to its bounding boxes and save patches
         Save class labels and parent images to patches.csv
         """
+        from ultralytics.utils.ops import xywhn2xyxy
+
         imgs_pth = os.path.join(self.root, subset_pth, "images")
         patches_pth = os.path.join(self.root, subset_pth, "patches")
         os.makedirs(patches_pth, exist_ok=True)

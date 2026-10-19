@@ -13,4 +13,4 @@
 module load cuda/12.4
 source /nfs/guille/eecs_research/soundbendor/beerya/miniforge3/bin/activate
 source activate intern-fw
-eval_embed experiment_config.ini
+internvl evaluate --config_file cfg/experiment_config_internvl.yml

@@ -1,14 +1,16 @@
+from __future__ import annotations
+
 import logging
 import os
 from collections import Counter
-from typing import List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import requests
-import torch
 from qdrant_client import QdrantClient
 from qdrant_client.models import (Distance, PointStruct, ScoredPoint,
                                   VectorParams)
-from sentence_transformers import CrossEncoder, SentenceTransformer, util
+if TYPE_CHECKING:
+    import torch
 
 
 class VectorDB:
@@ -19,6 +21,8 @@ class VectorDB:
         self.db_name: str = db_name
         self.embed_size = embed_size
         if reranker:
+            from sentence_transformers import CrossEncoder
+
             self.reranker = CrossEncoder(reranker)
         else:
             self.reranker = None

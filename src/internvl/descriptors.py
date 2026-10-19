@@ -3,12 +3,19 @@ import logging
 import subprocess
 import time
 from collections import defaultdict
+from pathlib import Path
 
 import ollama
 from ollama import ChatResponse, chat
 from pydantic import BaseModel
 
 from data_wrappers.dataset import Dataset
+
+
+DESCRIPTOR_PROMPT = {
+    "role": "user",
+    "content": "Can you provide a sentence describing the food {cleaned_item}? Please be as descriptive as possible, focusing on the visual characteristics of the {cleaned_item} and explicitly mention {cleaned_item} in your description.",
+}
 
 
 class FoodDescriptor(BaseModel):
@@ -32,17 +39,15 @@ class DescriberLLM:
         except ConnectionError:
             # Run online script
             process = subprocess.Popen(
-                "src/llm/start_deepseek.sh",
+                ["bash", str(Path(__file__).parent / "scripts" / "start_deepseek.sh")],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                shell=True,
             )
             out, err = process.communicate()
             logging.error(f"OLLAMA WARN: {err}")
             logging.info(f"OLLAMA ALERT: {out}")
             logging.info("Waiting 10 seconds...")
             time.sleep(10)
-            # subprocess.call("bash llm/start_deepseek.sh", shell=True)
 
     def generate_descriptors(self, ds: Dataset, save_path: str) -> str:
         """Given a dataset, provides a list of descriptions of each class of that dataset"""
@@ -56,8 +61,10 @@ class DescriberLLM:
                         model=self.model,
                         messages=[
                             {
-                                "role": "user",
-                                "content": f"Can you provide a sentence describing the food {cleaned_item}? Please be as descriptive as possible, focusing on the visual characteristics of the {cleaned_item} and explicitly mention {cleaned_item} in your description.",
+                                **DESCRIPTOR_PROMPT,
+                                "content": DESCRIPTOR_PROMPT["content"].format(
+                                    cleaned_item=cleaned_item
+                                ),
                             },
                         ],
                         format=FoodDescriptor.model_json_schema(),

@@ -1,18 +1,19 @@
+from __future__ import annotations
+
 import argparse
 import ast
 import logging
 import os
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-import yaml
-from mean_average_precision import MetricBuilder
-from pandas.core.groupby import DataFrameGroupBy
-from qdrant_client.models import ScoredPoint
-from sklearn.metrics import average_precision_score
+if TYPE_CHECKING:
+    from pandas.core.groupby import DataFrameGroupBy
+    from qdrant_client.models import ScoredPoint
 
-from database.vecdb import VectorDB
+    from database.vecdb import VectorDB
 
 
 # TODO: Refactor old experiments, deprecate EvalMetric
@@ -152,6 +153,7 @@ class ExperimentResult:
         """
         Calculate mAP-50 across all predictions
         """
+        from mean_average_precision import MetricBuilder
 
         gt = []
         preds = []
@@ -222,6 +224,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def parse_cfg(cfg_file: str) -> dict:
+    import yaml
+
     logging.basicConfig(level=logging.INFO)
     with open(cfg_file, "r") as stream:
         return yaml.load(stream, Loader=yaml.Loader)

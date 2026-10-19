@@ -7,16 +7,17 @@ name = "Intern-FW"
 version = "0.0.1"
 
 [project.scripts]
-test_classification = "app:test_classification"
-generate_descriptions = "app:generate_descriptions"
-build_vdb = "app:build_vdb"
-caption_imgs = "app:caption_imgs"
-merge_captions = "app:merge_files"
-convert_dict = "app:convert_csv_to_dictionary"
+internvl = "internvl.cli:main"
 build_clip_db = "app:build_img_vdb"
 test_clip = "app:eval_img_vdb"
 test_yolo = "yolo:main"
 
+[tool.setuptools]
+py-modules = ["app", "yolo", "util", "clip_finetune"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+namespaces = false
 
+[tool.setuptools.package-data]
+internvl = ["scripts/*.sh"]

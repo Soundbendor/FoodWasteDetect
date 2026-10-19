@@ -13,4 +13,4 @@
 module load cuda/12.4
 source /nfs/guille/eecs_research/soundbendor/beerya/miniforge3/bin/activate
 source activate intern-fw
-caption_imgs --config_file experiment_config.ini --partition 1
+internvl caption-images --config_file cfg/experiment_config_internvl.yml --partition 1
