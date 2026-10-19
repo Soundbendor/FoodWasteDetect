@@ -1,133 +1,99 @@
+"""Inference-only Jina CLIP v2 embeddings. No import-time backends."""
+from contextlib import ExitStack
+from pathlib import Path
 import json
-import logging
+import shutil
+import tempfile
 
-import pandas as pd
-import torch
-from datasets import Dataset
-from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
-from sentence_transformers.evaluation import SimilarityFunction, TripletEvaluator
-from sentence_transformers.losses import BatchAllTripletLoss
-from sentence_transformers.training_args import (
-    BatchSamplers,
-    SentenceTransformerTrainingArguments,
-)
+def _load_backend(model_id, device):
+    from huggingface_hub import snapshot_download
+    from transformers import AutoConfig, AutoImageProcessor, AutoModel, AutoTokenizer
+    import torch
 
-# goal:
-# load dataset from JSON file, dictionary
-# parse list of "label:, description: pairs"
-# --- check ordering of columns
-# import into Dataset
-# finetune using BatchAll loss
+    text_snapshot = Path(snapshot_download('jinaai/jina-embeddings-v3',
+                         local_files_only=True))
+    code_snapshot = Path(snapshot_download('jinaai/xlm-roberta-flash-implementation',
+                         local_files_only=True))
+    # Keep the nested text loader local: it does not forward local_files_only.
+    with tempfile.TemporaryDirectory(prefix='food-jina-config-') as directory:
+        local = Path(directory)
+        config = json.loads((text_snapshot / 'config.json').read_text())
+        config['auto_map'] = {key: value.split('--')[-1] for key, value in config['auto_map'].items()}
+        (local / 'config.json').write_text(json.dumps(config))
+        sources = list(code_snapshot.glob('*.py'))
+        if not sources:
+            raise FileNotFoundError('Text encoder Python sources are not cached')
+        for source in sources:
+            shutil.copyfile(source, local / source.name)
+        clip_config = AutoConfig.from_pretrained(model_id, trust_remote_code=True, local_files_only=True)
+        clip_config.text_config.hf_model_name_or_path = directory
+        clip_config.use_text_flash_attn = False
+        clip_config.use_vision_xformers = False
+        backend = AutoModel.from_pretrained(model_id, config=clip_config, trust_remote_code=True, local_files_only=True,
+            torch_dtype=torch.float32).to(device).eval()
+    # Override lazy loaders so preprocessing also uses only cached files.
+    backend.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, local_files_only=True)
+    backend.preprocess = AutoImageProcessor.from_pretrained(model_id, trust_remote_code=True, local_files_only=True)
+    return backend
 
 
 class EmbeddingModel:
+    def __init__(self, model_id, device, batch_size=32, *, backend=None):
+        if model_id != 'jinaai/jina-clip-v2':
+            raise ValueError('This experiment requires jinaai/jina-clip-v2')
+        if not device or device == 'auto' or type(batch_size) is not int or batch_size < 1:
+            raise ValueError('An explicit device and positive batch size are required')
+        self.batch_size = batch_size
+        self._metadata = dict(model_id=model_id,
+                              device=device, batch_size=batch_size, dimension=1024,
+                              normalized=True, preprocessing='checkpoint encode_image; RGB',
+                              text_task=None, truncate_dim=None, dtype='float32',
+                              use_text_flash_attn=False, use_vision_xformers=False)
+        if backend is None:
+            backend = _load_backend(model_id, device)
+        self.model = backend
 
-    def __init__(self, dictionary_path: str, anchor_path: str,  model_path: str, model_name: str):
-        self.ds, self.class_map = self._load_dataset(dictionary_path)
-        self.save_dir = model_path
-        self.eval_ds = self._load_triplet_dataset(anchor_path)
-        self.model = SentenceTransformer(model_name)
-        self.loss = BatchAllTripletLoss(self.model)
-        self.evaluator = self.evaluator()
+    @property
+    def dimension(self):
+        return 1024
 
-    def _load_dataset(self, path: str):
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    @property
+    def metadata(self):
+        return dict(self._metadata)
 
-        logging.info(data)
-        class_names = []
-        descriptors = []
-        class_map = {}
-        for idx, (k, v) in enumerate(data.items()):
-            class_map[k] = idx
-            for description in v:
-                descriptors.append(description)
-                class_names.append(idx)
+    def _encode(self, inputs, image=False):
+        import numpy as np
+        from PIL import Image
+        inputs = list(inputs)
+        outputs = []
+        for start in range(0, len(inputs), self.batch_size):
+            batch = inputs[start:start + self.batch_size]
+            with ExitStack() as stack:
+                if image:
+                    rgb = []
+                    for item in batch:
+                        original = stack.enter_context(Image.open(item)) if isinstance(item, (str, Path)) else item
+                        converted = original.convert('RGB')
+                        stack.callback(converted.close)
+                        rgb.append(converted)
+                    batch = rgb
+                method = self.model.encode_image if image else self.model.encode_text
+                values = method(batch, batch_size=self.batch_size, truncate_dim=None)
+                if hasattr(values, 'detach'):
+                    values = values.detach().float().cpu().numpy()
+                values = np.asarray(values, dtype=np.float32)
+                if values.ndim == 1 and len(batch) == 1:
+                    values = values[None, :]
+                if values.shape != (len(batch), self.dimension) or not np.isfinite(values).all():
+                    raise ValueError('Invalid embedding shape or nonfinite values')
+                norms = np.linalg.norm(values, axis=1, keepdims=True)
+                if (norms == 0).any():
+                    raise ValueError('Zero embedding')
+                outputs.append(values / norms)
+        return np.concatenate(outputs) if outputs else np.empty((0, self.dimension), dtype=np.float32)
 
-        # where image captions from InternV2.5 are anchors
-        # positive/negatives sourced from gemma
-        ds = {"label": class_names, "descriptions": descriptors}
-        ds = Dataset.from_dict(ds)
-        ds = ds.train_test_split(test_size=0.1)
-        # logging.info(f"Dataset: {ds}")
-        return ds, class_map
+    def encode_text(self, texts):
+        return self._encode(texts)
 
-
-    # goal: load dataset in (anchor, positive, negative) pairs
-    # relies on _load_dataset
-    # should be Dataset class with
-    def _load_triplet_dataset(self, path: str):
-        # load anchor captions
-        df = pd.read_csv(path, index_col='idx')
-        # has [class], [caption]
-        # sort to aggregate each anchor class
-        anchors_by_class = df.groupby(['class'])
-        # convert descriptions dataset to pandas
-        descriptions = self.ds['train'].to_pandas()
-        
-        # for each anchor
-        # randomly select positive and negative?
-        dfs = []
-        for label, anchors in anchors_by_class:
-            # extract all matching positive samples
-            class_idx = self.class_map[label[0]]
-            positives = descriptions[descriptions['label'] == class_idx].sample(n=len(anchors),
-                                                                                replace=True).reset_index(drop=True)
-            # problem: more anchors than negative descriptors
-            negatives = descriptions[descriptions['label'] != class_idx].sample(n=len(anchors),
-                                                                                replace=True).reset_index(drop=True)
-            dfs.append(pd.DataFrame({'anchor': anchors['caption'].reset_index(drop=True), 'positive': positives['descriptions'], 'negative': negatives['descriptions']}))
-        triplets = pd.concat(dfs, ignore_index = True).sample(frac=0.25)
-        print(triplets[triplets.isna().any(axis=1)])
-        dataset = Dataset.from_pandas(triplets)
-        return dataset
-
-
-    def evaluator(self):
-        # Our goal is to define some system to make sure descriptors of food categories are pushed away from one another
-        # We need a subset of our dataset that's formatted as triplets?
-        evaluator = TripletEvaluator(
-            anchors=self.eval_ds["anchor"],
-            positives=self.eval_ds["positive"],
-            negatives=self.eval_ds["negative"],
-            main_distance_function=SimilarityFunction.COSINE,
-            name="food-desc-triplet-eval",
-        )
-        return evaluator
-
-    def get_embedding(self, txt: str) -> torch.Tensor:
-        return self.model.encode(txt)
-
-    def train(self, save_path: str):
-        trainer = SentenceTransformerTrainer(
-            model=self.model,
-            args=self.set_config(),
-            train_dataset=self.ds['train'],
-            loss=self.loss,
-            eval_dataset = self.ds['test'],
-            evaluator=self.evaluator
-        )
-        trainer.train()
-        self.model.save_pretrained(save_path)
-        return trainer
-
-    def set_config(self):
-        return SentenceTransformerTrainingArguments(
-            # Required parameter:
-            output_dir=self.save_dir,
-            # Optional training parameters:
-            num_train_epochs=1,
-            per_device_train_batch_size=16,
-            per_device_eval_batch_size=16,
-            learning_rate=2e-5,
-            warmup_ratio=0.1,
-            fp16=True,  # Set to False if you get an error that your GPU can't run on FP16
-            bf16=False,  # Set to True if you have a GPU that supports BF16
-            batch_sampler=BatchSamplers.NO_DUPLICATES,  # losses that use "in-batch negatives" benefit from no duplicates
-            # Optional tracking/debugging parameters:
-            eval_strategy="epoch",
-            save_strategy="steps",
-            save_steps=100,
-            save_total_limit=2,
-            logging_steps=100,
-        )
+    def encode_images(self, images):
+        return self._encode(images, image=True)

@@ -23,18 +23,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             True,
             "Describe food class names through Ollama",
         ),
-        ("build-db", "build_vdb", True, "Embed and index reference descriptions"),
+        ("build-db", "build_vdb", True, "Retired: use internvl.experiment index"),
         (
             "evaluate",
             "test_classification",
             True,
-            "Evaluate caption-based image classification",
-        ),
-        (
-            "finetune-embeddings",
-            "finetune_embeddings",
-            True,
-            "Fine-tune the text embedding model",
+            "Retired: use internvl.experiment evaluate",
         ),
         (
             "merge-captions",
@@ -65,6 +59,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
 
     args = parser.parse_args(argv)
+
+    if args.command in {"build-db", "evaluate"}:
+        parser.error(
+            "This text-retrieval command is retired. Use python -m "
+            "internvl.experiment {describe,index,evaluate,run} --config_file "
+            "cfg/classification.yml; pretrained multimodal embeddings require no fine-tuning."
+        )
 
     # Help and argument errors return before loading any runtime dependencies.
     from . import workflows as experiments

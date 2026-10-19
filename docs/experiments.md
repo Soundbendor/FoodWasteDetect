@@ -59,10 +59,10 @@ top-5, and voting accuracy. Top-5 examines five description records, which can
 repeat classes. Voting selects the most common label among up to ten records.
 These metrics evaluate the combined caption, embedding, and retrieval path.
 
-Text embedding training also uses cosine triplet evaluation: an image caption is
-the anchor, a same-class description is positive, and a different-class
-description is negative. Descriptions come from the description training split;
-sampling is unseeded. This measures embedding separation, not caption correctness.
+The BGE embedding-training experiment, its `finetune-embeddings` command, and
+cosine triplet evaluator have been removed. The current whole-image experiment
+uses pretrained multimodal embeddings without training; see
+[whole-image classification](../README.md#whole-image-classification).
 
 No direct visual-factuality or human-reference caption evaluation is implemented.
 Ollama response validation checks structure, and the supplied class replaces the
@@ -71,7 +71,7 @@ database construction is a demonstration, not a benchmark.
 
 ## Text workflow limitations
 
-- `caption-images`, `build-db`, and `finetune-embeddings` use INI-style
+- `caption-images` and the retired `build-db` workflow use INI-style
   `cfg.get("Models", ...)` lookups against YAML dictionaries, resolving settings
   incorrectly.
 - `evaluate` passes the caption-anchor path as the embedding model name.
@@ -80,9 +80,8 @@ database construction is a demonstration, not a benchmark.
 - The shared reranker iterates the Qdrant response before accessing its points.
 - Caption resume checks Series indices rather than stored image IDs, and final
   buffered captions are not flushed. Caption files can therefore be incomplete.
-- Text embedding construction loads training artifacts even for inference.
-  Dataset splitting and triplet sampling are unseeded, and model/collection
-  provenance is not enforced.
+- Retired retrieval workflows still call the removed training-dependent embedding
+  interface and cannot use the new inference-only wrapper.
 
 ## Image workflow limitations
 

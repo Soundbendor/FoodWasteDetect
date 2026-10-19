@@ -70,7 +70,7 @@ import internvl.workflows
 from internvl.cli import main
 
 for command in [None, 'caption-images', 'generate-descriptions', 'build-db',
-                'evaluate', 'finetune-embeddings', 'merge-captions', 'convert-captions',
+                'evaluate', 'merge-captions', 'convert-captions',
                 'download_model']:
     try:
         main(([command] if command else []) + ['--help'])
@@ -101,9 +101,6 @@ except SystemExit as exc:
         cases = [
             ("caption-images", "caption_imgs", True),
             ("generate-descriptions", "generate_descriptions", True),
-            ("build-db", "build_vdb", True),
-            ("evaluate", "test_classification", True),
-            ("finetune-embeddings", "finetune_embeddings", True),
             ("merge-captions", "merge_files", False),
             ("convert-captions", "convert_csv_to_dictionary", False),
         ]
@@ -310,8 +307,8 @@ with tempfile.TemporaryDirectory() as directory:
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "experiment.yml"
             config.write_text("llm: fake\nsettings:\n  eval_samples: 7\n")
-            with patch.object(workflows, "test_classification") as evaluate:
-                main(["evaluate", "--config_file", str(config)])
+            with patch.object(workflows, "generate_descriptions") as evaluate:
+                main(["generate-descriptions", "--config_file", str(config)])
             evaluate.assert_called_once_with(cfg={"llm": "fake", "settings": {"eval_samples": 7}})
 
 

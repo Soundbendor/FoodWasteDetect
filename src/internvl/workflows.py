@@ -199,19 +199,3 @@ def caption_imgs(cfg: dict, partition: int) -> None:
             df = pd.concat([df, df_update])
             df.to_csv(save_path)
             buffer = []
-
-
-def finetune_embeddings(cfg: dict) -> None:
-    from .embeddings import EmbeddingModel
-
-    dict_path = cfg.get("Models", "dictionary")
-    embedder = EmbeddingModel(
-        dict_path,
-        cfg.get("Models", "anchor_path"),
-        cfg.get("Models", "embed_model_save_path"),
-        cfg.get("Models", "embed_model"),
-    )
-    # train embedding model
-    trainer = embedder.train(save_path=cfg.get("Models", "embed_model_save_path"))
-    metrics = trainer.state.log_history
-    print(metrics)

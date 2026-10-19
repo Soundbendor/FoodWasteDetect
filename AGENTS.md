@@ -65,7 +65,57 @@ The current implementation is a collection of offline experiments, not a complet
 implementation of this target. In particular, do not describe existing outputs as
 instance segmentation when they contain only boxes and class predictions.
 
-## InternVL text architecture and experiment pipeline
+## Configurable whole-image classification (current)
+
+The separately authorized `internvl.experiment` runner supersedes the old BGE
+text-retrieval/training commands. `workflows.py` remains unchanged for historical
+inspection except for the removed `finetune_embeddings` workflow. The
+`finetune-embeddings` CLI command is also removed; `internvl build-db` and
+`evaluate` fail with migration guidance. `embeddings.py` is inference-only Jina CLIP v2;
+the historical BGE training/triplet implementation has been removed. References
+to that implementation below describe the retired workflow, not a supported API.
+Caption, description, merge, conversion, and download utilities remain available;
+the separate CLIP fine-tuning experiment and legacy image interfaces are unchanged.
+
+Use `python -m internvl.experiment {describe,index,evaluate,run} --config_file
+cfg/classification.yml`. This independent whole-image baseline embeds pixels
+without InternVL captioning or YOLO. Its three reference booleans select any
+nonempty combination of class names, generated descriptions, and training images.
+Use all official FoodX251 training references and labeled validation images for
+evaluation, recording `source_split="val"`; never claim official test accuracy.
+The composed dataset adapter rejects path/hash leakage and preserves legacy names.
+
+Full 1024-dimensional normalized Jina embeddings use checkpoint preprocessing
+and an explicit device. By user choice, this whole-image experiment does not
+configure or track model/code revisions, including nested text-encoder revisions;
+it uses default cached versions. Loading is
+local-cache-only. Do not download weights or start real services for checks.
+Every selected record contributes one vote; ties use best similarity then class
+name. Accuracy is over successfully embedded evaluation images, with explicit
+coverage/exclusions and per-class metrics. Empty retrieval abstains; infrastructure
+errors fail the run with incomplete outputs. There is no top-five metric.
+
+Git revision, dependency-version, and timestamp provenance tracking has been
+removed from the whole-image runner by user request.
+Artifact validation is explicitly deferred by user request. Do not add hashes,
+compatibility checks, manifest comparisons, or collection-content verification.
+Existing descriptions load directly. Each index invocation builds a fresh uniquely
+named collection and replaces index.json with its collection name, source counts,
+model settings, exclusions, and status. Evaluation reads that file directly;
+status is reporting only, not a load gate. Historical collections and raw data
+are not overwritten. Every class requires a usable image reference when image
+references are enabled. Evaluation embeddings are recomputed for each run.
+Compare complete retrieval strategies, because changing reference sources also
+changes reference counts. No tuning or subsampling occurs.
+
+CPU verification includes fake model/Ollama backends, synthetic images, miniature
+FoodX251 fixtures, and qdrant-client's in-memory backend. Install the small CPU
+dependencies listed in README for these tests; retain explicit skips when absent.
+These tests do not establish real model, dataset, GPU, Ollama, remote-Qdrant, or HPC
+compatibility. The historical workflow limitations below remain relevant only to
+legacy source, and must not be attributed to the new experiment runner.
+
+## InternVL text architecture and experiment pipeline (historical)
 
 This is an independent whole-image classification experiment. It does not use
 YOLO or produce instance masks. YOLO is needed only by the separate image/crop
@@ -100,7 +150,8 @@ behavior.
 
 - `src/internvl/model.py` owns the existing `InternVLM` and image preprocessing.
 - `src/internvl/generate_descriptors.py` owns `DescriberLLM` and `FoodDescriptor`.
-- `src/internvl/embeddings.py` owns text embedding, training, and triplet evaluation.
+- `src/internvl/embeddings.py` now owns inference-only multimodal embeddings; the
+  former text training/triplet implementation is retired.
 - `src/internvl/workflows.py` owns the text workflows formerly mixed into `app.py`.
   Functions receive configuration dictionaries; captioning also receives a
   partition number. `src/internvl/cli.py` supplies command dispatch.
@@ -110,7 +161,7 @@ behavior.
   cross-encoder import inside reranker construction.
 
 Use `internvl` or `python -m internvl` with `caption-images`,
-`generate-descriptions`, `build-db`, `evaluate`, `finetune-embeddings`,
+`generate-descriptions`,
 `merge-captions`, `convert-captions`, or `download_model MODEL_NAME`.
 The download command reads `cfg/experiment_config_internvl.yml` from the working
 directory without a config flag. Other model workflows take `--config_file`;
@@ -146,25 +197,24 @@ inherited. Use an approved cluster allocation; Slurm handles forced termination.
 FoodX251 validation compares the final retrieved labels with ground truth. The
 example config samples 1,000 images with seed 42 and reports top-1, top-5, and
 voting accuracy. Top-5 means five description records, not five distinct classes.
-The cosine triplet evaluator compares a caption anchor with same-class and
-different-class descriptions sampled from the description training split.
-Sampling is unseeded. These evaluations do not isolate caption quality or measure
-whether every visual claim in a description is true.
+The former cosine triplet evaluator and BGE embedding-training workflow have
+been removed. The historical retrieval evaluation did not isolate caption quality
+or measure whether every visual claim in a description was true.
 
 No direct descriptor-factuality or human-reference caption evaluation is
 implemented. Ollama JSON validation checks structure, and the supplied label
 overwrites the model's class field. The macaron query in database construction is
 only a demonstration, not an accuracy benchmark.
 
-The extraction intentionally preserves these defects for separate repair:
+The legacy workflow source preserves these defects; retired commands do not dispatch it:
 
 - INI-style configuration lookups remain in several YAML-driven workflows.
 - Classification passes the anchor-file path as the embedding model name.
 - Text insertion passes incompatible class/metadata arguments and omits IDs.
 - The shared reranker accesses the Qdrant response incorrectly.
 - Caption resume checks Series indices, and final buffered captions are not saved.
-- Text embedding construction depends on training artifacts even for inference;
-  random splits and triplet sampling are unseeded.
+- Legacy retrieval callers still expect the removed training-dependent embedding
+  interface and are not supported by the inference-only wrapper.
 
 Do not claim successful end-to-end inference from the extraction tests. They
 establish command wiring, import boundaries, and selected artifact behavior only.

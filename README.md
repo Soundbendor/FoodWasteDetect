@@ -1,16 +1,17 @@
 # FoodWasteDetect
 
 FoodWasteDetect explores food recognition for food-waste sensing through two
-retrieval-based research pipelines:
+retrieval-based research pipelines and a whole-image classification baseline:
 
 - **Image retrieval:** the primary direction is YOLO localization → Jina CLIP
   image embeddings → Qdrant category retrieval. This target architecture is
   partially implemented; the example configuration selects a different CLIP
   model.
-- **Text retrieval:** the `internvl` package captions whole images, embeds the
-  captions, and retrieves labeled descriptions from Qdrant. References come from
-  Ollama-generated class descriptions or training-image captions. This pipeline
-  performs whole-image classification without boxes or masks.
+- **Whole-image classification:** `internvl.experiment` embeds image pixels with
+  pretrained Jina CLIP v2 and retrieves class names, generated descriptions,
+  training images, or any combination. It produces no boxes or masks.
+- **Caption utilities:** `internvl` retains InternVL caption generation and Ollama
+  class-description generation. The old BGE caption-retrieval/training CLI is retired.
 
 > [!NOTE] These are offline experiments with known runtime and evaluation
 > limitations. See [experiment notes](docs/experiments.md) before running a
@@ -69,9 +70,6 @@ marked **config** require `--config_file cfg/experiment_config_internvl.yml`.
 | `caption-images`            | config, `--partition 1`–`4` | Caption one quarter of the training images into a partition CSV.                   |
 | `merge-captions`            | None                        | Merge four partition CSVs into `assets/foodx251_captions.txt`.                     |
 | `convert-captions`          | None                        | Group merged captions by class into `foodx251_captions.json`.                      |
-| `build-db`                  | config                      | Embed reference descriptions and insert them into Qdrant.                          |
-| `evaluate`                  | config                      | Caption validation images and report retrieval classification accuracy.            |
-| `finetune-embeddings`       | config                      | Train the text embedder using descriptions and image captions.                     |
 
 For example:
 
@@ -79,8 +77,82 @@ For example:
 internvl generate-descriptions --config_file cfg/experiment_config_internvl.yml
 ```
 
-Captioning, indexing, evaluation, and training have
+Legacy caption utilities have
 [current limitations](docs/experiments.md#text-workflow-limitations).
+
+### Whole-image classification
+
+Configure [cfg/classification.yml](cfg/classification.yml), then run:
+
+```sh
+PYTHONPATH=src python -m internvl.experiment run --config_file cfg/classification.yml
+```
+
+The same command accepts `describe`, `index`, or `evaluate` in place of `run`.
+`describe` is a no-op when descriptions are disabled. `index` reads the saved descriptions when that source is enabled. `run` closes its owned Ollama
+server before constructing the embedder. Neither CLI help nor imports load models.
+
+Choose `embed_images`, `embed_class_labels`, and `embed_descriptions`; all seven
+nonempty combinations are supported. The default uses five generated descriptions
+per class, batches of 32, CPU, and k=10. Each reference record gets one equal vote
+in the pooled exact cosine top-k. Compare results as complete retrieval strategies:
+changing sources changes reference counts as well as wording. No partitions,
+subsampling, parameter tuning, or query-embedding cache are used.
+
+FoodX251 references use the complete official training table. Evaluation uses the
+complete **labeled validation split** (`source_split="val"`), never the unlabeled
+official test set. The adapter preserves legacy filenames, resolves paths, validates
+labels, and rejects cross-split path/content duplication. Images and raw annotations
+are never rewritten. Set a separate output directory for every reference strategy
+you want to keep separately; paths are resolved from the working directory.
+
+The pretrained embedder uses full normalized 1,024-dimensional float32 vectors.
+Model and code revisions are not configured or tracked for this experiment.
+The model, nested text encoder, tokenizer, and image preprocessing use their
+default cached versions. Attention
+accelerators are disabled to keep device selection explicit. Model loading is
+**local-cache-only**: provision the model, tokenizer, processor, and Python
+sources (including `jinaai/jina-embeddings-v3` and
+`jinaai/xlm-roberta-flash-implementation`) in a separately authorized setup step.
+No model download is performed by the runner. Runtime packages include PyTorch,
+Transformers, huggingface-hub, einops, timm, Pillow, NumPy, pandas, tqdm,
+qdrant-client, PyYAML, and Ollama's Python client. Real-model compatibility still
+requires a separately authorized run; fixture tests do not validate it.
+See the [Jina model card](https://huggingface.co/jinaai/jina-clip-v2) for the
+upstream text/image API.
+
+Artifacts in the output directory:
+
+- `descriptions.json`: generated description dictionary. Existing
+  descriptions are loaded directly; remove this file to generate them again.
+- `index.json`: latest collection name, model settings, reference-source counts,
+  exclusions, configuration, and run status.
+- `evaluation_<UUID>/`: predictions, metrics, exclusions, and a report containing
+  the source manifest, retrieval settings, and source counts.
+
+Artifact validation is deferred. There are no hashes, compatibility checks,
+manifest comparisons, or collection-content verification. Each `index` invocation
+(including through `run`) builds a fresh collection and replaces `index.json`;
+previous collections are left intact. `evaluate` directly uses the collection
+named in that file. Status fields report outcomes but do not gate artifact loading.
+Missing/unreadable/unembeddable training images are logged and excluded; every
+class still needs an image reference when that source is enabled. Generated
+descriptions must be nonempty.
+
+Votes tie-break by best individual similarity, then class name. `vote_fraction`
+is winning votes / actual returned neighbors, not calibrated confidence. Empty
+results abstain and count as incorrect. Primary accuracy uses successfully embedded
+evaluation images: 63 correct out of 90 embedded from 100 selected is 70%, with
+90% coverage. Reports also retain selected/available/embedded/evaluated counts,
+all exclusions, per-class support/correct/recall, and nearest-neighbor accuracy.
+There is no top-five metric. Qdrant failures abort and save incomplete outputs;
+zero embedded evaluation images produce undefined accuracy and fail the run.
+
+The old `internvl build-db` and `evaluate` commands exit with migration guidance.
+The `finetune-embeddings` command and its workflow have been removed, along with
+BGE training/triplet evaluation. The remaining legacy retrieval workflows are
+preserved for historical inspection, not supported execution. Caption utilities and the separate `clip_finetune.py`
+experiment remain available.
 
 ### Image experiments
 
@@ -101,7 +173,7 @@ Paths below are relative to `src/`.
 | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | [internvl/model.py](src/internvl/model.py)                                        | InternVL loading, image preprocessing, and caption inference.                                             |
 | [internvl/generate_descriptors.py](src/internvl/generate_descriptors.py)          | Ollama lifecycle, model downloads, and class descriptions.                                                |
-| [internvl/embeddings.py](src/internvl/embeddings.py)                              | Text embeddings, fine-tuning, and triplet evaluation.                                                     |
+| [internvl/embeddings.py](src/internvl/embeddings.py)                              | Inference-only Jina CLIP text/image embeddings.                                                     |
 | [internvl/workflows.py](src/internvl/workflows.py), [cli.py](src/internvl/cli.py) | Text experiment orchestration and command dispatch.                                                       |
 | [app.py](src/app.py), [yolo.py](src/yolo.py)                                      | Image-retrieval entry points, crop experiments, and detector evaluation.                                  |
 | [clip_finetune.py](src/clip_finetune.py)                                          | CLIP image/text fine-tuning experiments.                                                                  |
@@ -119,6 +191,8 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 Artifact and dataset checks need NumPy, pandas, Pillow, tqdm, and PyYAML;
+new index tests additionally need qdrant-client (tested with 1.19.1);
 missing dependencies produce skips. Tests use synthetic fixtures and mocked
 backends, without starting models or services; they do not establish model
-accuracy or Qdrant/GPU/HPC integration.
+accuracy or real-model/remote-Qdrant/GPU/HPC integration. New tests use an
+in-memory Qdrant client, not a live service.

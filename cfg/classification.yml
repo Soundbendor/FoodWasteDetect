@@ -1,0 +1,24 @@
+# One reference strategy per output directory. All paths resolve from the CWD.
+dataset:
+  name: foodx251
+  root: data/FoodX-251
+embed_images: false
+embed_class_labels: false
+embed_descriptions: true
+embedding:
+  model_id: jinaai/jina-clip-v2
+  device: cpu
+  batch_size: 32
+ollama:
+  llm: gemma3:27b
+  binary_path: deps/ollama/bin/ollama
+  host: http://127.0.0.1:11434
+  startup_timeout: 120
+  request_timeout: 600
+qdrant:
+  connection:
+    url: http://127.0.0.1:6333
+  collection_prefix: foodx251_whole_image
+k: 10
+description_count: 5
+output_dir: assets/classification/descriptions_v1
