@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from collections import defaultdict
+from pathlib import Path
 
 import httpx
 import ollama
@@ -84,11 +85,33 @@ class DescriberLLM:
             return False
         return True
 
+    def _validate_binary(self) -> str:
+        """Resolve the configured executable without installing or running it."""
+        guidance = (
+            "Install Ollama or set ollama.binary_path to an existing executable. "
+            "See README.md: Ollama setup."
+        )
+        if not isinstance(self.binary_path, str) or not self.binary_path.strip():
+            raise ValueError(
+                f"ollama.binary_path must be a nonempty string. {guidance}"
+            )
+        path = Path(self.binary_path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"Ollama executable not found: {path}. {guidance}")
+        if not path.is_file():
+            raise ValueError(f"ollama.binary_path is not a file: {path}. {guidance}")
+        if not os.access(path, os.X_OK):
+            raise PermissionError(
+                f"Ollama executable lacks execute permission: {path}. {guidance}"
+            )
+        return str(path)
+
     def start_server(self):
         """Launch Ollama, rejecting an endpoint already served by another instance."""
         deadline = time.monotonic() + self.startup_timeout
         try:
             if self._process is None:
+                binary_path = self._validate_binary()
                 # If self._process was not set, but an Ollama instance is already running
                 # on this port, abort.
                 if self._is_ready(timeout=min(1, self.startup_timeout)):
@@ -98,7 +121,14 @@ class DescriberLLM:
                 env = os.environ.copy()
                 env["OLLAMA_HOST"] = self.host
                 # Force Ollama subprocess to inherit model environment.
-                self._process = subprocess.Popen([self.binary_path, "serve"], env=env)
+                try:
+                    self._process = subprocess.Popen([binary_path, "serve"], env=env)
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"Could not launch Ollama executable {binary_path}: {exc}. "
+                        "Check the installation at ollama.binary_path. "
+                        "See README.md: Ollama setup."
+                    ) from exc
 
             while True:
                 if self._process.poll() is not None:
@@ -118,6 +148,14 @@ class DescriberLLM:
         except BaseException:
             self.close()
             raise
+
+    def download_model(self, model_name: str) -> None:
+        """Pull a requested model with visible progress from the owned server."""
+        for progress in self.client.pull(model=model_name, stream=True):
+            message = progress.status
+            if progress.total is not None and progress.completed is not None:
+                message = f"{message}: {progress.completed}/{progress.total} bytes"
+            print(message, flush=True)
 
     def _describe_class(self, label: str, prompt: dict[str, str]) -> FoodDescriptor:
         """Request and validate one description, retaining the supplied class label."""

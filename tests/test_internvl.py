@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 import types
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from internvl.cli import main
 from internvl import workflows
@@ -70,13 +70,20 @@ import internvl.workflows
 from internvl.cli import main
 
 for command in [None, 'caption-images', 'generate-descriptions', 'build-db',
-                'evaluate', 'finetune-embeddings', 'merge-captions', 'convert-captions']:
+                'evaluate', 'finetune-embeddings', 'merge-captions', 'convert-captions',
+                'download_model']:
     try:
         main(([command] if command else []) + ['--help'])
     except SystemExit as exc:
         assert exc.code == 0
     else:
         raise AssertionError('Help did not exit')
+try:
+    main(['download_model'])
+except SystemExit as exc:
+    assert exc.code == 2
+else:
+    raise AssertionError('Missing model name did not exit')
 sys.argv = ['internvl', '--help']
 try:
     runpy.run_module('internvl', run_name='__main__')
@@ -120,6 +127,38 @@ except SystemExit as exc:
                     fake_util.parse_cfg.assert_called_once_with("example.yml")
                 else:
                     fake_util.parse_cfg.assert_not_called()
+
+    def test_download_reads_working_directory_config_and_exact_model(self):
+        backend = types.ModuleType("internvl.generate_descriptors")
+        backend.DescriberLLM = MagicMock()
+        yaml = types.ModuleType("yaml")
+        cfg = {'ollama': {'llm': 'configured:tag', 'host': 'synthetic'}}
+        def load(stream):
+            self.assertEqual(stream.read(), content)
+            return cfg
+        yaml.safe_load = Mock(side_effect=load)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'cfg').mkdir()
+            path = root / 'cfg/experiment_config_internvl.yml'
+            content = 'ollama:\n  llm: configured:tag\n  host: synthetic\n'
+            path.write_text(content)
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch.dict(sys.modules, {
+                    'internvl.generate_descriptors': backend, 'yaml': yaml,
+                    'util': None,
+                }):
+                    main(['download_model', 'requested:exact-tag'])
+            finally:
+                os.chdir(previous)
+            self.assertEqual(path.read_text(), content)
+        backend.DescriberLLM.assert_called_once_with(
+            {'llm': 'configured:tag', 'host': 'synthetic'})
+        context = backend.DescriberLLM.return_value
+        context.__enter__.return_value.download_model.assert_called_once_with('requested:exact-tag')
+        context.__exit__.assert_called_once_with(None, None, None)
 
     def test_argument_errors_do_not_dispatch(self):
         for argv in [[], ["unknown"], ["evaluate"], ["caption-images", "--config_file", "x"]]:
@@ -245,7 +284,7 @@ class ArtifactTests(unittest.TestCase):
 
     def test_caption_utilities_do_not_import_model_backends(self):
         result = run_python(
-            "forbidden = {'internvl.model', 'internvl.descriptors', 'internvl.embeddings', "
+            "forbidden = {'internvl.model', 'internvl.generate_descriptors', 'internvl.embeddings', "
             "'ultralytics', 'ollama', 'torch', 'transformers', 'sentence_transformers', 'qdrant_client'}\n"
             + IMPORT_GUARD
             + """

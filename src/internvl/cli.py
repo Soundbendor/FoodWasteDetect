@@ -10,21 +10,44 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         description="FoodWasteDetect caption and text-retrieval experiments",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    download = commands.add_parser(
+        "download_model", help="Download weights for an Ollama model."
+    )
+    download.add_argument("model_name", help="Ollama model name to download")
+    download.set_defaults(workflow="download_model", needs_config=False)
     workflows = (
-        ("caption-images", "caption_imgs", True,
-         "Caption FoodX251 training images"),
-        ("generate-descriptions", "generate_descriptions", True,
-         "Describe food class names through Ollama"),
-        ("build-db", "build_vdb", True,
-         "Embed and index reference descriptions"),
-        ("evaluate", "test_classification", True,
-         "Evaluate caption-based image classification"),
-        ("finetune-embeddings", "finetune_embeddings", True,
-         "Fine-tune the text embedding model"),
-        ("merge-captions", "merge_files", False,
-         "Merge the four FoodX251 caption partitions"),
-        ("convert-captions", "convert_csv_to_dictionary", False,
-         "Convert merged captions to a description dictionary"),
+        ("caption-images", "caption_imgs", True, "Caption FoodX251 training images"),
+        (
+            "generate-descriptions",
+            "generate_descriptions",
+            True,
+            "Describe food class names through Ollama",
+        ),
+        ("build-db", "build_vdb", True, "Embed and index reference descriptions"),
+        (
+            "evaluate",
+            "test_classification",
+            True,
+            "Evaluate caption-based image classification",
+        ),
+        (
+            "finetune-embeddings",
+            "finetune_embeddings",
+            True,
+            "Fine-tune the text embedding model",
+        ),
+        (
+            "merge-captions",
+            "merge_files",
+            False,
+            "Merge the four FoodX251 caption partitions",
+        ),
+        (
+            "convert-captions",
+            "convert_csv_to_dictionary",
+            False,
+            "Convert merged captions to a description dictionary",
+        ),
     )
     for command, workflow, needs_config, help_text in workflows:
         subparser = commands.add_parser(command, help=help_text, description=help_text)
@@ -35,7 +58,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
         if command == "caption-images":
             subparser.add_argument(
-                "--partition", required=True, type=int,
+                "--partition",
+                required=True,
+                type=int,
                 help="Legacy FoodX251 partition number, 1 through 4",
             )
 
@@ -45,6 +70,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     from . import workflows as experiments
 
     kwargs = {}
+    if args.command == "download_model":
+        kwargs["model_name"] = args.model_name
     if args.needs_config:
         from util import parse_cfg
 

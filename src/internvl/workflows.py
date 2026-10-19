@@ -15,6 +15,16 @@ intern_prompt = "<image>\nPlease describe the food item in this image in a singl
 test_query = "They are delicate, pastel-pink macarons featuring crisp almond-flour meringue shells sandwiched around a sweet, creamy filling."
 
 
+def download_model(model_name: str) -> None:
+    import yaml
+    from .generate_descriptors import DescriberLLM
+
+    with open("cfg/experiment_config_internvl.yml", encoding="utf-8") as stream:
+        cfg = yaml.safe_load(stream)
+    with DescriberLLM(cfg["ollama"]) as llm:
+        llm.download_model(model_name)
+
+
 def generate_descriptions(cfg: dict) -> None:
     from data_wrappers.foodx251 import FoodX251
     from .generate_descriptors import DescriberLLM

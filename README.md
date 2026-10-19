@@ -1,14 +1,13 @@
 # FoodWasteDetect
 
-FoodWasteDetect contains two separate research pipelines. The primary experimental
-direction is YOLO localization followed by Jina CLIP image embeddings and Qdrant
-classification. The `internvl` package contains the older caption and text-retrieval
-experiments. Its name identifies the current captioner; its Ollama describer is a
-separate component with a different task.
+FoodWasteDetect contains two separate research pipelines. The primary
+experimental direction is YOLO localization followed by Jina CLIP image
+embeddings and Qdrant classification. The `internvl` package contains the older
+caption and text-retrieval experiments.
 
-This refactor separates the code and commands. It preserves existing experimental
-behavior, including the runtime defects listed below. These are offline research
-scripts, not a deployed inference service.
+This refactor separates the code and commands. It preserves existing
+experimental behavior, including the runtime defects listed below. These are
+offline research scripts, not a deployed inference service.
 
 ## How text-based inference works
 
@@ -25,11 +24,12 @@ scripts, not a deployed inference service.
    descriptions. An optional cross-encoder reranks them, and their labels are
    used for nearest-neighbor or majority-vote classification.
 
-Ollama is needed to generate the reference descriptions, not for each image query
-after the database is populated. Stored and query embeddings must use compatible
-models and preprocessing; the current code does not enforce collection provenance.
-Caption files can also be grouped by class to produce the same reference-dictionary
-format. This permits image-derived reference descriptions as another experiment.
+Ollama is needed to generate the reference descriptions, not for each image
+query after the database is populated. Stored and query embeddings must use
+compatible models and preprocessing; the current code does not enforce
+collection provenance. Caption files can also be grouped by class to produce the
+same reference-dictionary format. This permits image-derived reference
+descriptions as another experiment.
 
 YOLO is not used by this workflow. The captioner processes whole images and does
 not output boxes or instance masks. Per-object detection and captioning would be
@@ -38,35 +38,37 @@ methods are called.
 
 ## Package and command migration
 
-The package contains `model.py` for InternVL, `descriptors.py` for Ollama,
-`embeddings.py` for text embedding and training, and `workflows.py` for experiment
-orchestration. `cli.py` dispatches commands without loading backends until needed.
-Importing `internvl` or requesting CLI help does not load models or contact services.
-Datasets, Qdrant, and classification metrics remain shared with the image path.
+The package contains `model.py` for InternVL, `generate_descriptors.py` for
+Ollama, `embeddings.py` for text embedding and training, and `workflows.py` for
+experiment orchestration. `cli.py` dispatches commands without loading backends
+until needed. Importing `internvl` or requesting CLI help does not load models
+or contact services. Datasets, Qdrant, and classification metrics remain shared
+with the image path.
 
-The old `vlm.intern`, `llm.describer`, and `database.embedding` imports have been
-removed. Import their classes from `internvl.model`, `internvl.descriptors`, and
-`internvl.embeddings`, respectively. Class and method names are retained. Workflow
-functions accept a configuration dictionary; `caption_imgs` also takes `partition`.
+The old `vlm.intern`, `llm.describer`, and `database.embedding` imports have
+been removed. Import their classes from `internvl.model`,
+`internvl.generate_descriptors`, and `internvl.embeddings`, respectively. Class
+and method names are retained. Workflow functions accept a configuration
+dictionary; `caption_imgs` also takes `partition`.
 
-| Previous command | Replacement |
-| --- | --- |
-| `caption_imgs` | `internvl caption-images` |
-| `generate_descriptions` | `internvl generate-descriptions` |
-| `build_vdb` | `internvl build-db` |
-| `test_classification` | `internvl evaluate` |
-| `finetune_embeddings` function, previously without a console entry | `internvl finetune-embeddings` |
-| `merge_captions` | `internvl merge-captions` |
-| `convert_dict` | `internvl convert-captions` |
+| Previous command                                                   | Replacement                      |
+| ------------------------------------------------------------------ | -------------------------------- |
+| `caption_imgs`                                                     | `internvl caption-images`        |
+| `generate_descriptions`                                            | `internvl generate-descriptions` |
+| `build_vdb`                                                        | `internvl build-db`              |
+| `test_classification`                                              | `internvl evaluate`              |
+| `finetune_embeddings` function, previously without a console entry | `internvl finetune-embeddings`   |
+| `merge_captions`                                                   | `internvl merge-captions`        |
+| `convert_dict`                                                     | `internvl convert-captions`      |
 
 There are no compatibility aliases. The `build_clip_db`, `test_clip`, and
 `test_yolo` commands retain their names and implementations.
 
-In an existing research environment, install the checkout with `python -m pip
-install -e .`. Runtime dependencies are still managed by the research environment;
-the project metadata does not install them. The existing environment file is
-machine-specific and incomplete. Recreate an environment only after selecting the
-appropriate Python, CUDA, and model-library versions.
+In an existing research environment, install the checkout with
+`python -m pip install -e .`. Runtime dependencies are still managed by the
+research environment; the project metadata does not install them. The existing
+environment file is machine-specific and incomplete. Recreate an environment
+only after selecting the appropriate Python, CUDA, and model-library versions.
 
 To inspect the CLI directly from the checkout without installing it:
 
@@ -87,31 +89,67 @@ internvl merge-captions
 internvl convert-captions
 ```
 
-These examples document invocation, not a verified working experiment. Review the
-known defects before running them. The text configuration was renamed from
-`cfg/experiment_config.yml`; its values and interpretation are otherwise unchanged.
-Use the repository root as the working directory for legacy relative paths.
+These examples document invocation, not a verified working experiment. Review
+the known defects before running them. The text configuration was renamed from
+`cfg/experiment_config.yml`; its values and interpretation are otherwise
+unchanged. Use the repository root as the working directory for legacy relative
+paths.
 
 Captioning still partitions the training set into four slices. Merge expects
-`assets/foodx251_captions_1.txt` through `_4.txt`, containing CSV data, and writes
-`assets/foodx251_captions.txt`. Conversion writes `foodx251_captions.json` in the
-working directory, mapping each class to a list of captions. No artifact migration
-or new resume guarantees are introduced.
+`assets/foodx251_captions_1.txt` through `_4.txt`, containing CSV data, and
+writes `assets/foodx251_captions.txt`. Conversion writes
+`foodx251_captions.json` in the working directory, mapping each class to a list
+of captions. No artifact migration or new resume guarantees are introduced.
 
-Ollama scripts now reside in `src/internvl/scripts` and are included in the package.
-Descriptor generation retains its existing server-start attempt if the chat probe
-raises `ConnectionError`. Script names, model selections, and working-directory
-assumptions are historical; the download script still names DeepSeek while the
-experiment config selects Gemma. Do not run these scripts, GPU experiments, or
-Slurm jobs without the required data and compute authorization.
+### Ollama setup
+
+The Python `ollama` package is an API client; users will need to manually
+install the Ollama server executable (not bundled in this repo).
+
+The example config expects the compiled Ollama binary at
+`deps/ollama/bin/ollama`. To install the current Linux x86-64 distribution
+locally:
+
+```sh
+mkdir -p deps/ollama
+curl -fL https://ollama.com/download/ollama-linux-amd64.tar.zst -o /tmp/ollama-linux-amd64.tar.zst
+tar --zstd -xf /tmp/ollama-linux-amd64.tar.zst -C deps/ollama
+```
+
+Keep the archive's `bin/` and `lib/` layout; copying only the executable can
+omit required runtime libraries. For ARM64, AMD GPU support, and other
+platforms, follow the
+[official Ollama installation instructions](https://docs.ollama.com/linux).
+
+If Ollama is already installed elsewhere, update the YAML config:
+
+```yaml
+ollama:
+  binary_path: /absolute/path/to/ollama
+```
+
+To download a model, activate your Python environment and run from the
+repository root with the Ollama binary installed. Optionally set `OLLAMA_MODELS`
+to choose a model storage directory:
+
+```sh
+# Optional; omit to use Ollama's default model directory.
+export OLLAMA_MODELS=/path/to/your/model-storage
+internvl download_model gemma3:27b
+```
+
+To configure Ollama for description generation, see
+cfg/experiment_config_internvl.yml. Each Ollama client must have a model, path,
+and host (with open port).
 
 ## What the evaluation measures
 
 The classification workflow compares retrieved labels with FoodX251 validation
-labels. The example configuration selects 1,000 images with sampling seed 42.
-It reports top-1, top-5, and voting accuracy. Top-5 checks the first five description
-records, which can repeat classes; voting selects the most common label among up
-to ten records. These measure the combined caption, embedding, and retrieval path.
+labels. The example configuration selects 1,000 images with sampling seed 42. It
+reports top-1, top-5, and voting accuracy. Top-5 checks the first five
+description records, which can repeat classes; voting selects the most common
+label among up to ten records. These measure the combined caption, embedding,
+and retrieval path.
 
 Text embedding training also configures a cosine triplet evaluator. An image
 caption is the anchor, a same-class description is the positive, and a different
@@ -144,6 +182,7 @@ macaron query after database construction is only a demonstration.
 Run `PYTHONPATH=src python -m unittest discover -s tests -v`. CLI and dispatch
 checks use the standard library. Artifact and shared-dataset checks require the
 small CPU dependencies NumPy, pandas, Pillow, tqdm, and PyYAML; missing ones are
-reported as skips. External model and service interfaces are mocked where needed.
-These checks do not establish model accuracy, real Qdrant integration, or HPC
-execution. No models, datasets, Ollama servers, or GPU jobs are started by the tests.
+reported as skips. External model and service interfaces are mocked where
+needed. These checks do not establish model accuracy, real Qdrant integration,
+or HPC execution. No models, datasets, Ollama servers, or GPU jobs are started
+by the tests.
