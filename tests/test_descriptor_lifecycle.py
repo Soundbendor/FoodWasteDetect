@@ -70,6 +70,12 @@ class DescriptorLifecycleTests(unittest.TestCase):
             self.dataset_class,
         )
 
+    def test_public_description_uses_shared_prompt_without_cleaning_label(self):
+        output = types.SimpleNamespace(food_class='Seafood', description='A seafood dish.')
+        with patch.object(self.llm, '_describe_class', return_value=output) as describe:
+            self.assertIs(self.llm.describe_class('Seafood'), output)
+        describe.assert_called_once_with('Seafood', self.module.descriptor_prompt('Seafood'))
+
     def test_download_progress_environment_and_cleanup(self):
         for failure in (None, self.module.ollama.ResponseError('pull failed'), KeyboardInterrupt()):
             with self.subTest(failure=failure):

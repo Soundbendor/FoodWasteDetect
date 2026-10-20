@@ -91,6 +91,9 @@ PYTHONPATH=src python -m internvl.experiment run --config_file cfg/classificatio
 The same command accepts `describe`, `index`, or `evaluate` in place of `run`.
 `describe` is a no-op when descriptions are disabled. `index` reads the saved descriptions when that source is enabled. `run` closes its owned Ollama
 server before constructing the embedder. Neither CLI help nor imports load models.
+Constructing `Experiment` does not load dataset metadata or create directories.
+Disabled and cached description stages also avoid loading the dataset. Description
+generation uses the public `DescriberLLM.describe_class(label)` method.
 
 Choose `embed_images`, `embed_class_labels`, and `embed_descriptions`; all seven
 nonempty combinations are supported. The default uses five generated descriptions
@@ -98,6 +101,8 @@ per class, batches of 32, CPU, and k=10. Each reference record gets one equal vo
 in the pooled exact cosine top-k. Compare results as complete retrieval strategies:
 changing sources changes reference counts as well as wording. No partitions,
 subsampling, parameter tuning, or query-embedding cache are used.
+Reference switches must be YAML booleans. Batch size, evaluation `k`, and the
+generated description count must be positive integers for the stages that use them.
 
 FoodX251 references use the complete official training table. Evaluation uses the
 complete **labeled validation split** (`source_split="val"`), never the unlabeled
@@ -148,6 +153,10 @@ official test split. Its `iter_batches()` uses
 batch. Images are decoded once per pass and passed directly to the embedder.
 Missing, unreadable, or unembeddable images stop the run without retries or
 exclusions. Stage failures save incomplete outputs and propagate the error.
+Index setup failures also save incomplete outputs, with model metadata included
+only if it was loaded. If writing a failure report fails, that failure is logged
+and the original processing exception is re-raised. A failed report write after
+successful processing still fails the command.
 Every class needs a training image reference when that source is enabled.
 Generated descriptions must be nonempty.
 
@@ -158,6 +167,10 @@ validation split and have 100% coverage. Reports retain selected, available,
 embedded, and evaluated counts, per-class support/correct/recall, and
 nearest-neighbor accuracy. Incomplete reports retain counts for completed work;
 they do not establish full-dataset accuracy. There is no top-five metric.
+Evaluation rejects mismatched batch lengths and cannot complete unless selected,
+available, embedded, and prediction counts agree. Image reference records are
+constructed directly from decoded training batches; both indexing and evaluation
+close each batch's images on success, failure, or interruption.
 Qdrant failures also abort; an empty evaluation split fails with undefined accuracy.
 
 The old `internvl build-db` and `evaluate` commands exit with migration guidance.
@@ -203,15 +216,20 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 Artifact and dataset checks need NumPy, pandas, Pillow, tqdm, and PyYAML;
-whole-image tests additionally need datasets and qdrant-client;
+whole-image tests additionally need datasets, qdrant-client, and the Ollama Python client;
 missing dependencies produce skips. Install the CPU test dependencies with:
 
 ```sh
-python -m pip install numpy 'pandas<3' Pillow tqdm PyYAML datasets qdrant-client
+python -m pip install numpy 'pandas<3' Pillow tqdm PyYAML datasets qdrant-client ollama
 ```
 
 The pandas upper bound supports the separate legacy adapter; the whole-image
 loader no longer uses its pandas reader.
+The legacy YAML command test also requires PyTorch because `util` imports the
+legacy vector database module. It skips when that dependency is absent.
+Imports used by annotations are ordinary runtime imports. Tests do not restrict
+dependency imports; importing a library does not authorize model construction,
+downloads, or service startup.
 Tests use synthetic fixtures and mocked
 backends, without starting models or services; they do not establish model
 accuracy or real-model/remote-Qdrant/GPU/HPC integration. New tests use an

@@ -5,15 +5,13 @@ import ast
 import logging
 import os
 from collections import defaultdict
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-if TYPE_CHECKING:
-    from pandas.core.groupby import DataFrameGroupBy
-    from qdrant_client.models import ScoredPoint
+from pandas.core.groupby import DataFrameGroupBy
+from qdrant_client.models import ScoredPoint
 
-    from database.vecdb import VectorDB
+from database.vecdb import VectorDB
 
 
 # TODO: Refactor old experiments, deprecate EvalMetric

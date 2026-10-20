@@ -2,6 +2,13 @@
 
 Conversation date: October 19, 2026.
 
+This is a historical handoff. The subsequent orchestration refactor removed
+`Experiment.references()`: text references now use a private helper, and image
+references are constructed directly from decoded batches. Dataset loading is
+lazy, description generation uses `DescriberLLM.describe_class(label)`, and stage
+failure reporting includes index setup errors. See README.md and AGENTS.md for
+the current behavior; the snapshot below also predates removal of exclusions.
+
 The configurable whole-image classification runner is implemented in the working
 tree. The user then explicitly requested simplification: remove revision pins,
 artifact validation, provenance bookkeeping, and the retired BGE fine-tuning

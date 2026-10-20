@@ -157,6 +157,10 @@ class DescriberLLM:
                 message = f"{message}: {progress.completed}/{progress.total} bytes"
             print(message, flush=True)
 
+    def describe_class(self, label: str) -> FoodDescriptor:
+        """Generate one visual description using the shared class prompt."""
+        return self._describe_class(label, descriptor_prompt(label))
+
     def _describe_class(self, label: str, prompt: dict[str, str]) -> FoodDescriptor:
         """Request and validate one description, retaining the supplied class label."""
         response: ChatResponse = self.client.chat(

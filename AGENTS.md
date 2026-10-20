@@ -24,21 +24,15 @@ unless separately asked to extend it. The package name follows its current
 captioner; Ollama class-description generation remains a separate task within it.
 
 Before editing, inspect this repository's Git status and preserve unrelated work.
-Keep commits and pull requests local to this repository. This code is not the
-external segmentation service currently called by `CompostBinServer`; it has no
-stable production API or deployment contract. Define and test an inference
-request/response contract and artifact lifecycle before connecting the two.
+Keep commits and pull requests local to this repository.
 
 ## Data and compute boundaries
 
 - Do not download large models or datasets, start Ollama, use GPU/HPC resources,
   modify shared research storage, or publish model artifacts without explicit
   user authorization. Existing authorization remains applicable to its scope.
-- Never commit credentials, private dataset samples, household media, embeddings
+- Never commit credentials, private datasets, household media, embeddings
   derived from private data, or machine-specific access material.
-- Preserve raw data and annotations independently from crops, converted labels,
-  embeddings, predictions, and evaluation reports. Write derived artifacts to
-  separate destinations with source and transformation metadata.
 - Use small synthetic fixtures and CPU-only checks by default. Do not substitute
   a live production service for an automated test.
 
@@ -100,6 +94,19 @@ Git revision, dependency-version, and timestamp provenance tracking has been
 removed from the whole-image runner by user request.
 Artifact validation is explicitly deferred by user request. Do not add hashes,
 compatibility checks, manifest comparisons, or collection-content verification.
+The experiment refactor checks current-run batch lengths and evaluation counts;
+these are processing invariants, not saved-artifact validation. All selected,
+available, embedded, and predicted counts must agree before evaluation completes.
+`Experiment` loads dataset metadata lazily and creates directories only in writing
+stages. Image references are constructed from each decoded training batch rather
+than through the removed `references()` helper. Both image loops share cleanup.
+`DescriberLLM.describe_class(label)` owns the shared prompt for this runner;
+legacy description generation keeps its existing cleaning and error handling.
+Index setup errors save incomplete artifacts with only known metadata. Secondary
+report-write failures are logged without replacing the original processing error.
+Reference switches require booleans; stage-specific batch size, k, and generated
+description count require positive integers. CLI commands and successful artifact
+formats remain unchanged.
 Existing descriptions load directly. Each index invocation builds a fresh uniquely
 named collection and replaces index.json with its collection name, source counts,
 model settings and status. Evaluation reads that file directly;
@@ -332,6 +339,10 @@ inferring architecture from function names.
 
 ## Implementation and evaluation rules
 
+- Import dependencies normally, including imports used by type annotations.
+  Never use `if TYPE_CHECKING` guards or equivalent type-only import workarounds.
+  Do not add tests that forbid dependency imports. Keep model construction,
+  downloads, service startup, and other runtime side effects behind explicit calls.
 - Prefer typed model adapters and small CPU-testable units.
   Construct model and database clients explicitly; avoid new
   script-level downloads, inference, service startup, or file mutations.

@@ -3,14 +3,13 @@ from __future__ import annotations
 import logging
 import os
 from collections import Counter
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import List, Optional, Union
 
 import requests
+import torch
 from qdrant_client import QdrantClient
 from qdrant_client.models import (Distance, PointStruct, ScoredPoint,
                                   VectorParams)
-if TYPE_CHECKING:
-    import torch
 
 
 class VectorDB:

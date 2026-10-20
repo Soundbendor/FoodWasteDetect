@@ -8,12 +8,12 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from internvl.experiment import Experiment, validate_config
 from internvl.records import ReferenceRecord
 from internvl.retrieval import Neighbor, QdrantIndex, classify, metrics
-from test_internvl import run_python, IMPORT_GUARD, available
+from test_internvl import available
 
 
 class Contracts(unittest.TestCase):
@@ -36,17 +36,41 @@ class Contracts(unittest.TestCase):
         self.assertEqual(result['coverage'], .9)
         self.assertIsNone(result['per_class']['B']['recall'])
 
-    def test_import_help_and_retirement(self):
-        result = run_python("forbidden = {'numpy','pandas','torch','transformers','PIL','yaml','ollama','qdrant_client','datasets'}\n" + IMPORT_GUARD + '''
-import internvl.experiment
-import internvl.embeddings
-import internvl.retrieval
-try:
-    internvl.experiment.main(['--help'])
-except SystemExit as e:
-    assert e.code == 0
-''')
-        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_reference_switches_require_booleans(self):
+        for key in ('embed_images', 'embed_class_labels', 'embed_descriptions'):
+            for value in ('false', 1, None):
+                cfg = dict(embed_images=False, embed_class_labels=True, embed_descriptions=False)
+                cfg[key] = value
+                with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, key):
+                    validate_config(cfg)
+
+    def test_disabled_and_cached_descriptions_need_no_dataset_or_backends(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            cfg = dict(embed_images=False, embed_class_labels=True, embed_descriptions=False,
+                       output_dir=str(output))
+            backend = Mock(side_effect=AssertionError('Backend constructed'))
+            exp = Experiment(cfg, embedder_factory=backend, describer_factory=backend)
+            self.assertFalse(output.exists())
+            self.assertIsNone(exp.describe())
+            self.assertFalse(output.exists())
+            output.mkdir()
+            descriptions = {'Apple': ['An apple.']}
+            (output / 'descriptions.json').write_text(json.dumps({'descriptions': descriptions}))
+            cfg['embed_descriptions'] = True
+            self.assertEqual(exp.describe(), descriptions)
+            self.assertIsNone(exp._dataset)
+            backend.assert_not_called()
+
+    def test_output_cannot_be_inside_raw_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = dict(embed_images=True, embed_class_labels=False, embed_descriptions=False,
+                       dataset={'root': directory}, output_dir=str(Path(directory) / 'derived'))
+            with self.assertRaisesRegex(ValueError, 'separate from raw data'):
+                Experiment(cfg)
+            self.assertFalse((Path(directory) / 'derived').exists())
+
+    def test_retired_commands_explain_migration(self):
         from internvl.cli import main
         for command in ['build-db', 'evaluate']:
             with contextlib.redirect_stderr(io.StringIO()) as stderr, self.assertRaises(SystemExit):
@@ -56,18 +80,10 @@ except SystemExit as e:
 
 @unittest.skipUnless(available('numpy', 'PIL', 'pandas', 'tqdm', 'datasets'), 'requires datasets and CPU image/dataframe dependencies')
 class DatasetAndEmbedding(unittest.TestCase):
-    def test_native_dataset_contract_without_legacy_imports(self):
-        import builtins
+    def test_native_dataset_contract(self):
         from datasets import DatasetDict, Image as HFImage
         from PIL import Image
         from internvl.image_dataset import FoodX251ImageDataset
-
-        original_import = builtins.__import__
-
-        def import_without_legacy(name, *args, **kwargs):
-            if name == 'data_wrappers' or name.startswith('data_wrappers.'):
-                raise AssertionError(f'Legacy dataset import: {name}')
-            return original_import(name, *args, **kwargs)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -84,8 +100,7 @@ class DatasetAndEmbedding(unittest.TestCase):
             (root / 'annot/train_info.csv').write_text('"pear,one.png",2\npie.png,7\n')
             (root / 'annot/val_info.csv').write_text('pie.png,7\n')
             # No official test files are needed, and metadata loading does not decode.
-            with patch('builtins.__import__', side_effect=import_without_legacy), \
-                 patch('PIL.Image.open', side_effect=AssertionError('Eager image decode')):
+            with patch('PIL.Image.open', side_effect=AssertionError('Eager image decode')):
                 ds = FoodX251ImageDataset(root)
             self.assertIsInstance(ds.splits, DatasetDict)
             self.assertEqual(set(ds.splits), {'train', 'validation'})
@@ -162,6 +177,215 @@ class DatasetAndEmbedding(unittest.TestCase):
 
 @unittest.skipUnless(available('qdrant_client', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, qdrant-client and CPU fixture dependencies')
 class ExperimentTests(unittest.TestCase):
+    def test_index_setup_failures_are_reported(self):
+        for failure in ('descriptions', 'embedder', 'client'):
+            with self.subTest(failure=failure):
+                exp = self.experiment(name=failure)
+                if failure == 'descriptions':
+                    exp.config['embed_descriptions'] = True
+                elif failure == 'embedder':
+                    exp.embedder_factory = lambda **kwargs: (_ for _ in ()).throw(RuntimeError('setup failed'))
+                else:
+                    exp.client = None
+                    exp.config['qdrant']['connection'] = {'unsupported_setting': True}
+                with self.assertRaises(Exception):
+                    exp.index()
+                artifact = json.loads((exp.output / 'index.json').read_text())
+                self.assertEqual(artifact['state'], 'incomplete')
+                self.assertIn('error', artifact)
+                self.assertEqual(artifact['source_counts'], {})
+
+    def test_early_ending_evaluation_is_incomplete(self):
+        exp = self.experiment()
+        exp.index()
+        original = self.dataset.iter_batches
+        with patch.object(self.dataset, 'iter_batches', side_effect=lambda split, size: itertools.islice(original(split, 1), 1)):
+            with self.assertRaisesRegex(ValueError, 'Incomplete evaluation'):
+                exp.evaluate()
+        report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
+        self.assertEqual(report['state'], 'incomplete')
+        self.assertEqual(report['metrics']['coverage'], .5)
+        self.assert_images_closed(self.captured_images)
+
+    def test_invalid_stage_settings_prevent_backend_construction(self):
+        for stage, key in [('index', 'batch_size'), ('evaluate', 'batch_size'),
+                           ('evaluate', 'k'), ('describe', 'description_count')]:
+            for value in (0, -1, True, '2'):
+                with self.subTest(stage=stage, key=key, value=value):
+                    exp = self.experiment((False, False, True), f'{stage}-{key}-{value}')
+                    target = exp.config['embedding'] if key == 'batch_size' else exp.config
+                    target[key] = value
+                    backend = Mock(side_effect=AssertionError('Backend constructed'))
+                    exp.embedder_factory = exp.describer_factory = backend
+                    with self.assertRaisesRegex(ValueError, key):
+                        getattr(exp, stage)()
+                    backend.assert_not_called()
+
+    def test_reporting_failure_preserves_processing_exception(self):
+        from internvl.experiment import _write_json
+        for stage in ('index', 'evaluate'):
+            with self.subTest(stage=stage):
+                exp = self.experiment((True, False, False), stage)
+                if stage == 'evaluate':
+                    exp.index()
+                original = RuntimeError('processing failed')
+
+                def write(path, value):
+                    if 'error' in value:
+                        raise OSError('report write failed')
+                    return _write_json(path, value)
+
+                with patch.object(exp.embedder, 'encode_images', side_effect=original), \
+                     patch('internvl.experiment._write_json', side_effect=write), \
+                     self.assertLogs('internvl.experiment', level='ERROR') as logs:
+                    with self.assertRaises(RuntimeError) as raised:
+                        getattr(exp, stage)()
+                self.assertIs(raised.exception, original)
+                self.assertIn('report write failed', '\n'.join(logs.output))
+
+    def test_successful_processing_still_fails_if_report_write_fails(self):
+        from internvl.experiment import _write_json
+        for stage in ('index', 'evaluate'):
+            with self.subTest(stage=stage):
+                exp = self.experiment(name=stage)
+                if stage == 'evaluate':
+                    exp.index()
+
+                def write(path, value):
+                    if isinstance(value, dict) and value.get('state') == 'complete':
+                        raise OSError('report write failed')
+                    return _write_json(path, value)
+
+                with patch('internvl.experiment._write_json', side_effect=write):
+                    with self.assertRaisesRegex(OSError, 'report write failed'):
+                        getattr(exp, stage)()
+
+    def test_bad_batch_columns_and_vector_counts_fail_and_close_images(self):
+        original = self.dataset.iter_batches
+        for stage in ('index', 'evaluate'):
+            for failure in ('columns', 'vectors'):
+                with self.subTest(stage=stage, failure=failure):
+                    exp = self.experiment((True, False, False), f'{stage}-{failure}')
+                    if stage == 'evaluate':
+                        exp.index()
+                    images = []
+
+                    def batches(split, size):
+                        for batch in original(split, size):
+                            images.extend(batch['image'])
+                            if failure == 'columns':
+                                batch['source_id'] = batch['source_id'][:-1]
+                            yield batch
+
+                    encode = exp.embedder.encode_images
+                    def short_vectors(batch):
+                        return encode(batch)[:-1]
+
+                    with patch.object(self.dataset, 'iter_batches', side_effect=batches), \
+                         patch.object(exp.embedder, 'encode_images', side_effect=short_vectors if failure == 'vectors' else encode):
+                        with self.assertRaisesRegex(ValueError, 'count mismatch'):
+                            getattr(exp, stage)()
+                    self.assert_images_closed(images)
+                    path = exp.output / 'index.json' if stage == 'index' else next(exp.output.glob('evaluation_*/report.json'))
+                    self.assertEqual(json.loads(path.read_text())['state'], 'incomplete')
+
+    def test_database_failures_and_interrupts_close_images(self):
+        for stage, method in [('index', 'upsert'), ('evaluate', 'query')]:
+            for error in (ConnectionError('offline'), KeyboardInterrupt()):
+                with self.subTest(stage=stage, error=type(error).__name__):
+                    exp = self.experiment((True, False, False), f'{stage}-{type(error).__name__}')
+                    if stage == 'evaluate':
+                        exp.index()
+                    self.captured_images.clear()
+                    with patch.object(QdrantIndex, method, side_effect=error):
+                        with self.assertRaises(type(error)) as raised:
+                            getattr(exp, stage)()
+                    self.assertIs(raised.exception, error)
+                    self.assert_images_closed(self.captured_images)
+                    path = exp.output / 'index.json' if stage == 'index' else next(exp.output.glob('evaluation_*/report.json'))
+                    report = json.loads(path.read_text())
+                    self.assertEqual(report['state'], 'incomplete')
+                    if stage == 'index':
+                        self.assertEqual(report['source_counts'], {})
+
+    def test_training_partial_batches_keep_records_and_counts(self):
+        from datasets import Dataset, Image as HFImage, concatenate_datasets
+        extra = dict(self.rows[0], source_id='extra', image=self.rows[0]['fname'])
+        self.dataset.splits['train'] = concatenate_datasets([
+            self.dataset.splits['train'],
+            Dataset.from_list([extra]).cast_column('image', HFImage(decode=False)),
+        ])
+        exp = self.experiment((True, False, False))
+        with patch.object(self.dataset, 'train_set', side_effect=AssertionError('Extra metadata pass')):
+            artifact = exp.index()
+        stored, _ = self.client.scroll(artifact['collection'], with_vectors=True)
+        self.assertEqual(artifact['source_counts'], {'training_image': 3})
+        self.assertEqual({p.payload['source_identity'] for p in stored}, {'0', '1', 'extra'})
+        self.assertEqual(len({p.id for p in stored}), 3)
+        for point in stored:
+            self.assertEqual(point.vector, [0., 1.] if point.payload['source_identity'] == '1' else [1., 0.])
+        self.assert_images_closed(self.captured_images)
+
+    def test_index_failure_counts_only_completed_upserts(self):
+        exp = self.experiment((True, False, False))
+        exp.config['embedding']['batch_size'] = 1
+        upsert = QdrantIndex.upsert
+        calls = 0
+
+        def fail_second(index, records, vectors):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ConnectionError('second upsert failed')
+            return upsert(index, records, vectors)
+
+        with patch.object(QdrantIndex, 'upsert', new=fail_second):
+            with self.assertRaisesRegex(ConnectionError, 'second upsert'):
+                exp.index()
+        artifact = json.loads((exp.output / 'index.json').read_text())
+        self.assertEqual(artifact['state'], 'incomplete')
+        self.assertEqual(artifact['source_counts'], {'training_image': 1})
+        self.assert_images_closed(self.captured_images)
+
+    def test_image_references_still_require_every_class(self):
+        self.dataset.splits['train'] = self.dataset.splits['train'].select([0])
+        exp = self.experiment((True, False, False))
+        with self.assertRaisesRegex(ValueError, 'Missing usable training references'):
+            exp.index()
+        artifact = json.loads((exp.output / 'index.json').read_text())
+        self.assertEqual(artifact['state'], 'incomplete')
+        self.assertEqual(artifact['source_counts'], {'training_image': 1})
+        self.assert_images_closed(self.captured_images)
+
+    def test_artifact_formats_and_direct_loading_remain_compatible(self):
+        exp = self.experiment((False, False, True))
+        exp.output.mkdir()
+        descriptions = {'Apple': ['Apple stored'], 'Pear': ['Pear stored']}
+        (exp.output / 'descriptions.json').write_text(json.dumps({'descriptions': descriptions}))
+        exp.describer_factory = Mock(side_effect=AssertionError('Cached descriptions regenerated'))
+        report = exp.run()
+        artifact = json.loads((exp.output / 'index.json').read_text())
+        self.assertEqual(set(artifact), {'state', 'collection', 'model', 'source_counts', 'config'})
+        self.assertEqual(set(report), {'state', 'config', 'retrieval', 'predictions', 'evaluation_manifest',
+                                      'collection', 'model', 'reference_source_counts', 'metrics'})
+        folder = next(exp.output.glob('evaluation_*'))
+        self.assertEqual(json.loads((folder / 'predictions.json').read_text()), report['predictions'])
+        self.assertEqual(json.loads((folder / 'metrics.json').read_text()), report['metrics'])
+        artifact['state'] = 'incomplete'
+        (exp.output / 'index.json').write_text(json.dumps(artifact))
+        self.assertEqual(exp.evaluate()['state'], 'complete')
+
+    def test_default_batch_size_is_forwarded_and_dataset_is_cached(self):
+        exp = self.experiment()
+        del exp.config['embedding']['batch_size']
+        factory = Mock(side_effect=self.Embedder)
+        exp.embedder_factory = factory
+        with patch.object(self.dataset, 'get_class_list', wraps=self.dataset.get_class_list) as classes:
+            exp.run()
+            exp.evaluate()
+        classes.assert_called_once()
+        factory.assert_called_once_with(batch_size=32)
+
     def setUp(self):
         import numpy as np
         from datasets import Dataset, DatasetDict, Image as HFImage
@@ -195,7 +419,7 @@ class ExperimentTests(unittest.TestCase):
             def __init__(self, config): pass
             def __enter__(self): return self
             def __exit__(self, *args): pass
-            def _describe_class(self, label, prompt): return SimpleNamespace(description=label + ' description')
+            def describe_class(self, label): return SimpleNamespace(description=label + ' description')
         self.Embedder, self.Describer = Embedder, Describer
 
     def experiment(self, flags=(False, True, False), name='run'):
@@ -208,7 +432,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_reference_records_round_trip_through_qdrant(self):
         exp = self.experiment()
-        records = exp.references()
+        records = [ReferenceRecord(label, 'class_name', label, label) for label in ['Apple', 'Pear']]
         self.assertTrue(all(isinstance(record, ReferenceRecord) for record in records))
         index = QdrantIndex(self.client, 'record_round_trip', 2)
         index.create()
@@ -276,7 +500,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_empty_generation_and_missing_collection(self):
         exp = self.experiment((False, False, True))
-        with patch.object(self.Describer, '_describe_class', return_value=SimpleNamespace(description='')):
+        with patch.object(self.Describer, 'describe_class', return_value=SimpleNamespace(description='')):
             with self.assertRaises(ValueError): exp.describe()
         self.assertFalse((exp.output/'descriptions.json').exists())
         exp = self.experiment(name='valid'); exp.index()
@@ -320,14 +544,14 @@ class ExperimentTests(unittest.TestCase):
                 self.assertEqual(image.getpixel((0, 0))[0], int(source_id) * 100)
                 image.close()
         exp = self.experiment((True, False, False))
-        references = exp.references()
-        with patch.object(exp, 'references', return_value=references):
-            artifact = exp.index()
-        stored = self.client.retrieve(artifact['collection'], ids=[r.id for r in references], with_vectors=True)
+        artifact = exp.index()
+        stored, _ = self.client.scroll(artifact['collection'], with_vectors=True)
+        self.assertEqual(len(stored), 2)
         for point in stored:
-            record = next(r for r in references if r.id == str(point.id))
-            self.assertEqual(point.payload, record.to_payload())
-            self.assertEqual(point.vector, [1., 0.] if record.label == 'Apple' else [0., 1.])
+            row = next(r for r in self.rows if r['source_id'] == point.payload['source_identity'])
+            self.assertEqual(point.payload, dict(id=str(point.id), source_kind='training_image',
+                source_identity=row['source_id'], value=row['fname'], **{'class': row['class']}))
+            self.assertEqual(point.vector, [1., 0.] if row['class'] == 'Apple' else [0., 1.])
         report = exp.evaluate()
         self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1', '0'])
         self.assertEqual(report['metrics']['coverage'], 1)
