@@ -1,6 +1,26 @@
-"""Point records shared by experiment construction and vector storage."""
+"""Records shared by experiment construction, retrieval, and reporting."""
 from dataclasses import dataclass, field
+from typing import TypedDict
 from uuid import uuid4
+
+
+ImageMetadata = TypedDict(
+    "ImageMetadata",
+    {"fname": str, "class": str, "source_id": str, "source_split": str},
+)
+
+
+class Neighbor(TypedDict):
+    id: str
+    label: str
+    score: float
+
+
+class Prediction(ImageMetadata):
+    prediction: str | None
+    vote_fraction: float
+    nearest: str | None
+    neighbors: list[Neighbor]
 
 
 @dataclass(frozen=True)

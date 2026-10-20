@@ -9,13 +9,51 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from internvl.experiment import Experiment, validate_config
-from internvl.schemas import PointRecord
-from internvl.retrieval import Neighbor, QdrantIndex, classify, metrics
+from internvl.experiment import Experiment, _batch_rows, _prediction, validate_config
+from internvl.schemas import Neighbor, PointRecord
+from internvl.retrieval import QdrantIndex
 from test_internvl import available
 
 
 class Contracts(unittest.TestCase):
+
+    def test_prediction_preserves_metadata_and_neighbor_order(self):
+        batch = {
+            'fname': ['fixture.png'], 'class': ['A'], 'source_id': ['image-1'],
+            'source_split': ['val'], 'extra': ['retained'], 'image': [object()],
+        }
+        record = _batch_rows(batch)[0]
+        original = dict(record)
+        cases = [
+            (
+                [Neighbor(id='first', label='B', score=0.9), Neighbor(id='second', label='A', score=0.8),
+                 Neighbor(id='third', label='A', score=0.7)],
+                {
+                    'prediction': 'A', 'vote_fraction': 2 / 3, 'nearest': 'B',
+                    'neighbors': [
+                        {'id': 'first', 'label': 'B', 'score': 0.9},
+                        {'id': 'second', 'label': 'A', 'score': 0.8},
+                        {'id': 'third', 'label': 'A', 'score': 0.7},
+                    ],
+                },
+            ),
+            ([], {'prediction': None, 'vote_fraction': 0.0,
+                  'nearest': None, 'neighbors': []}),
+        ]
+        for neighbors, result in cases:
+            with self.subTest(neighbors=neighbors):
+                prediction = _prediction(record, neighbors)
+                self.assertEqual(prediction, {
+                    'fname': 'fixture.png', 'class': 'A', 'source_id': 'image-1',
+                    'source_split': 'val', 'extra': 'retained', **result,
+                })
+                self.assertEqual(record, original)
+                self.assertIsNot(prediction, record)
+                self.assertEqual(json.loads(json.dumps(prediction)), prediction)
+
+    def test_batch_rows_requires_paired_metadata_columns(self):
+        with self.assertRaises(ValueError):
+            _batch_rows({'fname': ['first', 'second'], 'class': ['A']})
 
     def test_reference_switch_combinations(self):
         keys = ('embed_images', 'embed_class_labels', 'embed_descriptions')
@@ -40,18 +78,6 @@ class Contracts(unittest.TestCase):
                         validate_config(cfg)
                     with self.assertRaisesRegex(ValueError, key):
                         Experiment(cfg)
-
-    def test_vote_and_denominator(self):
-        self.assertEqual(classify([]), (None, 0))
-        neighbors = [Neighbor('1', 'B', .9), Neighbor('2', 'A', .8)]
-        self.assertEqual(classify(neighbors), ('B', .5))
-        self.assertEqual(classify([Neighbor('1', 'B', .8), Neighbor('2', 'A', .8)]), ('A', .5))
-        predictions = [dict(prediction='A' if i < 63 else None, nearest='A', **{'class': 'A'}) for i in range(90)]
-        result = metrics(predictions, ['A', 'B'])
-        self.assertEqual(result['majority_vote_accuracy'], .7)
-        self.assertEqual(result['evaluated'], 90)
-        self.assertIsNone(result['per_class']['B']['recall'])
-
 
     def test_output_cannot_be_inside_raw_data(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -431,7 +457,7 @@ class ExperimentTests(unittest.TestCase):
                 'source_identity': record.source_identity, 'value': record.value,
             })
         neighbor = index.query(vectors[0], 1)[0]
-        self.assertEqual((neighbor.id, neighbor.label), (records[0].id, records[0].label))
+        self.assertEqual((neighbor['id'], neighbor['label']), (records[0].id, records[0].label))
 
     def test_combinations_and_collection_reuse(self):
         for flags in itertools.product([False, True], repeat=3):

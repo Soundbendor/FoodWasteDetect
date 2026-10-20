@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from datetime import datetime, timezone
 
 from qdrant_client import QdrantClient
@@ -15,7 +15,7 @@ from qdrant_client import QdrantClient
 from .embeddings import EmbeddingModel
 from .generate_descriptors import DescriberLLM
 from .image_dataset import load_dataset
-from .schemas import PointRecord
+from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 from .retrieval import QdrantIndex, classify, metrics
 
 
@@ -51,25 +51,27 @@ def validate_config(config: dict) -> dict:
     return config
 
 
-def _batch_rows(batch: dict[str, list]) -> list[dict]:
+def _batch_rows(batch: dict[str, list]) -> list[ImageMetadata]:
     """Convert metadata columns into ordered rows, omitting decoded images."""
-    metadata = {key: values for key, values in batch.items() if key != "image"}
+    metadata = batch.copy()
+    metadata.pop("image", None)
     return [
-        dict(zip(metadata, values, strict=True))
+        cast(ImageMetadata, dict(zip(metadata, values, strict=True)))
         for values in zip(*metadata.values(), strict=True)
     ]
 
 
-def _prediction(record: dict, neighbors: Sequence) -> dict:
+def _prediction(record: ImageMetadata, neighbors: Sequence[Neighbor]) -> Prediction:
     """Combine image metadata, the vote result, and retrieved neighbors."""
     label, fraction = classify(neighbors)
-    return dict(
-        record,
-        prediction=label,
-        vote_fraction=fraction,
-        nearest=neighbors[0].label if neighbors else None,
-        neighbors=[vars(neighbor) for neighbor in neighbors],
-    )
+    return {
+        # append image metadata into the result.
+        **record,
+        "prediction": label,
+        "vote_fraction": fraction,
+        "nearest": neighbors[0]["label"] if neighbors else None,
+        "neighbors": list(neighbors),
+    }
 
 
 class Experiment:
@@ -240,7 +242,7 @@ class Experiment:
                 artifact = summary
         index = self._qdrant_adapter(collection)
         # Classify test-time samples based on majority-vote query to vdb
-        predictions = []
+        predictions: list[Prediction] = []
         for batch in self.dataset.iter_batches("val", self.batch_size):
             rows = _batch_rows(batch)
             vectors = self.embedder.encode_images(batch["image"])
