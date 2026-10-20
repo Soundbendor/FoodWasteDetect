@@ -76,6 +76,34 @@ class DescriptorLifecycleTests(unittest.TestCase):
             self.assertIs(self.llm.describe_class('Seafood'), output)
         describe.assert_called_once_with('Seafood', self.module.descriptor_prompt('Seafood'))
 
+    def test_generate_descriptions_preserves_classes_and_requested_count(self):
+        outputs = [types.SimpleNamespace(description=text) for text in
+                   ['Apple one', 'Apple two', 'Pear one', 'Pear two']]
+        with patch.object(self.llm, 'describe_class', side_effect=outputs) as describe:
+            result = self.llm.generate_descriptions(['Apple', 'Pear'], 2)
+        self.assertEqual(result, {'Apple': ['Apple one', 'Apple two'],
+                                  'Pear': ['Pear one', 'Pear two']})
+        self.assertEqual([call.args for call in describe.call_args_list],
+                         [('Apple',), ('Apple',), ('Pear',), ('Pear',)])
+
+    def test_generate_descriptions_rejects_empty_output(self):
+        for count, text in [(0, 'unused'), (1, ''), (1, '   ')]:
+            with self.subTest(count=count, text=text), patch.object(
+                self.llm, 'describe_class', return_value=types.SimpleNamespace(description=text)
+            ):
+                with self.assertRaisesRegex(ValueError, 'Empty generated description for Apple'):
+                    self.llm.generate_descriptions(['Apple'], count)
+
+    def test_generate_descriptions_propagates_errors_without_retry(self):
+        for error in (RuntimeError('generation failed'), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__), patch.object(
+                self.llm, 'describe_class', side_effect=error
+            ) as describe:
+                with self.assertRaises(type(error)) as raised:
+                    self.llm.generate_descriptions(['Apple', 'Pear'], 2)
+                self.assertIs(raised.exception, error)
+                describe.assert_called_once_with('Apple')
+
     def test_download_progress_environment_and_cleanup(self):
         for failure in (None, self.module.ollama.ResponseError('pull failed'), KeyboardInterrupt()):
             with self.subTest(failure=failure):

@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 
 import httpx
@@ -161,6 +162,21 @@ class DescriberLLM:
         """Generate one visual description using the shared class prompt."""
         return self._describe_class(label, descriptor_prompt(label))
 
+    def generate_descriptions(
+        self, classes: Sequence[str], count: int
+    ) -> dict[str, list[str]]:
+        """Generate the requested descriptions for each class, rejecting empty text."""
+        descriptions = {}
+        for label in classes:
+            descriptions[label] = [
+                self.describe_class(label).description for _ in range(count)
+            ]
+            if not descriptions[label] or any(
+                not text.strip() for text in descriptions[label]
+            ):
+                raise ValueError(f"Empty generated description for {label}")
+        return descriptions
+
     def _describe_class(self, label: str, prompt: dict[str, str]) -> FoodDescriptor:
         """Request and validate one description, retaining the supplied class label."""
         response: ChatResponse = self.client.chat(
@@ -173,6 +189,7 @@ class DescriberLLM:
         output.description = output.description.replace("*", "")
         return output
 
+    # TODO: deprecate, uses old local Dataset interface
     def generate_descriptors(self, ds: Dataset, save_path: str) -> str:
         """Given a dataset, provides a list of descriptions of each class of that dataset"""
         ds_descriptors = defaultdict(list)

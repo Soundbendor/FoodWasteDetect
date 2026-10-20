@@ -1,10 +1,10 @@
-"""Reference records shared by experiment construction and vector storage."""
+"""Point records shared by experiment construction and vector storage."""
 from dataclasses import dataclass, field
 from uuid import uuid4
 
 
 @dataclass(frozen=True)
-class ReferenceRecord:
+class PointRecord:
     label: str
     source_kind: str
     source_identity: str

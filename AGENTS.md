@@ -71,8 +71,10 @@ to that implementation below describe the retired workflow, not a supported API.
 Caption, description, merge, conversion, and download utilities remain available;
 the separate CLIP fine-tuning experiment and legacy image interfaces are unchanged.
 
-Use `python -m internvl.experiment {describe,index,evaluate,run} --config_file
-cfg/classification.yml`. This independent whole-image baseline embeds pixels
+Use `python -m internvl experiment {describe,index,evaluate,run} --config_file
+cfg/classification.yml`. Parsing and YAML loading live in `internvl.cli`;
+`internvl.experiment` has no command-line entry point; use the shared CLI.
+This independent whole-image baseline embeds pixels
 without InternVL captioning or YOLO. Its three reference booleans select any
 nonempty combination of class names, generated descriptions, and training images.
 Use all official FoodX251 training references and labeled validation images for
@@ -85,32 +87,60 @@ configure or track model/code revisions, including nested text-encoder revisions
 it uses default cached versions. Loading is
 local-cache-only. Do not download weights or start real services for checks.
 Every selected record contributes one vote; ties use best similarity then class
-name. Completed evaluations cover the full validation split, with explicit counts,
-coverage, and per-class metrics. Empty retrieval abstains. Image-loading, embedding,
+name. Completed evaluations cover the full validation split, with an evaluated count
+and per-class metrics. Empty retrieval abstains. Image-loading, embedding,
 and infrastructure errors fail the run without retries or exclusions; stage
-failures save incomplete outputs. There is no top-five metric.
+failures propagate without saved partial reports. There is no top-five metric.
 
 Git revision, dependency-version, and timestamp provenance tracking has been
 removed from the whole-image runner by user request.
 Artifact validation is explicitly deferred by user request. Do not add hashes,
 compatibility checks, manifest comparisons, or collection-content verification.
-The experiment refactor checks current-run batch lengths and evaluation counts;
-these are processing invariants, not saved-artifact validation. All selected,
-available, embedded, and predicted counts must agree before evaluation completes.
-`Experiment` loads dataset metadata lazily and creates directories only in writing
-stages. Image references are constructed from each decoded training batch rather
-than through the removed `references()` helper. Both image loops share cleanup.
-`DescriberLLM.describe_class(label)` owns the shared prompt for this runner;
-legacy description generation keeps its existing cleaning and error handling.
-Index setup errors save incomplete artifacts with only known metadata. Secondary
-report-write failures are logged without replacing the original processing error.
-Reference switches require booleans; stage-specific batch size, k, and generated
-description count require positive integers. CLI commands and successful artifact
-formats remain unchanged.
-Existing descriptions load directly. Each index invocation builds a fresh uniquely
-named collection and replaces index.json with its collection name, source counts,
-model settings and status. Evaluation reads that file directly;
-status is reporting only, not a load gate. Historical collections and raw data
+The runner preserves strict row/vector pairing and requires a nonempty validation
+split with exactly one prediction per image before saving a report.
+`Experiment(config)` loads dataset metadata and class names during construction,
+including for disabled or cached description commands. It stores batch size once,
+defaulting to 32, and creates directories only in writing stages. The embedder
+and Qdrant client are constructed on first use and reused. `run()` finishes
+Ollama description generation before constructing the embedder. Constructor
+injection arguments and `_positive_integer()` have been removed.
+`validate_config()` requires boolean reference switches and at least one enabled
+source during construction. Numeric settings use backend checks and ordinary
+Python errors.
+Image references are constructed from each decoded training batch rather than
+through the removed `references()` helper. Both image loops rely on garbage
+collection for decoded batch images, as requested by the user.
+`DescriberLLM.generate_descriptions(classes, count)` owns the per-class generation
+loop and empty-description checks, using `describe_class(label)` for the shared
+prompt. The experiment owns saved-file handling and the Ollama context. Legacy
+description generation keeps its existing cleaning and error handling.
+Failures and interrupts propagate without retries or partial reports. A failed
+index build may leave a partial Qdrant collection; no rollback or cleanup is added.
+The previous successful index summary remains intact after a failed rebuild.
+The `index` CLI command calls `Experiment.build_vector_database()`; the former
+Python method `index()` has been renamed. The `describe` CLI command calls
+`Experiment.generate_descriptions()`, formerly `describe()`.
+CLI commands and YAML keys remain unchanged; the Python constructor and new
+report formats intentionally change. Temporary-file JSON replacement remains.
+Existing descriptions load directly. `qdrant.collection_prefix` now supplies the
+exact collection name without an appended UUID. `build_vector_database()` checks
+existence before loading the embedder or reading training inputs. For an existing
+collection it warns and returns None, leaving vectors and index.json untouched.
+For a missing collection it inserts records and saves collection name, source
+counts, model settings and configuration in index.json after success. Select a
+new name to build again, or an older collection's full name to reuse it.
+No compatibility or completeness checks are added; partial collections are also
+reused. `run()` still generates or loads descriptions before the build stage.
+Evaluation queries the configured collection and uses a local index.json only
+for metadata about that same collection. Without a matching summary, model and
+reference_source_counts are null. This supports reuse across output directories
+without claiming knowledge of the stored vectors. A successful evaluation
+writes only `evaluation_<UTC timestamp>/report.json`, with configuration, collection, model,
+reference-source counts, predictions, and metrics. Prediction `value`, evaluation
+manifest, fixed retrieval settings, status/error fields, and separate prediction
+and metric files have been removed. Metrics retain evaluated count, majority-vote
+and nearest-neighbor accuracy, and per-class metrics; no intermediate counts or
+coverage are saved. Historical collections and raw data
 are not overwritten. Every class requires a usable image reference when image
 references are enabled. Evaluation embeddings are recomputed for each run.
 `FoodX251ImageDataset` reads the local class list and split CSV annotations
@@ -122,7 +152,7 @@ remain compatible. `train_path` points to the training images; `val_path` and
 `iter_batches(split, batch_size)` accepts `train`, `val`, or `validation`, enables
 image decoding, and uses `Dataset.iter()` with the final partial batch retained.
 Metadata access leaves images undecoded. The experiment embeds decoded PIL images
-and closes them after each batch. Resolved-path checks remain. Image-content hashing and SHA-256 metadata were
+and leaves their cleanup to garbage collection. Resolved-path checks remain. Image-content hashing and SHA-256 metadata were
 removed by user request; do not restore them. Image files are read when batches
 are decoded, and loading failures propagate. No exclusion artifacts are written by new runs.
 Compare complete retrieval strategies, because changing reference sources also

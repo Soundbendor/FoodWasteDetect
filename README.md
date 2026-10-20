@@ -85,15 +85,21 @@ Legacy caption utilities have
 Configure [cfg/classification.yml](cfg/classification.yml), then run:
 
 ```sh
-PYTHONPATH=src python -m internvl.experiment run --config_file cfg/classification.yml
+PYTHONPATH=src python -m internvl experiment run --config_file cfg/classification.yml
 ```
 
 The same command accepts `describe`, `index`, or `evaluate` in place of `run`.
+Argument parsing and YAML loading live in `internvl.cli`. Use the shared CLI;
+`internvl.experiment` has no command-line entry point.
+The `index` CLI command calls `Experiment.build_vector_database()`; `describe`
+calls `Experiment.generate_descriptions()`.
 `describe` is a no-op when descriptions are disabled. `index` reads the saved descriptions when that source is enabled. `run` closes its owned Ollama
 server before constructing the embedder. Neither CLI help nor imports load models.
-Constructing `Experiment` does not load dataset metadata or create directories.
-Disabled and cached description stages also avoid loading the dataset. Description
-generation uses the public `DescriberLLM.describe_class(label)` method.
+Constructing `Experiment` loads dataset metadata but does not create directories.
+Disabled and cached description stages also require dataset metadata. Description
+generation calls `DescriberLLM.generate_descriptions(classes, count)`, which loops
+over class names using `describe_class(label)` and rejects empty descriptions.
+The experiment owns saved-file handling and the Ollama context.
 
 Choose `embed_images`, `embed_class_labels`, and `embed_descriptions`; all seven
 nonempty combinations are supported. The default uses five generated descriptions
@@ -101,8 +107,10 @@ per class, batches of 32, CPU, and k=10. Each reference record gets one equal vo
 in the pooled exact cosine top-k. Compare results as complete retrieval strategies:
 changing sources changes reference counts as well as wording. No partitions,
 subsampling, parameter tuning, or query-embedding cache are used.
-Reference switches must be YAML booleans. Batch size, evaluation `k`, and the
-generated description count must be positive integers for the stages that use them.
+Reference switches must be YAML booleans, with at least one enabled source;
+`validate_config()` checks these during construction. Use positive integers for
+batch size, evaluation `k`, and generated description count; the runner does not
+validate these numeric settings.
 
 FoodX251 references use the complete official training table. Evaluation uses the
 complete **labeled validation split** (`source_split="val"`), never the unlabeled
@@ -131,15 +139,29 @@ Artifacts in the output directory:
 - `descriptions.json`: generated description dictionary. Existing
   descriptions are loaded directly; remove this file to generate them again.
 - `index.json`: latest collection name, model settings, reference-source counts,
-  configuration and run status.
-- `evaluation_<UUID>/`: predictions, metrics, and a report containing
-  the source manifest, retrieval settings, and source counts.
+  and configuration.
+- `evaluation_<UTC timestamp>/report.json`: configuration, collection, model settings,
+  reference-source counts, predictions, and metrics. Folder timestamps use
+  `YYYYMMDDTHHMMSS_microsecondsZ`, for example `evaluation_20261019T153042_123456Z`.
 
 Artifact validation is deferred. There are no hashes, compatibility checks,
-manifest comparisons, or collection-content verification. Each `index` invocation
-(including through `run`) builds a fresh collection and replaces `index.json`;
-previous collections are left intact. `evaluate` directly uses the collection
-named in that file. Status fields report outcomes but do not gate artifact loading.
+manifest comparisons, or collection-content verification. `qdrant.collection_prefix`
+is now the exact collection name; no UUID is appended. If it exists, `index`
+warns and returns without loading the embedder, inserting records, or rewriting
+`index.json`. Otherwise, it creates that collection and saves `index.json` after
+successful insertion. Choose a different name to build another collection. To
+reuse an older UUID-suffixed collection, set the YAML value to its full name.
+`evaluate` queries the configured collection. It includes stored model settings
+and source counts from a local `index.json` only when its collection name matches;
+otherwise those report fields are `null`. This allows reuse from a new output
+directory without inventing metadata for precomputed vectors. No compatibility
+or completeness checks are performed, so an existing partial collection is also
+reused. `run()` still performs the description stage before checking the collection.
+`Experiment(config)` loads dataset metadata and class names during construction,
+including for disabled or cached description commands. The batch size defaults to
+32 and is stored once. The embedder and Qdrant client are constructed on first use
+and reused. `run()` finishes description generation before loading the embedder.
+Beyond reference-switch validation, backend checks and Python errors propagate.
 The independent FoodX251 adapter reads `annot/class_list.txt`,
 `annot/train_info.csv`, and `annot/val_info.csv` directly. It exposes a Hugging Face
 `DatasetDict` as `splits`, with `train` and `validation` keys and explicit column
@@ -152,25 +174,24 @@ official test split. Its `iter_batches()` uses
 `Dataset.iter()` to load images in annotation order, including the final partial
 batch. Images are decoded once per pass and passed directly to the embedder.
 Missing, unreadable, or unembeddable images stop the run without retries or
-exclusions. Stage failures save incomplete outputs and propagate the error.
-Index setup failures also save incomplete outputs, with model metadata included
-only if it was loaded. If writing a failure report fails, that failure is logged
-and the original processing exception is re-raised. A failed report write after
-successful processing still fails the command.
+exclusions. Errors and interrupts propagate without saving partial reports.
+Failed indexing can leave a partial collection; no rollback or cleanup is added.
+The previous successful `index.json` remains in place if a rebuild or summary
+write fails. JSON writes use temporary-file replacement. Old artifacts stay intact.
 Every class needs a training image reference when that source is enabled.
 Generated descriptions must be nonempty.
 
 Votes tie-break by best individual similarity, then class name. `vote_fraction`
 is winning votes / actual returned neighbors, not calibrated confidence. Empty
 results abstain and count as incorrect. Completed evaluations use the entire
-validation split and have 100% coverage. Reports retain selected, available,
-embedded, and evaluated counts, per-class support/correct/recall, and
-nearest-neighbor accuracy. Incomplete reports retain counts for completed work;
-they do not establish full-dataset accuracy. There is no top-five metric.
-Evaluation rejects mismatched batch lengths and cannot complete unless selected,
-available, embedded, and prediction counts agree. Image reference records are
-constructed directly from decoded training batches; both indexing and evaluation
-close each batch's images on success, failure, or interruption.
+validation split, with exactly one prediction per image. Reports retain the
+evaluated count, majority-vote and nearest-neighbor accuracy, and per-class
+support/correct/recall. There is no top-five metric. Prediction records keep
+image identity, ground truth, the predicted label, vote fraction, nearest label,
+and neighbor details; `fname` is not duplicated as `value`.
+Strict row/vector pairing rejects mismatches. Image reference records are
+constructed directly from decoded training batches. Indexing and evaluation rely
+on garbage collection to release decoded batch images.
 Qdrant failures also abort; an empty evaluation split fails with undefined accuracy.
 
 The old `internvl build-db` and `evaluate` commands exit with migration guidance.

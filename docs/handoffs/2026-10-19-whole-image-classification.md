@@ -2,12 +2,37 @@
 
 Conversation date: October 19, 2026.
 
-This is a historical handoff. The subsequent orchestration refactor removed
-`Experiment.references()`: text references now use a private helper, and image
-references are constructed directly from decoded batches. Dataset loading is
-lazy, description generation uses `DescriberLLM.describe_class(label)`, and stage
-failure reporting includes index setup errors. See README.md and AGENTS.md for
-the current behavior; the snapshot below also predates removal of exclusions.
+This is a historical handoff. Current behavior supersedes the snapshot below:
+`Experiment(config)` loads dataset metadata and class names during construction,
+stores batch size once, and constructs the embedder and Qdrant client on first use.
+`validate_config()` checks boolean reference switches and requires at least one
+enabled source during construction.
+Text references use a private helper; image references come from decoded batches.
+The image batch context manager has been removed; indexing and evaluation rely
+on garbage collection for decoded images.
+Description generation delegates its loop and empty-description checks to
+`DescriberLLM.generate_descriptions(classes, count)`, which calls `describe_class(label)`.
+The experiment owns saved-file handling and closes Ollama before `run()` constructs
+the embedder. Stages save results only after success.
+Failures propagate without partial reports and may leave a partial collection;
+a failed rebuild preserves the last successful `index.json`. The YAML
+`qdrant.collection_prefix` now specifies the exact collection name. If it exists,
+`build_vector_database()` warns and returns None without embedding or insertion.
+Evaluation queries the configured collection; without a matching local index
+summary, stored model settings and source counts are null. No compatibility or
+completeness checks are added. Existing partial collections are also reused.
+Evaluation writes
+only `evaluation_<UTC timestamp>/report.json` with predictions and metrics for the complete,
+nonempty validation split. Status fields, duplicated manifests and files,
+prediction `value`, coverage, and intermediate counts are removed. CLI commands
+and YAML keys remain unchanged. The `index` CLI command now calls the renamed
+`Experiment.build_vector_database()` method, and `describe` calls
+`Experiment.generate_descriptions()`. No artifact validation or provenance
+is added.
+Argument parsing and YAML loading now live in `internvl.cli`, under
+`python -m internvl experiment ...`; the old module entry point has been removed.
+See README.md and AGENTS.md for the current contracts; the snapshot below also
+predates removal of exclusions.
 
 The configurable whole-image classification runner is implemented in the working
 tree. The user then explicitly requested simplification: remove revision pins,
@@ -16,7 +41,7 @@ experiment. Those later requests supersede the original implementation plan.
 Do not restore that machinery without a new request.
 
 The latest code change replaces reference dictionaries with a shared
-`ReferenceRecord` dataclass. The user's latest question was about
+`PointRecord` dataclass. The user's latest question was about
 `source_identity`; it was explained, and no removal was requested.
 
 ## Current experiment
@@ -24,7 +49,7 @@ The latest code change replaces reference dictionaries with a shared
 Run from the repository root:
 
 ```sh
-PYTHONPATH=src python -m internvl.experiment run --config_file cfg/classification.yml
+PYTHONPATH=src python -m internvl experiment run --config_file cfg/classification.yml
 ```
 
 The stages are `describe`, `index`, `evaluate`, and `run`. Three YAML booleans
@@ -91,13 +116,13 @@ Status fields report outcomes only. Each evaluation recomputes query embeddings
 and writes a separate `evaluation_<UUID>` directory with report, predictions,
 metrics, and exclusions JSON files.
 
-## ReferenceRecord
+## PointRecord
 
-`src/internvl/records.py` defines a frozen dataclass:
+`src/internvl/schemas.py` defines a frozen dataclass:
 
 ```python
 @dataclass(frozen=True)
-class ReferenceRecord:
+class PointRecord:
     label: str
     source_kind: str
     source_identity: str
@@ -135,7 +160,7 @@ not requested changing the field.
 | File | Responsibility |
 | --- | --- |
 | `src/internvl/experiment.py` | Stage orchestration, reference construction, image batching, reports, CLI. |
-| `src/internvl/records.py` | Shared reference dataclass and payload conversion. |
+| `src/internvl/schemas.py` | Shared point dataclass and payload conversion. |
 | `src/internvl/retrieval.py` | Separate Qdrant adapter, neighbors, voting, and metrics. |
 | `src/internvl/image_dataset.py` | Independent dataset interface and composed FoodX251 adapter. |
 | `src/internvl/embeddings.py` | Inference-only multimodal embedding wrapper. |

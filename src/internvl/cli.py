@@ -1,15 +1,21 @@
-"""Command dispatch without importing model, dataset, or service backends."""
+"""Parse commands and load runtime dependencies only when dispatching work."""
 
 import argparse
 from typing import Optional, Sequence
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
+    """Parse legacy utility or whole-image experiment commands and dispatch them."""
     parser = argparse.ArgumentParser(
         prog="internvl",
-        description="FoodWasteDetect caption and text-retrieval experiments",
+        description="FoodWasteDetect caption utilities and whole-image experiments",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    experiment = commands.add_parser(
+        "experiment", help="Run a whole-image classification experiment."
+    )
+    experiment.add_argument("stage", choices=("describe", "index", "evaluate", "run"))
+    experiment.add_argument("--config_file", required=True, help="Path to experiment YAML")
     download = commands.add_parser(
         "download_model", help="Download weights for an Ollama model."
     )
@@ -23,12 +29,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             True,
             "Describe food class names through Ollama",
         ),
-        ("build-db", "build_vdb", True, "Retired: use internvl.experiment index"),
+        ("build-db", "build_vdb", True, "Retired: use internvl experiment index"),
         (
             "evaluate",
             "test_classification",
             True,
-            "Retired: use internvl.experiment evaluate",
+            "Retired: use internvl experiment evaluate",
         ),
         (
             "merge-captions",
@@ -63,9 +69,23 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if args.command in {"build-db", "evaluate"}:
         parser.error(
             "This text-retrieval command is retired. Use python -m "
-            "internvl.experiment {describe,index,evaluate,run} --config_file "
+            "internvl experiment {describe,index,evaluate,run} --config_file "
             "cfg/classification.yml; pretrained multimodal embeddings require no fine-tuning."
         )
+
+    if args.command == "experiment":
+        import yaml
+
+        from .experiment import Experiment
+
+        with open(args.config_file, encoding="utf-8") as stream:
+            config = yaml.safe_load(stream)
+        method = {
+            "describe": "generate_descriptions",
+            "index": "build_vector_database",
+        }.get(args.stage, args.stage)
+        getattr(Experiment(config), method)()
+        return
 
     # Help and argument errors return before loading any runtime dependencies.
     from . import workflows as experiments
