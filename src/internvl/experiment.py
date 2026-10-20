@@ -219,7 +219,6 @@ class Experiment:
             )
         artifact = dict(
             collection=collection,
-            model=self.embedder.metadata,
             source_counts=counts,
             config=self.config,
         )
@@ -259,7 +258,6 @@ class Experiment:
         report = dict(
             config=self.config,
             collection=collection,
-            model=artifact.get("model"),
             reference_source_counts=artifact.get("source_counts"),
             predictions=predictions,
             metrics=metrics(predictions, self.classes),

@@ -119,16 +119,19 @@ labels, and rejects cross-split path/content duplication. Images and raw annotat
 are never rewritten. Set a separate output directory for every reference strategy
 you want to keep separately; paths are resolved from the working directory.
 
-The pretrained embedder uses full normalized 1,024-dimensional float32 vectors.
+The pretrained embedder uses Sentence Transformers with Jina CLIP v2 and full
+1,024-dimensional float32 vectors. The wrapper does not request normalization;
+Qdrant handles normalization for cosine retrieval. Its text and image methods both
+delegate to `SentenceTransformer.encode()`.
 Model and code revisions are not configured or tracked for this experiment.
-The model, nested text encoder, tokenizer, and image preprocessing use their
-default cached versions. Attention
-accelerators are disabled to keep device selection explicit. Model loading is
-**local-cache-only**: provision the model, tokenizer, processor, and Python
-sources (including `jinaai/jina-embeddings-v3` and
-`jinaai/xlm-roberta-flash-implementation`) in a separately authorized setup step.
-No model download is performed by the runner. Runtime packages include PyTorch,
-Transformers, huggingface-hub, einops, timm, Pillow, NumPy, pandas, tqdm,
+Sentence Transformers handles model, nested text encoder, tokenizer, and processor
+loading through its normal caching and download behavior. The runner does not
+enforce offline mode. Attention accelerators are disabled to keep device selection
+explicit. Local development tests mock pretrained loading and use synthetic
+encoders, so they do not download weights or require a populated model cache.
+Runtime packages include PyTorch,
+Sentence Transformers (>=5.4,<6), Transformers, huggingface-hub, einops, timm,
+requests, Pillow, NumPy, pandas, tqdm,
 datasets, qdrant-client, PyYAML, and Ollama's Python client. Real-model compatibility still
 requires a separately authorized run; fixture tests do not validate it.
 See the [Jina model card](https://huggingface.co/jinaai/jina-clip-v2) for the
@@ -138,9 +141,9 @@ Artifacts in the output directory:
 
 - `descriptions.json`: generated description dictionary. Existing
   descriptions are loaded directly; remove this file to generate them again.
-- `index.json`: latest collection name, model settings, reference-source counts,
+- `index.json`: latest collection name, reference-source counts,
   and configuration.
-- `evaluation_<UTC timestamp>/report.json`: configuration, collection, model settings,
+- `evaluation_<UTC timestamp>/report.json`: configuration, collection,
   reference-source counts, predictions, and metrics. Folder timestamps use
   `YYYYMMDDTHHMMSS_microsecondsZ`, for example `evaluation_20261019T153042_123456Z`.
 
@@ -151,9 +154,8 @@ warns and returns without loading the embedder, inserting records, or rewriting
 `index.json`. Otherwise, it creates that collection and saves `index.json` after
 successful insertion. Choose a different name to build another collection. To
 reuse an older UUID-suffixed collection, set the YAML value to its full name.
-`evaluate` queries the configured collection. It includes stored model settings
-and source counts from a local `index.json` only when its collection name matches;
-otherwise those report fields are `null`. This allows reuse from a new output
+`evaluate` queries the configured collection. It includes stored source counts from a local `index.json` only when its collection name matches;
+otherwise `reference_source_counts` is `null`. This allows reuse from a new output
 directory without inventing metadata for precomputed vectors. No compatibility
 or completeness checks are performed, so an existing partial collection is also
 reused. `run()` still performs the description stage before checking the collection.
@@ -238,20 +240,28 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 
 Artifact and dataset checks need NumPy, pandas, Pillow, tqdm, and PyYAML;
 whole-image tests additionally need datasets, qdrant-client, and the Ollama Python client;
+the embedder import and encoding tests require Sentence Transformers and CPU PyTorch.
 missing dependencies produce skips. Install the CPU test dependencies with:
 
 ```sh
-python -m pip install numpy 'pandas<3' Pillow tqdm PyYAML datasets qdrant-client ollama
+uv run --no-project --with numpy --with 'pandas<3' --with Pillow --with tqdm \
+  --with PyYAML --with datasets --with qdrant-client --with ollama --with requests \
+  --with 'sentence-transformers>=5.4,<6' \
+  --with 'torch==2.10.0+cpu' --extra-index-url https://download.pytorch.org/whl/cpu \
+  --index-strategy unsafe-best-match \
+  python -m unittest discover -s tests -v
 ```
 
 The pandas upper bound supports the separate legacy adapter; the whole-image
 loader no longer uses its pandas reader.
-The legacy YAML command test also requires PyTorch because `util` imports the
-legacy vector database module. It skips when that dependency is absent.
+Run this command with `PYTHONPATH=src`. The CPU wheel above targets Linux/Windows;
+use the platform's PyTorch wheel on macOS. The legacy YAML command test also
+requires requests because `util` imports the legacy vector database module.
 Imports used by annotations are ordinary runtime imports. Tests do not restrict
 dependency imports; importing a library does not authorize model construction,
 downloads, or service startup.
 Tests use synthetic fixtures and mocked
-backends, without starting models or services; they do not establish model
+backends plus a tiny synthetic Sentence Transformers module, without loading
+pretrained models or starting services; they do not establish model
 accuracy or real-model/remote-Qdrant/GPU/HPC integration. New tests use an
 in-memory Qdrant client, not a live service.

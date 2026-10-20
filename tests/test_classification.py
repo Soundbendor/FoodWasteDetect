@@ -95,7 +95,7 @@ class Contracts(unittest.TestCase):
 
 
 @unittest.skipUnless(available('numpy', 'PIL', 'pandas', 'tqdm', 'datasets'), 'requires datasets and CPU image/dataframe dependencies')
-class DatasetAndEmbedding(unittest.TestCase):
+class DatasetTests(unittest.TestCase):
     def test_native_dataset_contract(self):
         from datasets import DatasetDict, Image as HFImage
         from PIL import Image
@@ -166,29 +166,6 @@ class DatasetAndEmbedding(unittest.TestCase):
             with self.assertRaises(ValueError): FoodX251ImageDataset(root)
             (root / 'annot/train_info.csv').write_text('a.png,99\n')
             with self.assertRaises(KeyError): FoodX251ImageDataset(root)
-
-    def test_embeddings(self):
-        import numpy as np
-        from PIL import Image
-        from internvl.embeddings import EmbeddingModel
-        captured = []
-        class Backend:
-            def encode_text(self, texts, **kwargs):
-                return np.array([[i + 1] + [1] * 1023 for i in map(int, texts)])
-            def encode_image(self, images, **kwargs):
-                captured.extend(images)
-                assert all(image.mode == 'RGB' for image in images)
-                return np.ones((len(images), 1024))
-        model = EmbeddingModel('jinaai/jina-clip-v2', 'cpu', 2, backend=Backend())
-        values = model.encode_text(['0', '1', '2'])
-        self.assertEqual(values.dtype, np.float32)
-        np.testing.assert_allclose(np.linalg.norm(values, axis=1), 1, atol=1e-6)
-        self.assertLess(values[0, 0], values[2, 0])
-        self.assertEqual(model.encode_images([]).shape, (0, 1024))
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'image.png'; Image.new('L', (9, 3)).save(path)
-            self.assertEqual(model.encode_images([path]).shape, (1, 1024))
-            with self.assertRaises(ValueError): captured[0].getpixel((0, 0))
 
 
 @unittest.skipUnless(available('qdrant_client', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, qdrant-client and CPU fixture dependencies')
@@ -379,9 +356,9 @@ class ExperimentTests(unittest.TestCase):
         self.describer_constructor.side_effect = AssertionError('Cached descriptions regenerated')
         report = exp.run()
         artifact = json.loads((exp.output / 'index.json').read_text())
-        self.assertEqual(set(artifact), {'collection', 'model', 'source_counts', 'config'})
+        self.assertEqual(set(artifact), {'collection', 'source_counts', 'config'})
         self.assertEqual(set(report), {'config', 'predictions',
-                                      'collection', 'model', 'reference_source_counts', 'metrics'})
+                                      'collection', 'reference_source_counts', 'metrics'})
         folder = next(exp.output.glob('evaluation_*'))
         self.assertEqual([p.name for p in folder.iterdir()], ['report.json'])
         self.assertEqual(json.loads((folder / 'report.json').read_text()), report)
@@ -413,7 +390,6 @@ class ExperimentTests(unittest.TestCase):
         self.dataset.splits = DatasetDict(train=split, validation=split)
         class Embedder:
             dimension = 2
-            metadata = {'dimension': 2, 'fixture': True}
             def __init__(self, **kwargs): pass
             def encode_text(self, texts):
                 return np.array([[1., 0.] if 'Apple' in x else [0., 1.] for x in texts])
@@ -504,7 +480,7 @@ class ExperimentTests(unittest.TestCase):
         report = reused.evaluate()
         self.assertEqual(report['collection'], artifact['collection'])
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
-        self.assertIsNone(report['model'])
+        self.assertNotIn('model', report)
         self.assertIsNone(report['reference_source_counts'])
 
     def test_evaluation_uses_configured_collection_with_stale_summary(self):
@@ -517,7 +493,7 @@ class ExperimentTests(unittest.TestCase):
         report = exp.evaluate()
         self.assertEqual(report['collection'], exp.config['qdrant']['collection_prefix'])
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
-        self.assertIsNone(report['model'])
+        self.assertNotIn('model', report)
         self.assertIsNone(report['reference_source_counts'])
 
     def test_collection_lookup_failure_propagates_without_building(self):

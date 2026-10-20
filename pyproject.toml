@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "Intern-FW"
 version = "0.0.1"
+dependencies = [
+    "sentence-transformers>=5.4,<6",
+]
 
 [project.scripts]
 internvl = "internvl.cli:main"

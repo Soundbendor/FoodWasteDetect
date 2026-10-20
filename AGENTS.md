@@ -81,11 +81,13 @@ Use all official FoodX251 training references and labeled validation images for
 evaluation, recording `source_split="val"`; never claim official test accuracy.
 The composed dataset adapter rejects resolved-path overlap and preserves legacy names.
 
-Full 1024-dimensional normalized Jina embeddings use checkpoint preprocessing
+Full 1024-dimensional Jina embeddings use checkpoint preprocessing
 and an explicit device. By user choice, this whole-image experiment does not
 configure or track model/code revisions, including nested text-encoder revisions;
-it uses default cached versions. Loading is
-local-cache-only. Do not download weights or start real services for checks.
+it uses the library's default model loading and caching behavior, including
+downloads when needed during normal application execution. The no-download
+restriction applies to local development checks: mock pretrained construction
+and use synthetic encoders. Do not download weights or start real services for checks.
 Every selected record contributes one vote; ties use best similarity then class
 name. Completed evaluations cover the full validation split, with an evaluated count
 and per-class metrics. Empty retrieval abstains. Image-loading, embedding,
@@ -127,15 +129,14 @@ exact collection name without an appended UUID. `build_vector_database()` checks
 existence before loading the embedder or reading training inputs. For an existing
 collection it warns and returns None, leaving vectors and index.json untouched.
 For a missing collection it inserts records and saves collection name, source
-counts, model settings and configuration in index.json after success. Select a
+counts and configuration in index.json after success. Select a
 new name to build again, or an older collection's full name to reuse it.
 No compatibility or completeness checks are added; partial collections are also
 reused. `run()` still generates or loads descriptions before the build stage.
 Evaluation queries the configured collection and uses a local index.json only
-for metadata about that same collection. Without a matching summary, model and
-reference_source_counts are null. This supports reuse across output directories
+for metadata about that same collection. Without a matching summary, reference_source_counts is null. This supports reuse across output directories
 without claiming knowledge of the stored vectors. A successful evaluation
-writes only `evaluation_<UTC timestamp>/report.json`, with configuration, collection, model,
+writes only `evaluation_<UTC timestamp>/report.json`, with configuration, collection,
 reference-source counts, predictions, and metrics. Prediction `value`, evaluation
 manifest, fixed retrieval settings, status/error fields, and separate prediction
 and metric files have been removed. Metrics retain evaluated count, majority-vote
@@ -160,6 +161,24 @@ changes reference counts. No tuning or subsampling occurs.
 
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
 FoodX251 fixtures, Hugging Face datasets, and qdrant-client's in-memory backend.
+Embedding contracts are isolated in `tests/test_embeddings.py` and require
+Sentence Transformers, CPU PyTorch, NumPy, and Pillow. `EmbeddingModel` wraps a
+`SentenceTransformer` directly; `encode()` owns inference batching and NumPy
+conversion. The wrapper does not request embedding normalization; Qdrant handles
+normalization for cosine retrieval. Model settings are recorded only through the saved experiment
+configuration; the embedder has no metadata dictionary/property or separate artifact
+model field. The experiment iterates decoded dataset batches to bound
+image memory; `encode_images()` prepares the supplied batch without rebatching it.
+String inputs use Jina's default text/path/URL interpretation without overriding
+`assume_text_inputs`.
+The RGB helper explicitly closes path-opened originals after conversion, including
+on conversion failure, and leaves caller-owned PIL images open. RGB copies are
+released through garbage collection after use. Loading calls Sentence Transformers directly,
+without temporary configuration copies or enforced offline mode.
+Tests exercise real Sentence Transformers
+with synthetic vectors and mock pretrained construction; they do not establish
+real-model compatibility. `EmbeddingModel` has no backend injection parameter;
+encoding tests patch `_load_backend()` to return a fake or synthetic encoder.
 Install the small CPU dependencies listed in README for these tests; retain
 explicit skips when absent.
 These tests do not establish real model, dataset, GPU, Ollama, remote-Qdrant, or HPC

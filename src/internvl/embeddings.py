@@ -1,99 +1,96 @@
 """Inference-only Jina CLIP v2 embeddings. No import-time backends."""
-from contextlib import ExitStack
+
+from collections.abc import Iterable
 from pathlib import Path
-import json
-import shutil
-import tempfile
+from typing import Any
 
-def _load_backend(model_id, device):
-    from huggingface_hub import snapshot_download
-    from transformers import AutoConfig, AutoImageProcessor, AutoModel, AutoTokenizer
-    import torch
+import numpy as np
+import torch
+from numpy.typing import NDArray
+from PIL import Image
+from sentence_transformers import SentenceTransformer
 
-    text_snapshot = Path(snapshot_download('jinaai/jina-embeddings-v3',
-                         local_files_only=True))
-    code_snapshot = Path(snapshot_download('jinaai/xlm-roberta-flash-implementation',
-                         local_files_only=True))
-    # Keep the nested text loader local: it does not forward local_files_only.
-    with tempfile.TemporaryDirectory(prefix='food-jina-config-') as directory:
-        local = Path(directory)
-        config = json.loads((text_snapshot / 'config.json').read_text())
-        config['auto_map'] = {key: value.split('--')[-1] for key, value in config['auto_map'].items()}
-        (local / 'config.json').write_text(json.dumps(config))
-        sources = list(code_snapshot.glob('*.py'))
-        if not sources:
-            raise FileNotFoundError('Text encoder Python sources are not cached')
-        for source in sources:
-            shutil.copyfile(source, local / source.name)
-        clip_config = AutoConfig.from_pretrained(model_id, trust_remote_code=True, local_files_only=True)
-        clip_config.text_config.hf_model_name_or_path = directory
-        clip_config.use_text_flash_attn = False
-        clip_config.use_vision_xformers = False
-        backend = AutoModel.from_pretrained(model_id, config=clip_config, trust_remote_code=True, local_files_only=True,
-            torch_dtype=torch.float32).to(device).eval()
-    # Override lazy loaders so preprocessing also uses only cached files.
-    backend.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, local_files_only=True)
-    backend.preprocess = AutoImageProcessor.from_pretrained(model_id, trust_remote_code=True, local_files_only=True)
+_SUPPORTED_MODELS = ["jinaai/jina-clip-v2"]
+_DIMENSION = 1024
+ImageInput = str | Path | Image.Image
+
+
+def _load_backend(model_id: str, device: str) -> SentenceTransformer:
+    """Load Jina directly, using the library's normal caching and downloads."""
+    backend = SentenceTransformer(
+        model_id,
+        device=device,
+        trust_remote_code=True,
+        truncate_dim=None,
+        model_kwargs={"torch_dtype": torch.float32},
+        config_kwargs={
+            "use_text_flash_attn": False,
+            "use_vision_xformers": False,
+        },
+    )
+    # Jina-clip-v2 lacks modality metadata - inject it.
+    module: Any = backend[0]
+    if not hasattr(module, "modalities"):
+        module.modalities = ["text", "image"]
     return backend
 
 
+def _prepare_rgb_image(image: ImageInput) -> Image.Image:
+    """Convert images to RGB colorspace, loading the image if not already open."""
+    if isinstance(image, (str, Path)):
+        original = Image.open(image)
+        try:
+            return original.convert("RGB")
+        finally:
+            original.close()
+    return image.convert("RGB")
+
+
 class EmbeddingModel:
-    def __init__(self, model_id, device, batch_size=32, *, backend=None):
-        if model_id != 'jinaai/jina-clip-v2':
-            raise ValueError('This experiment requires jinaai/jina-clip-v2')
-        if not device or device == 'auto' or type(batch_size) is not int or batch_size < 1:
-            raise ValueError('An explicit device and positive batch size are required')
+    """Batch text and images into full-size Jina CLIP vectors."""
+
+    def __init__(
+        self,
+        model_id: str,
+        batch_size: int = 32,
+        *,
+        device: str = "auto",
+    ) -> None:
+        """Load a supported model with the requested device and batch size."""
+        if model_id not in _SUPPORTED_MODELS:
+            raise ValueError(
+                f"Unsupported model {model_id!r}. Supported models: {_SUPPORTED_MODELS}"
+            )
         self.batch_size = batch_size
-        self._metadata = dict(model_id=model_id,
-                              device=device, batch_size=batch_size, dimension=1024,
-                              normalized=True, preprocessing='checkpoint encode_image; RGB',
-                              text_task=None, truncate_dim=None, dtype='float32',
-                              use_text_flash_attn=False, use_vision_xformers=False)
-        if backend is None:
-            backend = _load_backend(model_id, device)
-        self.model = backend
+        self.dimension = _DIMENSION
+        self.model = _load_backend(model_id, device)
 
-    @property
-    def dimension(self):
-        return 1024
+    def _encode(self, inputs: list[str] | list[Image.Image]) -> NDArray[np.float32]:
+        """Delegate batching and NumPy conversion to the library."""
+        if not inputs:
+            return np.empty((0, self.dimension), dtype=np.float32)
+        values = self.model.encode(
+            inputs,
+            batch_size=self.batch_size,
+            convert_to_numpy=True,
+            precision="float32",
+            show_progress_bar=False,
+        )
+        values = np.asarray(values, dtype=np.float32)
+        if (
+            values.shape != (len(inputs), self.dimension)
+            or not np.isfinite(values).all()
+        ):
+            raise ValueError("Invalid embedding shape or nonfinite values")
+        norms = np.linalg.norm(values, axis=1, keepdims=True)
+        if (norms == 0).any():
+            raise ValueError("Model returned zero-length embeddings.")
+        return values
 
-    @property
-    def metadata(self):
-        return dict(self._metadata)
+    def encode_text(self, texts: Iterable[str]) -> NDArray[np.float32]:
+        """Generate embedding vectors from text inputs."""
+        return self._encode(list(texts))
 
-    def _encode(self, inputs, image=False):
-        import numpy as np
-        from PIL import Image
-        inputs = list(inputs)
-        outputs = []
-        for start in range(0, len(inputs), self.batch_size):
-            batch = inputs[start:start + self.batch_size]
-            with ExitStack() as stack:
-                if image:
-                    rgb = []
-                    for item in batch:
-                        original = stack.enter_context(Image.open(item)) if isinstance(item, (str, Path)) else item
-                        converted = original.convert('RGB')
-                        stack.callback(converted.close)
-                        rgb.append(converted)
-                    batch = rgb
-                method = self.model.encode_image if image else self.model.encode_text
-                values = method(batch, batch_size=self.batch_size, truncate_dim=None)
-                if hasattr(values, 'detach'):
-                    values = values.detach().float().cpu().numpy()
-                values = np.asarray(values, dtype=np.float32)
-                if values.ndim == 1 and len(batch) == 1:
-                    values = values[None, :]
-                if values.shape != (len(batch), self.dimension) or not np.isfinite(values).all():
-                    raise ValueError('Invalid embedding shape or nonfinite values')
-                norms = np.linalg.norm(values, axis=1, keepdims=True)
-                if (norms == 0).any():
-                    raise ValueError('Zero embedding')
-                outputs.append(values / norms)
-        return np.concatenate(outputs) if outputs else np.empty((0, self.dimension), dtype=np.float32)
-
-    def encode_text(self, texts):
-        return self._encode(texts)
-
-    def encode_images(self, images):
-        return self._encode(images, image=True)
+    def encode_images(self, images: Iterable[ImageInput]) -> NDArray[np.float32]:
+        """Load images into memory and convert to embedding vectors."""
+        return self._encode([_prepare_rgb_image(image) for image in images])
