@@ -4,8 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pandas as pd
-from datasets import DatasetDict, Dataset, Features, Image, Value
-
+from datasets import Dataset, DatasetDict, Features, Image, Value
 
 SPLIT_NAMES = {"train": "train", "val": "validation"}
 

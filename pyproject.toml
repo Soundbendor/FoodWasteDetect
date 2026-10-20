@@ -10,7 +10,6 @@ dependencies = [
 ]
 
 [project.scripts]
-internvl = "internvl.cli:main"
 build_clip_db = "app:build_img_vdb"
 test_clip = "app:eval_img_vdb"
 test_yolo = "yolo:main"
@@ -21,6 +20,4 @@ py-modules = ["app", "yolo", "util", "clip_finetune"]
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
-
-[tool.setuptools.package-data]
-internvl = ["scripts/*.sh"]
+exclude = ["internvl", "internvl.*"]

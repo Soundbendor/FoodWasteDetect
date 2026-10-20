@@ -116,8 +116,9 @@ through the removed `references()` helper. Both image loops rely on garbage
 collection for decoded batch images, as requested by the user.
 `DescriberLLM.generate_descriptions(classes, count)` owns the per-class generation
 loop and empty-description checks, using `describe_class(label)` for the shared
-prompt. The experiment owns saved-file handling and the Ollama context. Legacy
-description generation keeps its existing cleaning and error handling.
+prompt. The experiment owns saved-file handling and the Ollama context. The legacy
+`generate_descriptors(ds, save_path)` method has been removed; use
+`generate_descriptions(classes, count)` instead.
 Failures and interrupts propagate without retries or partial reports. A failed
 index build may leave a partial Qdrant collection; no rollback or cleanup is added.
 The previous successful index summary remains intact after a failed rebuild.
@@ -460,3 +461,22 @@ dependencies produce explicit skips. Keep all fixtures synthetic and local.
 Explicitly identify dataset, model, GPU, network, Qdrant, and HPC checks that could
 not be run. Do not claim an end-to-end experiment passed based on syntax checks or
 stubbed components alone.
+
+
+## Standalone internvl environment
+
+`src/internvl/pyproject.toml` and its committed `uv.lock` own the `internvl`
+package and console command; root package discovery excludes it. Use standard
+CPython 3.14.8 and select `--extra cpu` or `--extra cu128` consistently with
+`uv sync/run --project src/internvl --locked`. The legacy description method and
+its `ClassDataset` protocol have been removed. See `src/internvl/README.md`
+for installation, Ruff, scoped ty checks, and pytest coverage commands.
+`internvl.scripts.smoke_jina` is an explicit real-model download check with
+temporary subprocess caches; it is never part of routine synthetic tests.
+The user authorized running it for both profiles during this environment setup.
+
+Real-model acceptance required Transformers `<5` (resolved 4.57.6), Sentence
+Transformers `>=5.4,<6` (5.7.0), and datasets `<5` (4.8.5). The initially proposed
+Transformers 5.5.4 stack failed image embedding validation in both profiles.
+Both final profiles passed real text/image encoding on CPU and temporary-cache
+cleanup. CUDA execution and external services were not tested.

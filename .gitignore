@@ -2,3 +2,14 @@ deps/
 assets/
 /db/
 *__pycache__*
+
+.venv*/
+build/
+dist/
+*.egg-info/
+.coverage*
+htmlcov/
+coverage.xml
+.pytest_cache/
+.ruff_cache/
+.ty_cache/

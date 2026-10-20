@@ -1,8 +1,9 @@
 """Parse commands and load runtime dependencies only when dispatching work."""
 
 import argparse
-import yaml
 from collections.abc import Sequence
+
+import yaml
 
 from .experiment import Experiment
 

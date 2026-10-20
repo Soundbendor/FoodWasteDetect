@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from typing import TypedDict
 from uuid import uuid4
 
-
 ImageMetadata = TypedDict(
     "ImageMetadata",
     {"fname": str, "class": str, "source_id": str, "source_split": str},

@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Sequence
 import json
 import logging
+from collections import Counter
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from datetime import datetime, timezone
 
 from qdrant_client import QdrantClient
 
 from .embeddings import EmbeddingModel
 from .generate_descriptors import DescriberLLM
 from .image_dataset import load_dataset
-from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 from .retrieval import QdrantIndex, classify, metrics
+from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -264,7 +264,7 @@ class Experiment:
             predictions=predictions,
             metrics=metrics(predictions, self.classes),
         )
-        run_dir = self.output / datetime.now(timezone.utc).strftime(
+        run_dir = self.output / datetime.now(UTC).strftime(
             "evaluation_%Y%m%dT%H%M%S_%fZ"
         )
         run_dir.mkdir(parents=True)

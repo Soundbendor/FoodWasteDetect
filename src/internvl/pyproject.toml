@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foodwaste-internvl"
+version = "0.1.0"
+description = "Whole-image food classification with Jina CLIP and Qdrant"
+readme = "README.md"
+requires-python = ">=3.14.8,<3.15"
+dependencies = [
+    "datasets<5",
+    "einops>=0.8.2",
+    "httpx>=0.28.1",
+    "numpy>=2.5.4",
+    "ollama>=0.6.3",
+    "pandas>=3.0.6",
+    "pillow>=13.0.0",
+    "pydantic>=2.14.1",
+    "pyyaml>=6.0.3",
+    "qdrant-client>=1.19.1",
+    "requests>=2.34.2",
+    "sentence-transformers>=5.4,<6",
+    "timm>=1.0.30",
+    "tqdm>=4.70.1",
+    "transformers<5",
+]
+
+[project.scripts]
+internvl = "internvl.cli:main"
+
+[project.optional-dependencies]
+cpu = [
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+]
+cu128 = [
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+]
+
+[tool.setuptools]
+packages = ["internvl", "internvl.scripts"]
+package-dir = {internvl = "."}
+
+[tool.setuptools.package-data]
+internvl = ["scripts/*.sh"]
+
+[tool.uv]
+conflicts = [[{extra = "cpu"}, {extra = "cu128"}]]
+default-groups = ["dev", "test"]
+
+[tool.uv.sources]
+torch = [{index = "pytorch-cpu", extra = "cpu"}, {index = "pytorch-cu128", extra = "cu128"}]
+torchvision = [{index = "pytorch-cpu", extra = "cpu"}, {index = "pytorch-cu128", extra = "cu128"}]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["../../tests"]
+addopts = "--cov=internvl --cov-report=term-missing"
+
+[tool.ty.environment]
+root = [".."]
+python-version = "3.14"
+
+[tool.ty.src]
+include = ["cli.py", "schemas.py"]
+
+[dependency-groups]
+dev = [
+    "ruff",
+    "ty",
+]
+test = [
+    "pytest",
+    "pytest-cov",
+]

@@ -61,6 +61,8 @@ class CommandTests(unittest.TestCase):
                                 "internvl.generate_descriptors": descriptors,
                             },
                         ),
+                        patch("internvl.cli.Experiment", backend.Experiment),
+                        patch("internvl.cli.yaml", yaml),
                         patch("builtins.open", opened),
                         self.assertRaises(type(failure)) as error,
                     ):
@@ -87,6 +89,8 @@ class CommandTests(unittest.TestCase):
                         patch.dict(
                             sys.modules, {"yaml": yaml, "internvl.experiment": backend}
                         ),
+                        patch("internvl.cli.Experiment", backend.Experiment),
+                        patch("internvl.cli.yaml", yaml),
                         patch("builtins.open", mock_open()),
                         self.assertRaises(type(failure)) as error,
                     ):
@@ -240,6 +244,8 @@ class CommandTests(unittest.TestCase):
                     patch.dict(
                         sys.modules, {"internvl.experiment": backend, "yaml": yaml}
                     ),
+                    patch("internvl.cli.Experiment", backend.Experiment),
+                    patch("internvl.cli.yaml", yaml),
                     patch(
                         "builtins.open",
                         mock_open(read_data="output_dir: synthetic"),
@@ -271,7 +277,7 @@ class CommandTests(unittest.TestCase):
             ]:
                 with (
                     self.subTest(stage=stage),
-                    patch.dict(sys.modules, {"internvl.experiment": backend}),
+                    patch("internvl.cli.Experiment", experiment),
                 ):
                     main(["experiment", stage, "--config_file", str(config_path)])
                 experiment.assert_called_once_with({"k": 7})

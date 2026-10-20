@@ -1,18 +1,12 @@
-import json
-import logging
 import os
 import subprocess
 import time
-from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
 import httpx
-import ollama
 from ollama import ChatResponse, Client
 from pydantic import BaseModel
-
-from data_wrappers.dataset import Dataset
 
 
 def descriptor_prompt(cleaned_item: str) -> dict[str, str]:
@@ -188,24 +182,3 @@ class DescriberLLM:
         output.food_class = label
         output.description = output.description.replace("*", "")
         return output
-
-    # TODO: deprecate, uses old local Dataset interface
-    def generate_descriptors(self, ds: Dataset, save_path: str) -> str:
-        """Given a dataset, provides a list of descriptions of each class of that dataset"""
-        ds_descriptors = defaultdict(list)
-        for item in ds.get_class_list():
-            prompt = descriptor_prompt(item.replace("food", "").strip())
-            for _ in range(5):
-                try:
-                    output = self._describe_class(item, prompt)
-                    logging.info(output)
-                    ds_descriptors[item].append(output.description)
-                # ollama server failure
-                except ollama.ResponseError as e:
-                    logging.error(f"Warning! Server error {e}")
-                    continue
-
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(ds_descriptors, f, ensure_ascii=False, indent=4)
-
-        return save_path

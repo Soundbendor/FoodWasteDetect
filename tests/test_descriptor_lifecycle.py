@@ -1,7 +1,6 @@
 """Lifecycle checks with synthetic HTTP/process doubles; no Ollama or GPU needed."""
 import errno
 import importlib.util
-import json
 from pathlib import Path
 import subprocess
 import sys
@@ -32,18 +31,13 @@ class DescriptorLifecycleTests(unittest.TestCase):
         ollama = types.ModuleType('ollama')
         ollama.Client = Mock()
         ollama.ChatResponse = object
-        ollama.ResponseError = RuntimeError
         pydantic = types.ModuleType('pydantic')
         pydantic.BaseModel = object
-        dataset = types.ModuleType('data_wrappers.dataset')
-        dataset.Dataset = type('Dataset', (), {})
-        self.dataset_class = dataset.Dataset
         path = Path(__file__).resolve().parents[1] / 'src/internvl/generate_descriptors.py'
         spec = importlib.util.spec_from_file_location('_descriptor_lifecycle_test', path)
         self.module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {
             'httpx': httpx, 'ollama': ollama, 'pydantic': pydantic,
-            'data_wrappers.dataset': dataset,
         }):
             spec.loader.exec_module(self.module)
         self.popen = self.enterContext(patch.object(self.module.subprocess, 'Popen'))
@@ -62,13 +56,6 @@ class DescriptorLifecycleTests(unittest.TestCase):
             'request_timeout': 600,
         }
         self.llm = self.module.DescriberLLM(self.config)
-
-    def test_dataset_annotation_uses_imported_class(self):
-        self.assertIs(self.module.Dataset, self.dataset_class)
-        self.assertIs(
-            self.module.DescriberLLM.generate_descriptors.__annotations__['ds'],
-            self.dataset_class,
-        )
 
     def test_public_description_uses_shared_prompt_without_cleaning_label(self):
         output = types.SimpleNamespace(food_class='Seafood', description='A seafood dish.')
@@ -105,7 +92,7 @@ class DescriptorLifecycleTests(unittest.TestCase):
                 describe.assert_called_once_with('Apple')
 
     def test_download_progress_environment_and_cleanup(self):
-        for failure in (None, self.module.ollama.ResponseError('pull failed'), KeyboardInterrupt()):
+        for failure in (None, RuntimeError('pull failed'), KeyboardInterrupt()):
             with self.subTest(failure=failure):
                 self.process.reset_mock()
                 self.get.side_effect = [ConnectError(), self.get.return_value]
@@ -291,21 +278,6 @@ class DescriptorLifecycleTests(unittest.TestCase):
         self.assertEqual(result.food_class, 'bread food')
         self.assertEqual(result.description, 'Golden crust')
         self.assertEqual(self.llm.client.chat.call_args.kwargs['messages'], [prompt])
-
-    def test_generation_saves_five_descriptions_per_class(self):
-        dataset = Mock()
-        dataset.get_class_list.return_value = ['bread', 'rice']
-        def describe(label, prompt):
-            self.assertIn(label, prompt['content'])
-            return types.SimpleNamespace(description=f'{label} description')
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / 'descriptions.json')
-            with patch.object(self.llm, '_describe_class', side_effect=describe):
-                self.assertEqual(self.llm.generate_descriptors(dataset, path), path)
-            self.assertEqual(json.loads(Path(path).read_text()), {
-                'bread': ['bread description'] * 5,
-                'rice': ['rice description'] * 5,
-            })
 
 
 if __name__ == '__main__':

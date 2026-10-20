@@ -1,1 +1,1 @@
-"""Bundled operational scripts; importing this package does not execute them."""
+"""Explicit maintenance and smoke-test commands."""

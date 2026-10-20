@@ -19,24 +19,19 @@ baseline:
 
 ## Setup
 
-From the repository root, activate your research Python environment and install:
+The whole-image experiment has a [standalone uv environment](src/internvl/README.md).
+Run from the repository root:
 
 ```sh
-python -m pip install -e .
+uv sync --project src/internvl --locked --extra cpu
+uv run --project src/internvl --locked --extra cpu internvl --help
 ```
 
-Runtime dependencies are managed separately; installation does not supply them.
-The [environment file](environment.yml) is machine-specific and incomplete.
-Configure dataset/model paths and Qdrant settings in the
-[InternVL configuration](cfg/experiment_config_internvl.yml) or
-[CLIP configuration](cfg/experiment_config_clip.yml). InternVL captioning uses
-CUDA. Run commands from the repository root.
-
-To view command line options:
-
-```sh
-PYTHONPATH=src python -m internvl --help
-```
+Use `--extra cu128` for the CUDA 12.8 profile. Keep the selected extra on every
+`uv run` command. Configure dataset paths and Qdrant in `cfg/classification.yml`.
+The nested environment owns the `internvl` command. The legacy image package can
+still be installed with `python -m pip install -e .`; its runtime dependencies
+remain separately managed by the machine-specific `environment.yml`.
 
 ### Ollama setup
 
@@ -50,7 +45,7 @@ The description and download commands start and stop their own server and reject
 occupied endpoints. Download a model with:
 
 ```sh
-internvl download_model gemma3:27b
+uv run --project src/internvl --locked --extra cpu internvl download_model gemma3:27b
 ```
 
 Optionally set `OLLAMA_MODELS` to choose model storage. This command downloads
@@ -60,15 +55,15 @@ an Ollama model; the InternVL captioner checkpoint is configured separately.
 
 ### Ollama downloads
 
-Run `internvl download_model MODEL_NAME` (or
-`python -m internvl download_model MODEL_NAME`). The positional model name is
+Run `uv run --project src/internvl --locked --extra cpu internvl download_model MODEL_NAME`.
+The positional model name is
 required. The command always reads `cfg/experiment_config_internvl.yml` from the
 working directory and accepts no configuration flag.
 
 Generate class descriptions through the whole-image experiment:
 
 ```sh
-python -m internvl experiment describe --config_file cfg/classification.yml
+uv run --project src/internvl --locked --extra cpu python -m internvl experiment describe --config_file cfg/classification.yml
 ```
 
 Description generation follows the experiment configuration:
@@ -83,7 +78,7 @@ are not migrated.
 Configure [cfg/classification.yml](cfg/classification.yml), then run:
 
 ```sh
-PYTHONPATH=src python -m internvl experiment run --config_file cfg/classification.yml
+uv run --project src/internvl --locked --extra cpu python -m internvl experiment run --config_file cfg/classification.yml
 ```
 
 The same command accepts `describe`, `index`, or `evaluate` in place of `run`.
@@ -240,31 +235,12 @@ hold cluster jobs; [tests/](tests) contains CPU checks.
 ## Checks
 
 ```sh
-PYTHONPATH=src python -m unittest discover -s tests -v
+uv run --project src/internvl --locked --extra cpu pytest -c src/internvl/pyproject.toml
 ```
 
-Artifact and dataset checks need NumPy, pandas, Pillow, tqdm, and PyYAML;
-whole-image tests additionally need datasets, qdrant-client, and the Ollama
-Python client; the embedder import and encoding tests require Sentence
-Transformers and CPU PyTorch. missing dependencies produce skips. Install the
-CPU test dependencies with:
-
-```sh
-uv run --no-project --with numpy --with 'pandas<3' --with Pillow --with tqdm \
-  --with PyYAML --with datasets --with qdrant-client --with ollama --with requests \
-  --with 'sentence-transformers>=5.4,<6' \
-  --with 'torch==2.10.0+cpu' --extra-index-url https://download.pytorch.org/whl/cpu \
-  --index-strategy unsafe-best-match \
-  python -m unittest discover -s tests -v
-```
-
-The pandas upper bound supports the separate legacy adapter; the whole-image
-loader no longer uses its pandas reader. Run this command with `PYTHONPATH=src`.
-The CPU wheel above targets Linux/Windows; use the platform's PyTorch wheel on
-macOS. The legacy YAML command test also requires requests because `util`
-imports the legacy vector database module. Imports used by annotations are
-ordinary runtime imports. Tests do not restrict dependency imports; importing a
-library does not authorize model construction, downloads, or service startup.
+See the [environment guide](src/internvl/README.md) for linting, scoped type checks,
+builds, CUDA library installation, and the explicit temporary real-model smoke test.
+Imports used by annotations remain ordinary runtime imports.
 Tests use synthetic fixtures and mocked backends plus a tiny synthetic Sentence
 Transformers module, without loading pretrained models or starting services;
 they do not establish model accuracy or real-model/remote-Qdrant/GPU/HPC
