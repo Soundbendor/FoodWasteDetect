@@ -1,5 +1,4 @@
-"""InternVL captioning and the associated text-retrieval experiments.
+"""Whole-image food classification, using Ollama-generated descriptions and multimodal embedding retrieval.
 
 Class descriptions are generated separately through Ollama using food labels.
-Import concrete backends from their modules only when running an experiment.
 """

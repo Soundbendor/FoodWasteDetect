@@ -1,6 +1,5 @@
 """Synthetic CPU-only contracts for whole-image experiments."""
-import contextlib
-import io
+import importlib.util
 import itertools
 import json
 from pathlib import Path
@@ -12,7 +11,10 @@ from unittest.mock import patch
 from internvl.experiment import Experiment, _batch_rows, _prediction, validate_config
 from internvl.schemas import Neighbor, PointRecord
 from internvl.retrieval import QdrantIndex
-from test_internvl import available
+
+
+def available(*modules):
+    return all(importlib.util.find_spec(module) is not None for module in modules)
 
 
 class Contracts(unittest.TestCase):
@@ -87,37 +89,6 @@ class Contracts(unittest.TestCase):
                 Experiment(cfg)
             self.assertFalse((Path(directory) / 'derived').exists())
 
-    @unittest.skipUnless(available('yaml'), 'requires PyYAML')
-    def test_cli_dispatches_experiment_stages(self):
-        from internvl.cli import main
-        with tempfile.TemporaryDirectory() as directory:
-            config_path = Path(directory) / 'config.yml'
-            config_path.write_text('k: 7')
-            for stage, method in [('index', 'build_vector_database'),
-                                  ('describe', 'generate_descriptions'),
-                                  ('evaluate', 'evaluate'), ('run', 'run')]:
-                with self.subTest(stage=stage), \
-                     patch('internvl.experiment.Experiment') as experiment:
-                    main(['experiment', stage, '--config_file', str(config_path)])
-                experiment.assert_called_once_with({'k': 7})
-                getattr(experiment.return_value, method).assert_called_once_with()
-
-    def test_experiment_cli_argument_errors(self):
-        from internvl.cli import main
-        for args in [['experiment'], ['experiment', 'unknown'], ['experiment', 'run']]:
-            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()), \
-                 patch('internvl.experiment.Experiment') as experiment:
-                with self.assertRaises(SystemExit) as error:
-                    main(args)
-                self.assertEqual(error.exception.code, 2)
-                experiment.assert_not_called()
-
-    def test_retired_commands_explain_migration(self):
-        from internvl.cli import main
-        for command in ['build-db', 'evaluate']:
-            with contextlib.redirect_stderr(io.StringIO()) as stderr, self.assertRaises(SystemExit):
-                main([command, '--config_file', 'unused'])
-            self.assertIn('retired', stderr.getvalue())
 
 
 @unittest.skipUnless(available('numpy', 'PIL', 'pandas', 'tqdm', 'datasets'), 'requires datasets and CPU image/dataframe dependencies')

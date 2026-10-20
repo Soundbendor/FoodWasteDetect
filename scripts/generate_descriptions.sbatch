@@ -17,5 +17,5 @@ cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the repository root}"
 export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # DescriberLLM manages Ollama using the YAML configuration.
-python -m internvl generate-descriptions \
-  --config_file "${1:-cfg/experiment_config_internvl.yml}"
+python -m internvl experiment describe \
+  --config_file "${1:-cfg/classification.yml}"

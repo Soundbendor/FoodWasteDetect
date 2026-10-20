@@ -115,7 +115,7 @@ class EmbeddingTests(unittest.TestCase):
             (np.ones((1, 1, 1024)), "Invalid embedding"),
             (np.full((1, 1024), np.nan), "Invalid embedding"),
             (np.full((1, 1024), np.inf), "Invalid embedding"),
-            (np.zeros((1, 1024)), "Zero embedding"),
+            (np.zeros((1, 1024)), "Model returned zero-length embeddings"),
         ]:
             with self.subTest(shape=values.shape, message=message):
                 self.backend.encode.return_value = values

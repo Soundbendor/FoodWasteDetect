@@ -1,102 +1,65 @@
 """Parse commands and load runtime dependencies only when dispatching work."""
 
 import argparse
-from typing import Optional, Sequence
+import yaml
+from collections.abc import Sequence
+
+from .experiment import Experiment
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    """Parse legacy utility or whole-image experiment commands and dispatch them."""
+def download_model(model_name: str) -> None:
+    import yaml
+
+    from .generate_descriptors import DescriberLLM
+
+    with open("cfg/experiment_config_internvl.yml", encoding="utf-8") as stream:
+        cfg = yaml.safe_load(stream)
+    with DescriberLLM(cfg["ollama"]) as llm:
+        llm.download_model(model_name)
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="internvl",
-        description="FoodWasteDetect caption utilities and whole-image experiments",
+        description="FoodWasteDetect utilities and food image recognition experiments",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     experiment = commands.add_parser(
-        "experiment", help="Run a whole-image classification experiment."
+        "experiment", help="Run a food image classification experiment."
     )
-    experiment.add_argument("stage", choices=("describe", "index", "evaluate", "run"))
-    experiment.add_argument("--config_file", required=True, help="Path to experiment YAML")
+    experiment.add_argument(
+        "stage",
+        choices=("describe", "index", "evaluate", "run"),
+        help="Run a specific stage of the food image classification experiment.",
+    )
+    experiment.add_argument(
+        "--config_file", required=True, help="Path to experiment config YAML"
+    )
     download = commands.add_parser(
         "download_model", help="Download weights for an Ollama model."
     )
     download.add_argument("model_name", help="Ollama model name to download")
-    download.set_defaults(workflow="download_model", needs_config=False)
-    workflows = (
-        ("caption-images", "caption_imgs", True, "Caption FoodX251 training images"),
-        (
-            "generate-descriptions",
-            "generate_descriptions",
-            True,
-            "Describe food class names through Ollama",
-        ),
-        ("build-db", "build_vdb", True, "Retired: use internvl experiment index"),
-        (
-            "evaluate",
-            "test_classification",
-            True,
-            "Retired: use internvl experiment evaluate",
-        ),
-        (
-            "merge-captions",
-            "merge_files",
-            False,
-            "Merge the four FoodX251 caption partitions",
-        ),
-        (
-            "convert-captions",
-            "convert_csv_to_dictionary",
-            False,
-            "Convert merged captions to a description dictionary",
-        ),
-    )
-    for command, workflow, needs_config, help_text in workflows:
-        subparser = commands.add_parser(command, help=help_text, description=help_text)
-        subparser.set_defaults(workflow=workflow, needs_config=needs_config)
-        if needs_config:
-            subparser.add_argument(
-                "--config_file", required=True, help="Path to experiment YAML"
-            )
-        if command == "caption-images":
-            subparser.add_argument(
-                "--partition",
-                required=True,
-                type=int,
-                help="Legacy FoodX251 partition number, 1 through 4",
-            )
+    return parser
 
-    args = parser.parse_args(argv)
 
-    if args.command in {"build-db", "evaluate"}:
-        parser.error(
-            "This text-retrieval command is retired. Use python -m "
-            "internvl experiment {describe,index,evaluate,run} --config_file "
-            "cfg/classification.yml; pretrained multimodal embeddings require no fine-tuning."
-        )
+def _run_experiment(config_file: str, stage: str) -> None:
 
+    with open(config_file, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    experiment = Experiment(config)
+    stages = {
+        "describe": experiment.generate_descriptions,
+        "index": experiment.build_vector_database,
+        "evaluate": experiment.evaluate,
+        "run": experiment.run,
+    }
+    stages[stage]()
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Parse Ollama download or whole-image experiment commands and dispatch them."""
+    args = _build_parser().parse_args(argv)
     if args.command == "experiment":
-        import yaml
-
-        from .experiment import Experiment
-
-        with open(args.config_file, encoding="utf-8") as stream:
-            config = yaml.safe_load(stream)
-        method = {
-            "describe": "generate_descriptions",
-            "index": "build_vector_database",
-        }.get(args.stage, args.stage)
-        getattr(Experiment(config), method)()
-        return
-
-    # Help and argument errors return before loading any runtime dependencies.
-    from . import workflows as experiments
-
-    kwargs = {}
-    if args.command == "download_model":
-        kwargs["model_name"] = args.model_name
-    if args.needs_config:
-        from util import parse_cfg
-
-        kwargs["cfg"] = parse_cfg(args.config_file)
-    if args.command == "caption-images":
-        kwargs["partition"] = args.partition
-    getattr(experiments, args.workflow)(**kwargs)
+        _run_experiment(args.config_file, args.stage)
+    elif args.command == "download_model":
+        download_model(args.model_name)

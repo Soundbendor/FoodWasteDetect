@@ -62,14 +62,16 @@ instance segmentation when they contain only boxes and class predictions.
 ## Configurable whole-image classification (current)
 
 The separately authorized `internvl.experiment` runner supersedes the old BGE
-text-retrieval/training commands. `workflows.py` remains unchanged for historical
-inspection except for the removed `finetune_embeddings` workflow. The
-`finetune-embeddings` CLI command is also removed; `internvl build-db` and
-`evaluate` fail with migration guidance. `embeddings.py` is inference-only Jina CLIP v2;
+text-retrieval/training commands. `workflows.py` and its legacy workflows have
+been deleted without a compatibility module. The
+`finetune-embeddings`, `internvl build-db`, and top-level `evaluate` CLI commands
+are also removed and produce ordinary argparse errors. Use `experiment index`
+and `experiment evaluate` for the current alternatives. `embeddings.py` is inference-only Jina CLIP v2;
 the historical BGE training/triplet implementation has been removed. References
 to that implementation below describe the retired workflow, not a supported API.
-Caption, description, merge, conversion, and download utilities remain available;
-the separate CLIP fine-tuning experiment and legacy image interfaces are unchanged.
+The caption, merge, conversion, and duplicate description CLI commands are removed.
+Description generation uses `experiment describe`; Ollama downloads remain in the CLI.
+The separate CLIP fine-tuning experiment and legacy image interfaces are unchanged.
 
 Use `python -m internvl experiment {describe,index,evaluate,run} --config_file
 cfg/classification.yml`. Parsing and YAML loading live in `internvl.cli`;
@@ -182,10 +184,13 @@ encoding tests patch `_load_backend()` to return a fake or synthetic encoder.
 Install the small CPU dependencies listed in README for these tests; retain
 explicit skips when absent.
 These tests do not establish real model, dataset, GPU, Ollama, remote-Qdrant, or HPC
-compatibility. The historical workflow limitations below remain relevant only to
+compatibility. The historical workflow limitations below describe the removed
 legacy source, and must not be attributed to the new experiment runner.
 
 ## InternVL text architecture and experiment pipeline (historical)
+
+The following describes the removed workflow. Its source remains in Git history;
+the standalone model and description backends remain in the repository.
 
 This is an independent whole-image classification experiment. It does not use
 YOLO or produce instance masks. YOLO is needed only by the separate image/crop
@@ -222,20 +227,22 @@ behavior.
 - `src/internvl/generate_descriptors.py` owns `DescriberLLM` and `FoodDescriptor`.
 - `src/internvl/embeddings.py` now owns inference-only multimodal embeddings; the
   former text training/triplet implementation is retired.
-- `src/internvl/workflows.py` owns the text workflows formerly mixed into `app.py`.
-  Functions receive configuration dictionaries; captioning also receives a
-  partition number. `src/internvl/cli.py` supplies command dispatch.
+- `src/internvl/cli.py` owns command dispatch and the Ollama download wrapper.
+  The former `src/internvl/workflows.py` module has been deleted.
 - Dataset wrappers, `database.vecdb`, and classification utilities remain shared.
 
-Use `internvl` or `python -m internvl` with `caption-images`,
-`generate-descriptions`,
-`merge-captions`, `convert-captions`, or `download_model MODEL_NAME`.
-The download command reads `cfg/experiment_config_internvl.yml` from the working
-directory without a config flag. Other model workflows take `--config_file`;
-captioning also takes `--partition`. The configuration is
-`cfg/experiment_config_internvl.yml`. The old text console commands and imports
-under `vlm`, `llm`, and `database.embedding` have no compatibility aliases.
-The image commands `build_clip_db`, `test_clip`, and `test_yolo` retain their names.
+Use `internvl download_model MODEL_NAME` or `python -m internvl download_model
+MODEL_NAME` for downloads. It reads `cfg/experiment_config_internvl.yml` from the
+working directory without a config flag. `caption-images`, `generate-descriptions`,
+`merge-captions`, and `convert-captions` are removed and produce argparse errors.
+Generate descriptions with `python -m internvl experiment describe --config_file
+cfg/classification.yml`: `embed_descriptions` controls generation, cached
+`output_dir/descriptions.json` is reused, and new descriptions are written there.
+No existing artifacts are migrated. The description Slurm script accepts an
+optional config path and defaults to `cfg/classification.yml`.
+The old text console commands and imports under `vlm`, `llm`, and
+`database.embedding` have no compatibility aliases. The image commands
+`build_clip_db`, `test_clip`, and `test_yolo` retain their names.
 
 Descriptor generation now probes Ollama readiness and, for unavailable
 endpoints, launches the configured binary directly with bounded polling.
@@ -271,7 +278,8 @@ implemented. Ollama JSON validation checks structure, and the supplied label
 overwrites the model's class field. The macaron query in database construction is
 only a demonstration, not an accuracy benchmark.
 
-The legacy workflow source preserves these defects; retired commands do not dispatch it:
+The deleted legacy workflows had these defects; this historical list does not
+describe the current experiment runner:
 
 - INI-style configuration lookups remain in several YAML-driven workflows.
 - Classification passes the anchor-file path as the embedding model name.

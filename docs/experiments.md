@@ -3,7 +3,11 @@
 These notes describe current behavior and limitations of the offline experiments.
 See the [README](../README.md) for setup, commands, and the module map.
 
-## Text retrieval workflow
+## Text retrieval workflow (removed)
+
+The `internvl.workflows` module and its caption, merge, conversion, and duplicate
+description commands have been removed. This section records their historical
+design; the standalone InternVL model remains available.
 
 Ollama receives known FoodX251 class names and attempts five generic visual
 descriptions per class. It receives no image pixels. The example configuration
@@ -24,7 +28,7 @@ per-object captioning after detection is not implemented.
 
 ## Configuration and artifacts
 
-Run from the repository root. Model workflows receive the YAML selected by
+Run from the repository root. Whole-image experiment commands receive the YAML selected by
 `--config_file`; `download_model MODEL_NAME` always reads
 `cfg/experiment_config_internvl.yml` from the working directory and accepts no
 configuration flag. It pulls the positional Ollama model with progress and does
@@ -37,23 +41,23 @@ and `request_timeout`. The executable path expands `~` and resolves relative to
 the working directory, without PATH discovery. No automatic installation occurs.
 See [Ollama setup](../README.md#ollama-setup).
 
-| Artifact | Producer and format |
-| --- | --- |
-| Configured `paths.dictionary` | `generate-descriptions`: JSON object mapping class labels to lists of descriptions. |
-| `assets/foodx251_captions_1.txt` through `_4.txt` | `caption-images`: CSV data despite the extension, with image index (`idx`), class, and caption fields. Each partition selects a quarter of the training table. |
-| `assets/foodx251_captions.txt` | `merge-captions`: combines the four fixed partition paths, retaining `idx`, `class`, and `caption`. |
-| `foodx251_captions.json` | `convert-captions`: reads the fixed merged path and writes a class-to-caption-list dictionary in the working directory. |
-| Configured Qdrant collection | `build-db`: intended destination for reference vectors, descriptions, and class labels; insertion currently needs repair. |
+Generate descriptions with `python -m internvl experiment describe --config_file
+cfg/classification.yml`. This stage follows `embed_descriptions`: when disabled,
+it returns without generating descriptions. When enabled, it reuses existing
+`output_dir/descriptions.json` or generates and saves that file with a top-level
+`descriptions` mapping from class labels to lists of descriptions.
+`scripts/generate_descriptions.sbatch` uses this command and configuration by
+default; its optional first argument selects another configuration.
 
-The generated-description and grouped-caption dictionaries share a format but
-have different provenance: one derives from class names, the other from labeled
-training images. Record which source an experiment uses. Conversion does not
-update `paths.dictionary`; select the resulting file explicitly. Preserve source
-images and annotations independently from derived captions, crops, and vectors.
+The removed commands were `generate-descriptions`, `caption-images`,
+`merge-captions`, and `convert-captions`. Existing description dictionaries and
+caption CSV files are not migrated. Class-name descriptions and captions of
+labeled training images have different provenance; preserve that distinction
+when using historical artifacts.
 
-## Evaluation
+## Historical text evaluation
 
-Text classification compares retrieved labels with FoodX251 validation labels.
+The removed text classification workflow compared retrieved labels with FoodX251 validation labels.
 The example configuration samples 1,000 images with seed 42 and reports top-1,
 top-5, and voting accuracy. Top-5 examines five description records, which can
 repeat classes. Voting selects the most common label among up to ten records.
@@ -69,7 +73,9 @@ Ollama response validation checks structure, and the supplied class replaces the
 model's class field. Neither establishes factual accuracy. The macaron query in
 database construction is a demonstration, not a benchmark.
 
-## Text workflow limitations
+## Historical text workflow limitations
+
+These defects describe the deleted workflow source, available in Git history.
 
 - `caption-images` and the retired `build-db` workflow use INI-style
   `cfg.get("Models", ...)` lookups against YAML dictionaries, resolving settings
