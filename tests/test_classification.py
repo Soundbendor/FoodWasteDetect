@@ -21,10 +21,9 @@ class Contracts(unittest.TestCase):
         for flags in itertools.product([False, True], repeat=3):
             cfg = dict(zip(('embed_images', 'embed_class_labels', 'embed_descriptions'), flags))
             if any(flags):
-                self.assertEqual(validate_config(cfg)['k'], 10)
+                self.assertEqual(validate_config(cfg), cfg)
             else:
                 with self.assertRaises(ValueError): validate_config(cfg)
-        with self.assertRaises(ValueError): validate_config({'embed_images': 'false'})
 
     def test_vote_and_denominator(self):
         self.assertEqual(classify([]), (None, 0))
@@ -38,10 +37,9 @@ class Contracts(unittest.TestCase):
         self.assertIsNone(result['per_class']['B']['recall'])
 
     def test_import_help_and_retirement(self):
-        result = run_python("forbidden = {'numpy','pandas','torch','transformers','PIL','yaml','ollama','qdrant_client'}\n" + IMPORT_GUARD + '''
+        result = run_python("forbidden = {'numpy','pandas','torch','transformers','PIL','yaml','ollama','qdrant_client','datasets'}\n" + IMPORT_GUARD + '''
 import internvl.experiment
 import internvl.embeddings
-import internvl.image_dataset
 import internvl.retrieval
 try:
     internvl.experiment.main(['--help'])
@@ -56,12 +54,63 @@ except SystemExit as e:
             self.assertIn('retired', stderr.getvalue())
 
 
-@unittest.skipUnless(available('numpy', 'PIL', 'pandas', 'tqdm'), 'requires CPU image/dataframe dependencies')
+@unittest.skipUnless(available('numpy', 'PIL', 'pandas', 'tqdm', 'datasets'), 'requires datasets and CPU image/dataframe dependencies')
 class DatasetAndEmbedding(unittest.TestCase):
+    def test_native_dataset_contract_without_legacy_imports(self):
+        import builtins
+        from datasets import DatasetDict, Image as HFImage
+        from PIL import Image
+        from internvl.image_dataset import FoodX251ImageDataset
+
+        original_import = builtins.__import__
+
+        def import_without_legacy(name, *args, **kwargs):
+            if name == 'data_wrappers' or name.startswith('data_wrappers.'):
+                raise AssertionError(f'Legacy dataset import: {name}')
+            return original_import(name, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'annot').mkdir()
+            (root / 'annot/class_list.txt').write_text('7 apple_PIE\n2 pear\n')
+            for split, filename, color in [
+                ('train', 'pear,one.png', 'green'),
+                ('train', 'pie.png', 'red'),
+                ('val', 'pie.png', 'blue'),
+            ]:
+                folder = root / split / f'{split}_set'
+                folder.mkdir(parents=True, exist_ok=True)
+                Image.new('RGB', (8, 4), color).save(folder / filename)
+            (root / 'annot/train_info.csv').write_text('"pear,one.png",2\npie.png,7\n')
+            (root / 'annot/val_info.csv').write_text('pie.png,7\n')
+            # No official test files are needed, and metadata loading does not decode.
+            with patch('builtins.__import__', side_effect=import_without_legacy), \
+                 patch('PIL.Image.open', side_effect=AssertionError('Eager image decode')):
+                ds = FoodX251ImageDataset(root)
+            self.assertIsInstance(ds.splits, DatasetDict)
+            self.assertEqual(set(ds.splits), {'train', 'validation'})
+            self.assertEqual(ds.get_class_list(), ['Apple pie', 'Pear'])
+            self.assertEqual(list(ds.train_set()['class']), ['Pear', 'Apple pie'])
+            self.assertEqual(ds.train_path, root / 'train/train_set')
+            self.assertEqual(ds.test_path, root / 'val/val_set')
+            self.assertEqual(str(ds.test_set().split), 'validation')
+            self.assertEqual(ds.train_set().features['image'], HFImage(decode=False))
+            batch = next(ds.iter_batches('validation', 2))
+            self.assertEqual(batch['source_split'], ['val'])
+            self.assertEqual(batch['image'][0].getpixel((0, 0)), (0, 0, 255))
+            batch['image'][0].close()
+            (root / 'annot/val_info.csv').write_text('')
+            empty = FoodX251ImageDataset(root)
+            self.assertEqual(len(empty.test_set()), 0)
+            self.assertEqual(empty.test_set().features, empty.train_set().features)
+            self.assertEqual(list(empty.iter_batches('val', 2)), [])
+            (root / 'annot/train_info.csv').write_text('pie.png,7\npie.png,7\n')
+            with self.assertRaisesRegex(ValueError, 'Duplicate source'):
+                FoodX251ImageDataset(root)
+
     def test_dataset_and_leakage(self):
         from PIL import Image
         from internvl.image_dataset import FoodX251ImageDataset
-        from data_wrappers.foodx251 import FoodX251
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'annot').mkdir()
@@ -72,14 +121,15 @@ class DatasetAndEmbedding(unittest.TestCase):
                 Image.new('RGB', (8, 4), color).save(folder / 'a.png')
                 (root / f'annot/{split}_info.csv').write_text('a.png,0\n')
             ds = FoodX251ImageDataset(root)
-            self.assertEqual(ds.test_set().iloc[0]['source_split'], 'val')
-            self.assertEqual(ds.train_set().iloc[0]['class'], 'Apple pie')
-            self.assertTrue(Path(ds.train_set().iloc[0]['fname']).is_absolute())
-            self.assertEqual(FoodX251(root).train_set().iloc[0]['fname'], 'a.png')
-            copied = ds.train_set(); copied.loc[0, 'class'] = 'mutated'
-            self.assertEqual(ds.train_set().iloc[0]['class'], 'Apple pie')
+            self.assertEqual(ds.test_set()[0]['source_split'], 'val')
+            self.assertEqual(ds.train_set()[0]['class'], 'Apple pie')
+            self.assertTrue(Path(ds.train_set()[0]['fname']).is_absolute())
+            copied = ds.train_set()[0]; copied['class'] = 'mutated'
+            self.assertEqual(ds.train_set()[0]['class'], 'Apple pie')
             (root / 'val/val_set/a.png').write_bytes((root / 'train/train_set/a.png').read_bytes())
-            with self.assertRaisesRegex(ValueError, 'content-hash'): FoodX251ImageDataset(root)
+            duplicate_content = FoodX251ImageDataset(root)
+            self.assertNotIn('sha256', duplicate_content.train_set().column_names)
+            self.assertNotIn('sha256', duplicate_content.test_set().column_names)
             (root / 'val/val_set/a.png').unlink()
             (root / 'val/val_set/a.png').symlink_to(root / 'train/train_set/a.png')
             with self.assertRaises(ValueError): FoodX251ImageDataset(root)
@@ -110,11 +160,12 @@ class DatasetAndEmbedding(unittest.TestCase):
             with self.assertRaises(ValueError): captured[0].getpixel((0, 0))
 
 
-@unittest.skipUnless(available('qdrant_client', 'numpy', 'pandas', 'PIL'), 'requires qdrant-client and CPU fixture dependencies')
+@unittest.skipUnless(available('qdrant_client', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, qdrant-client and CPU fixture dependencies')
 class ExperimentTests(unittest.TestCase):
     def setUp(self):
         import numpy as np
-        import pandas as pd
+        from datasets import Dataset, DatasetDict, Image as HFImage
+        from internvl.image_dataset import FoodX251ImageDataset
         from PIL import Image
         from qdrant_client import QdrantClient
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
@@ -123,18 +174,23 @@ class ExperimentTests(unittest.TestCase):
         rows = []
         for i, label in enumerate(['Apple', 'Pear']):
             path = self.root / f'{i}.png'; Image.new('RGB', (3, 4), (i*100, 0, 0)).save(path)
-            rows.append(dict(fname=str(path), source_id=str(i), source_split='train', sha256=str(i), **{'class': label}))
+            rows.append(dict(fname=str(path), source_id=str(i), source_split='train', **{'class': label}))
         self.rows = rows
-        self.dataset = SimpleNamespace(get_class_list=lambda: ['Apple', 'Pear'],
-            train_set=lambda: pd.DataFrame(rows), test_set=lambda: pd.DataFrame(rows))
+        self.dataset = FoodX251ImageDataset.__new__(FoodX251ImageDataset)
+        self.dataset.class_map = {0: 'Apple', 1: 'Pear'}
+        split = Dataset.from_list([dict(row, image=row['fname']) for row in rows]).cast_column('image', HFImage(decode=False))
+        self.dataset.splits = DatasetDict(train=split, validation=split)
+        self.captured_images = []
+        captured = self.captured_images
         class Embedder:
             dimension = 2
             metadata = {'dimension': 2, 'fixture': True}
             def __init__(self, **kwargs): pass
             def encode_text(self, texts):
                 return np.array([[1., 0.] if 'Apple' in x else [0., 1.] for x in texts])
-            def encode_images(self, paths):
-                return np.array([[1., 0.] if Path(x).stem == '0' else [0., 1.] for x in paths])
+            def encode_images(self, images):
+                captured.extend(images)
+                return np.array([[1., 0.] if image.getpixel((0, 0))[0] == 0 else [0., 1.] for image in images])
         class Describer:
             def __init__(self, config): pass
             def __enter__(self): return self
@@ -145,7 +201,8 @@ class ExperimentTests(unittest.TestCase):
     def experiment(self, flags=(False, True, False), name='run'):
         cfg = dict(zip(('embed_images','embed_class_labels','embed_descriptions'), flags))
         cfg.update(output_dir=str(self.root / name), embedding={'batch_size': 2},
-                   ollama={'llm':'fake'}, qdrant={'collection_prefix':'fixture'}, k=10)
+                   ollama={'llm':'fake'}, qdrant={'collection_prefix':'fixture'}, k=10,
+                   description_count=5)
         return Experiment(cfg, dataset=self.dataset, embedder_factory=self.Embedder,
                           describer_factory=self.Describer, client=self.client)
 
@@ -179,19 +236,33 @@ class ExperimentTests(unittest.TestCase):
             self.assertNotEqual(exp.index()['collection'], collection)
             self.assertEqual(exp.evaluate()['metrics']['evaluated'], 2)
 
-    def test_exclusions_and_incomplete(self):
-        exp = self.experiment((True, False, False))
-        Path(self.rows[1]['fname']).unlink()
-        with self.assertRaisesRegex(ValueError, 'Missing usable'): exp.index()
-        artifact = json.loads((exp.output/'index.json').read_text())
-        self.assertEqual(artifact['state'], 'incomplete')
-        self.assertEqual(len(artifact['exclusions']), 1)
-        exp = self.experiment(name='text')
-        report = exp.run()
-        self.assertEqual(report['metrics']['selected'], 2)
-        self.assertEqual(report['metrics']['evaluated'], 1)
-        self.assertEqual(report['metrics']['coverage'], .5)
-        self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
+    def assert_images_closed(self, images):
+        self.assertTrue(images)
+        for image in images:
+            with self.assertRaises(ValueError): image.getpixel((0, 0))
+
+    def test_missing_and_corrupt_images_abort(self):
+        for corrupt in [False, True]:
+            with self.subTest(corrupt=corrupt):
+                path = Path(self.rows[1]['fname'])
+                if corrupt:
+                    path.write_bytes(b'not an image')
+                else:
+                    path.unlink()
+                exp = self.experiment((True, False, False), f'bad-index-{corrupt}')
+                with self.assertRaises(OSError): exp.index()
+                artifact = json.loads((exp.output/'index.json').read_text())
+                self.assertEqual(artifact['state'], 'incomplete')
+                self.assertIn('error', artifact)
+                self.assertNotIn('exclusions', artifact)
+                exp = self.experiment(name=f'bad-eval-{corrupt}')
+                exp.index()
+                with self.assertRaises(OSError): exp.evaluate()
+                report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
+                self.assertEqual(report['state'], 'incomplete')
+                self.assertEqual(report['metrics']['selected'], 2)
+                self.assertEqual(report['metrics']['evaluated'], 0)
+                self.assertFalse(list(exp.output.glob('evaluation_*/exclusions.json')))
 
     def test_query_failure_and_empty_evaluation(self):
         exp = self.experiment(); exp.index()
@@ -199,7 +270,8 @@ class ExperimentTests(unittest.TestCase):
             with self.assertRaises(ConnectionError): exp.evaluate()
         report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
         self.assertEqual(report['state'], 'incomplete')
-        for row in self.rows: Path(row['fname']).unlink()
+        self.assert_images_closed(self.captured_images)
+        self.dataset.splits['validation'] = self.dataset.splits['validation'].select([])
         with self.assertRaisesRegex(ValueError, 'No evaluation'): exp.evaluate()
 
     def test_empty_generation_and_missing_collection(self):
@@ -211,32 +283,56 @@ class ExperimentTests(unittest.TestCase):
         self.client.delete_collection(exp.index()['collection'])
         with self.assertRaises(Exception): exp.evaluate()
 
-    def test_batch_failure_preserves_ids_and_empty_retrieval(self):
-        import numpy as np
+    def test_embedding_failure_aborts_without_retry(self):
+        for stage in ['index', 'evaluate']:
+            with self.subTest(stage=stage):
+                exp = self.experiment((True, False, False), stage)
+                if stage == 'evaluate': exp.index()
+                with patch.object(exp.embedder, 'encode_images', side_effect=ValueError('synthetic failure')) as encode:
+                    with self.assertRaisesRegex(ValueError, 'synthetic failure'):
+                        getattr(exp, stage)()
+                encode.assert_called_once()
+                self.assert_images_closed(encode.call_args.args[0])
+                path = exp.output/'index.json' if stage == 'index' else next(exp.output.glob('evaluation_*/report.json'))
+                report = json.loads(path.read_text())
+                self.assertEqual(report['state'], 'incomplete')
+                if stage == 'evaluate':
+                    self.assertEqual(report['metrics']['available'], 2)
+                    self.assertEqual(report['metrics']['successfully_embedded'], 0)
+
+    def test_empty_retrieval(self):
         exp = self.experiment(); exp.index()
-        def encode(paths):
-            if len(paths) > 1 or Path(paths[0]).stem == '0':
-                raise ValueError('synthetic failure')
-            return np.array([[0., 1.]])
-        with patch.object(exp.embedder, 'encode_images', side_effect=encode):
-            report = exp.evaluate()
-        self.assertEqual(report['metrics']['available'], 2)
-        self.assertEqual(report['metrics']['evaluated'], 1)
-        self.assertEqual(report['predictions'][0]['source_id'], '1')
-        self.assertEqual(len(report['exclusions']), 1)
         with patch('internvl.retrieval.QdrantIndex.query', return_value=[]):
             report = exp.evaluate()
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 0)
         self.assertTrue(all(p['prediction'] is None for p in report['predictions']))
+        self.assert_images_closed(self.captured_images)
 
-    def test_skip_training_image_with_class_coverage(self):
-        import pandas as pd
-        missing = dict(self.rows[0], source_id='missing', fname=str(self.root/'missing.png'))
-        self.dataset.train_set = lambda: pd.DataFrame(self.rows + [missing])
-        exp = self.experiment((True, True, False))
-        artifact = exp.index()
-        self.assertEqual(sum(artifact['source_counts'].values()), 4)
-        self.assertEqual(len(artifact['exclusions']), 1)
+    def test_batch_order_partial_batch_and_payloads(self):
+        from datasets import concatenate_datasets
+        self.dataset.splits['validation'] = concatenate_datasets([self.dataset.splits['validation'], self.dataset.splits['validation'].select([0])])
+        batches = list(self.dataset.iter_batches('val', 2))
+        self.assertEqual([len(b['image']) for b in batches], [2, 1])
+        self.assertEqual([sid for b in batches for sid in b['source_id']], ['0', '1', '0'])
+        for batch in batches:
+            for source_id, image in zip(batch['source_id'], batch['image']):
+                self.assertEqual(image.size, (3, 4))
+                self.assertEqual(image.getpixel((0, 0))[0], int(source_id) * 100)
+                image.close()
+        exp = self.experiment((True, False, False))
+        references = exp.references()
+        with patch.object(exp, 'references', return_value=references):
+            artifact = exp.index()
+        stored = self.client.retrieve(artifact['collection'], ids=[r.id for r in references], with_vectors=True)
+        for point in stored:
+            record = next(r for r in references if r.id == str(point.id))
+            self.assertEqual(point.payload, record.to_payload())
+            self.assertEqual(point.vector, [1., 0.] if record.label == 'Apple' else [0., 1.])
+        report = exp.evaluate()
+        self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1', '0'])
+        self.assertEqual(report['metrics']['coverage'], 1)
+        self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
+        self.assert_images_closed(self.captured_images)
 
     def test_disabled_description_and_ollama_closes_before_embedder(self):
         events = []

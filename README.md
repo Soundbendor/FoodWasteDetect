@@ -116,7 +116,7 @@ sources (including `jinaai/jina-embeddings-v3` and
 `jinaai/xlm-roberta-flash-implementation`) in a separately authorized setup step.
 No model download is performed by the runner. Runtime packages include PyTorch,
 Transformers, huggingface-hub, einops, timm, Pillow, NumPy, pandas, tqdm,
-qdrant-client, PyYAML, and Ollama's Python client. Real-model compatibility still
+datasets, qdrant-client, PyYAML, and Ollama's Python client. Real-model compatibility still
 requires a separately authorized run; fixture tests do not validate it.
 See the [Jina model card](https://huggingface.co/jinaai/jina-clip-v2) for the
 upstream text/image API.
@@ -126,8 +126,8 @@ Artifacts in the output directory:
 - `descriptions.json`: generated description dictionary. Existing
   descriptions are loaded directly; remove this file to generate them again.
 - `index.json`: latest collection name, model settings, reference-source counts,
-  exclusions, configuration, and run status.
-- `evaluation_<UUID>/`: predictions, metrics, exclusions, and a report containing
+  configuration and run status.
+- `evaluation_<UUID>/`: predictions, metrics, and a report containing
   the source manifest, retrieval settings, and source counts.
 
 Artifact validation is deferred. There are no hashes, compatibility checks,
@@ -135,18 +135,30 @@ manifest comparisons, or collection-content verification. Each `index` invocatio
 (including through `run`) builds a fresh collection and replaces `index.json`;
 previous collections are left intact. `evaluate` directly uses the collection
 named in that file. Status fields report outcomes but do not gate artifact loading.
-Missing/unreadable/unembeddable training images are logged and excluded; every
-class still needs an image reference when that source is enabled. Generated
-descriptions must be nonempty.
+The independent FoodX251 adapter reads `annot/class_list.txt`,
+`annot/train_info.csv`, and `annot/val_info.csv` directly. It exposes a Hugging Face
+`DatasetDict` as `splits`, with `train` and `validation` keys and explicit column
+types. Class IDs map to the existing naturalized class names. It does not import
+the legacy dataset adapter. Pandas reads the annotations, and
+`Dataset.from_pandas()` converts the resulting tables. `train_path` points to
+`train/train_set`; `val_path` and the evaluation-facing `test_path` point to
+`val/val_set`. `test_set()` returns labeled validation data, never the unlabeled
+official test split. Its `iter_batches()` uses
+`Dataset.iter()` to load images in annotation order, including the final partial
+batch. Images are decoded once per pass and passed directly to the embedder.
+Missing, unreadable, or unembeddable images stop the run without retries or
+exclusions. Stage failures save incomplete outputs and propagate the error.
+Every class needs a training image reference when that source is enabled.
+Generated descriptions must be nonempty.
 
 Votes tie-break by best individual similarity, then class name. `vote_fraction`
 is winning votes / actual returned neighbors, not calibrated confidence. Empty
-results abstain and count as incorrect. Primary accuracy uses successfully embedded
-evaluation images: 63 correct out of 90 embedded from 100 selected is 70%, with
-90% coverage. Reports also retain selected/available/embedded/evaluated counts,
-all exclusions, per-class support/correct/recall, and nearest-neighbor accuracy.
-There is no top-five metric. Qdrant failures abort and save incomplete outputs;
-zero embedded evaluation images produce undefined accuracy and fail the run.
+results abstain and count as incorrect. Completed evaluations use the entire
+validation split and have 100% coverage. Reports retain selected, available,
+embedded, and evaluated counts, per-class support/correct/recall, and
+nearest-neighbor accuracy. Incomplete reports retain counts for completed work;
+they do not establish full-dataset accuracy. There is no top-five metric.
+Qdrant failures also abort; an empty evaluation split fails with undefined accuracy.
 
 The old `internvl build-db` and `evaluate` commands exit with migration guidance.
 The `finetune-embeddings` command and its workflow have been removed, along with
@@ -191,8 +203,16 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 Artifact and dataset checks need NumPy, pandas, Pillow, tqdm, and PyYAML;
-new index tests additionally need qdrant-client (tested with 1.19.1);
-missing dependencies produce skips. Tests use synthetic fixtures and mocked
+whole-image tests additionally need datasets and qdrant-client;
+missing dependencies produce skips. Install the CPU test dependencies with:
+
+```sh
+python -m pip install numpy 'pandas<3' Pillow tqdm PyYAML datasets qdrant-client
+```
+
+The pandas upper bound supports the separate legacy adapter; the whole-image
+loader no longer uses its pandas reader.
+Tests use synthetic fixtures and mocked
 backends, without starting models or services; they do not establish model
 accuracy or real-model/remote-Qdrant/GPU/HPC integration. New tests use an
 in-memory Qdrant client, not a live service.

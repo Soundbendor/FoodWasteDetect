@@ -83,7 +83,7 @@ without InternVL captioning or YOLO. Its three reference booleans select any
 nonempty combination of class names, generated descriptions, and training images.
 Use all official FoodX251 training references and labeled validation images for
 evaluation, recording `source_split="val"`; never claim official test accuracy.
-The composed dataset adapter rejects path/hash leakage and preserves legacy names.
+The composed dataset adapter rejects resolved-path overlap and preserves legacy names.
 
 Full 1024-dimensional normalized Jina embeddings use checkpoint preprocessing
 and an explicit device. By user choice, this whole-image experiment does not
@@ -91,9 +91,10 @@ configure or track model/code revisions, including nested text-encoder revisions
 it uses default cached versions. Loading is
 local-cache-only. Do not download weights or start real services for checks.
 Every selected record contributes one vote; ties use best similarity then class
-name. Accuracy is over successfully embedded evaluation images, with explicit
-coverage/exclusions and per-class metrics. Empty retrieval abstains; infrastructure
-errors fail the run with incomplete outputs. There is no top-five metric.
+name. Completed evaluations cover the full validation split, with explicit counts,
+coverage, and per-class metrics. Empty retrieval abstains. Image-loading, embedding,
+and infrastructure errors fail the run without retries or exclusions; stage
+failures save incomplete outputs. There is no top-five metric.
 
 Git revision, dependency-version, and timestamp provenance tracking has been
 removed from the whole-image runner by user request.
@@ -101,16 +102,29 @@ Artifact validation is explicitly deferred by user request. Do not add hashes,
 compatibility checks, manifest comparisons, or collection-content verification.
 Existing descriptions load directly. Each index invocation builds a fresh uniquely
 named collection and replaces index.json with its collection name, source counts,
-model settings, exclusions, and status. Evaluation reads that file directly;
+model settings and status. Evaluation reads that file directly;
 status is reporting only, not a load gate. Historical collections and raw data
 are not overwritten. Every class requires a usable image reference when image
 references are enabled. Evaluation embeddings are recomputed for each run.
+`FoodX251ImageDataset` reads the local class list and split CSV annotations
+with pandas, independently of `data_wrappers.foodx251`. It builds an explicitly
+typed Hugging Face `DatasetDict` (`splits['train']`, `splits['validation']`) and exposes these
+through `train_set()` and `test_set()`. Class ID mapping and naturalized names
+remain compatible. `train_path` points to the training images; `val_path` and
+`test_path` point to labeled validation images. No official test files are read.
+`iter_batches(split, batch_size)` accepts `train`, `val`, or `validation`, enables
+image decoding, and uses `Dataset.iter()` with the final partial batch retained.
+Metadata access leaves images undecoded. The experiment embeds decoded PIL images
+and closes them after each batch. Resolved-path checks remain. Image-content hashing and SHA-256 metadata were
+removed by user request; do not restore them. Image files are read when batches
+are decoded, and loading failures propagate. No exclusion artifacts are written by new runs.
 Compare complete retrieval strategies, because changing reference sources also
 changes reference counts. No tuning or subsampling occurs.
 
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
-FoodX251 fixtures, and qdrant-client's in-memory backend. Install the small CPU
-dependencies listed in README for these tests; retain explicit skips when absent.
+FoodX251 fixtures, Hugging Face datasets, and qdrant-client's in-memory backend.
+Install the small CPU dependencies listed in README for these tests; retain
+explicit skips when absent.
 These tests do not establish real model, dataset, GPU, Ollama, remote-Qdrant, or HPC
 compatibility. The historical workflow limitations below remain relevant only to
 legacy source, and must not be attributed to the new experiment runner.
@@ -156,9 +170,6 @@ behavior.
   Functions receive configuration dictionaries; captioning also receives a
   partition number. `src/internvl/cli.py` supplies command dispatch.
 - Dataset wrappers, `database.vecdb`, and classification utilities remain shared.
-  Do not import the image orchestration or CLIP wrapper into the text workflows.
-  Keep YOLO imports inside shared crop/detection methods and the optional
-  cross-encoder import inside reranker construction.
 
 Use `internvl` or `python -m internvl` with `caption-images`,
 `generate-descriptions`,
@@ -170,9 +181,7 @@ captioning also takes `--partition`. The configuration is
 under `vlm`, `llm`, and `database.embedding` have no compatibility aliases.
 The image commands `build_clip_db`, `test_clip`, and `test_yolo` retain their names.
 
-Package import and CLI help must not load models, open datasets, start subprocesses,
-or contact services. Concrete backend modules are imported by the selected
-workflow. Descriptor generation now probes Ollama readiness and, for unavailable
+Descriptor generation now probes Ollama readiness and, for unavailable
 endpoints, launches the configured binary directly with bounded polling.
 Its context manager cleans up only the server it started, including on startup
 failure. The constructor receives `cfg["ollama"]`, requiring `llm`, `binary_path`, `host`,
@@ -323,8 +332,8 @@ inferring architecture from function names.
 
 ## Implementation and evaluation rules
 
-- Prefer import-safe package boundaries, typed model adapters, and small
-  CPU-testable units. Construct model and database clients explicitly; avoid new
+- Prefer typed model adapters and small CPU-testable units.
+  Construct model and database clients explicitly; avoid new
   script-level downloads, inference, service startup, or file mutations.
 - Make paths, model revisions/checksums, taxonomy versions, dataset splits, seeds,
   and artifact metadata explicit before extending experiments. Record the code
