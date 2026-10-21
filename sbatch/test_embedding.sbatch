@@ -7,10 +7,11 @@
 #SBATCH --mem=40G
 #SBATCH --gres=gpu:1
 #SBATCH --export=ALL
-#SBATCH --output=/nfs/guille/eecs_research/soundbendor/beerya/intern-fw/logs/%j.out
-#SBATCH --error=/nfs/guille/eecs_research/soundbendor/beerya/intern-fw/logs/%j.err
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
 
-module load cuda/12.4
-source /nfs/guille/eecs_research/soundbendor/beerya/miniforge3/bin/activate
-source activate intern-fw
-internvl evaluate --config_file cfg/experiment_config_internvl.yml
+# Prepare cu126 and model caches before submitting from the repository root.
+set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the repository root}"
+exec pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl experiment evaluate \
+  --config_file "${1:-cfg/classification.yml}"

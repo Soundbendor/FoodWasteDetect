@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Sequence
@@ -90,7 +91,15 @@ class DescriberLLM:
             raise ValueError(
                 f"ollama.binary_path must be a nonempty string. {guidance}"
             )
-        path = Path(self.binary_path).expanduser().resolve()
+        binary = self.binary_path
+        if "/" not in binary and not binary.startswith("~"):
+            resolved = shutil.which(binary)
+            if resolved is None:
+                raise FileNotFoundError(
+                    f"ollama.binary_path executable not found on PATH: {binary}. {guidance}"
+                )
+            binary = resolved
+        path = Path(binary).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(f"Ollama executable not found: {path}. {guidance}")
         if not path.is_file():

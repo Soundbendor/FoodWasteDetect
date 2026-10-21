@@ -5,8 +5,9 @@
 #SBATCH -t 1-00:00:00
 #SBATCH -c 2
 #SBATCH --mem=20G
-#SBATCH --gres=gpu:1
 #SBATCH --export=ALL
 
-module load gcc
-./deps/qdrant/qdrant
+# Prepare the default Pixi environment before submitting from the repository root.
+set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the repository root}"
+exec pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default qdrant

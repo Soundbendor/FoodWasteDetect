@@ -164,11 +164,24 @@ class DescriptorLifecycleTests(unittest.TestCase):
     def test_relative_and_home_paths_resolve(self):
         # Use a mocked cwd rather than changing the process-wide working directory.
         with patch.object(self.module.os, 'getcwd', return_value=str(self.directory)):
-            self.llm.binary_path = 'ollama'
+            self.llm.binary_path = './ollama'
             self.assertEqual(self.llm._validate_binary(), str(self.binary))
         with patch.dict(self.module.os.environ, {'HOME': str(self.directory)}):
             self.llm.binary_path = '~/ollama'
             self.assertEqual(self.llm._validate_binary(), str(self.binary))
+
+    def test_bare_executable_resolves_on_path(self):
+        with patch.dict(self.module.os.environ, {'PATH': str(self.directory)}):
+            self.llm.binary_path = 'ollama'
+            self.assertEqual(self.llm._validate_binary(), str(self.binary))
+
+    def test_missing_path_executable_fails_before_network_or_launch(self):
+        with patch.dict(self.module.os.environ, {'PATH': ''}):
+            self.llm.binary_path = 'missing-ollama'
+            with self.assertRaisesRegex(FileNotFoundError, 'not found on PATH'):
+                self.llm.start_server()
+        self.get.assert_not_called()
+        self.popen.assert_not_called()
 
     def test_launch_errors_include_guidance_and_preserve_cause(self):
         self.get.side_effect = ConnectError()

@@ -11,7 +11,7 @@ embedding:
   batch_size: 32
 ollama:
   llm: gemma3:27b
-  binary_path: deps/ollama/bin/ollama
+  binary_path: ollama
   host: http://127.0.0.1:11434
   startup_timeout: 120
   request_timeout: 600

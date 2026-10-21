@@ -16,31 +16,33 @@ image-retrieval experiments:
 
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and run
+Install [Pixi](https://pixi.prefix.dev/latest/installation/) 0.81.0 or newer and run
 all commands from the repository root.
 
 ### Install the environment
 
+These environments support Linux x86-64 with glibc 2.28 or newer. Pixi installs
+Python, the application dependencies, Ollama, and Qdrant.
+
 ```sh
-uv python install 3.13.13
-uv sync --project src/internvl --locked --extra cpu --managed-python
-uv run --project src/internvl --locked --extra cpu internvl --help
+pixi install --manifest-path src/internvl/pyproject.toml --locked -e default
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e default internvl --help
 ```
 
-For GPU experiments, use `--extra cu126` in both sync and run commands to
-install CUDA-specific dependencies. Check that PyTorch can access the GPU with:
+For GPU experiments, install the separate `cu126` environment:
 
 ```sh
-uv sync --project src/internvl --locked --extra cu126 --managed-python
-uv run --project src/internvl --locked --extra cu126 python -c \
+pixi install --manifest-path src/internvl/pyproject.toml --locked -e cu126
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 python -c \
   "import torch; print(torch.__version__); print('CUDA available:', torch.cuda.is_available())"
 ```
 
-The profiles pin PyTorch 2.7.1 and torchvision 0.22.1 with Python 3.13.13. The
-CUDA 12.6 profile targets V100 compatibility; run the
+The GPU environment uses PyTorch with CUDA 12.6 and Ollama with CUDA 12.9.
+Use a CUDA 12.9-compatible NVIDIA driver, such as 580.178.04. Run the
 [V100 kernel check](src/internvl/README.md#v100-kernel-check) inside your
-allocation. The [environment guide](src/internvl/README.md) covers dependencies
-and checks.
+allocation. Prepare environments on a node with internet access before submitting
+jobs; use `pixi run --as-is` in jobs to avoid installing dependencies there.
+The [environment guide](src/internvl/README.md) lists development commands.
 
 ### Configure the dataset and services
 
@@ -67,7 +69,7 @@ Update these settings in your copied YAML:
 | -------------------------- | ---------------------------------------------------------- |
 | `embedding.device`         | `cuda` for GPU execution, or `cpu`                         |
 | `embedding.batch_size`     | Start with 32; reduce based on available VRAM              |
-| `ollama.binary_path`       | Absolute path to the installed Ollama executable           |
+| `ollama.binary_path`       | `ollama` to use the Pixi executable           |
 | `ollama.host`              | An unused local endpoint, such as `http://127.0.0.1:11434` |
 | `qdrant.connection.url`    | Running Qdrant service reachable from the compute node     |
 | `qdrant.collection_prefix` | The exact Qdrant collection name                           |
@@ -87,41 +89,27 @@ separate Qdrant collection and output directory for each experiment.
 
 ### Qdrant setup
 
-Qdrant is a vector database that stores reference embeddings and retrieves
-similar examples for classification. See the
-[Qdrant installation guide on GitHub](https://github.com/qdrant/qdrant#client-server).
-Create a persistent storage directory, then choose Docker or Singularity:
+Start the bundled Qdrant server inside an approved allocation:
 
 ```sh
-mkdir -p qdrant_storage
+pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default qdrant
 ```
 
-With Docker:
+Keep it running during indexing and evaluation. It listens on `127.0.0.1:6333`
+and stores data under `assets/qdrant/1.19.0/`. To use another location or port,
+set `QDRANT__STORAGE__STORAGE_PATH`, `QDRANT__STORAGE__SNAPSHOTS_PATH`, and
+`QDRANT__SERVICE__HTTP_PORT` before starting it. For access from other nodes,
+set `QDRANT__SERVICE__HOST` to a cluster-reachable interface and follow your
+cluster's access rules.
 
-```sh
-docker run --rm -p 6333:6333 \
-  -v "$(pwd)/qdrant_storage:/qdrant/storage" qdrant/qdrant:v1.12.0
-```
-
-On HPC, pull the Singularity image on a node with internet access, then run it
-inside an approved allocation. Replace `{PORT}` with an available port, such as
-6333:
-
-```sh
-singularity pull qdrant.sif docker://qdrant/qdrant:v1.12.0
-singularity exec \
-  --bind "$(pwd)/qdrant_storage:/qdrant/storage" \
-  --env QDRANT__SERVICE__HTTP_PORT={PORT} qdrant.sif /qdrant/qdrant
-```
-
-Keep the service running during indexing and evaluation. Set
-`qdrant.connection.url` to `http://<service-node>:<port>`; use `localhost` only
-when Qdrant and the experiment run on the same node. These container commands
-have not been verified against the project's locked client.
+Set `qdrant.connection.url` to `http://<service-node>:<port>`; use `localhost`
+only when the experiment runs on the same node. Use a fresh storage directory;
+see [existing database upgrades](docs/experiments.md#pixi-environment-maintenance)
+before reusing an older database.
 
 ### Ollama setup
 
-Install the [Ollama executable](https://docs.ollama.com/linux) separately.
+Pixi includes the Ollama executable. Keep `ollama.binary_path: ollama` in your YAML.
 Choose persistent storage paths for your model cache, and export these variables
 in each job (replace the example paths):
 
@@ -135,7 +123,7 @@ Set the Ollama binary and host in both your experiment YAML and
 latter and has no configuration flag. Then download the configured model:
 
 ```sh
-uv run --project src/internvl --locked --extra cu126 internvl download_model gemma3:27b
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl download_model gemma3:27b
 ```
 
 Do not start Ollama manually: the download and description commands start and
@@ -144,7 +132,7 @@ If compute nodes lack internet, populate its cache beforehand on a permitted
 node, using the same `HF_HOME` available to the job:
 
 ```sh
-uv run --project src/internvl --locked --extra cu126 python -c \
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 python -c \
   "from internvl.embeddings import EmbeddingModel; EmbeddingModel('jinaai/jina-clip-v2', device='cpu')"
 ```
 
@@ -155,13 +143,13 @@ The temporary smoke test deletes its downloads and does not prepare this cache.
 Inside your allocation, run each stage separately to check setup:
 
 ```sh
-uv run --project src/internvl --locked --extra cu126 internvl experiment describe --config_file cfg/classification_hpc.yml
-uv run --project src/internvl --locked --extra cu126 internvl experiment index --config_file cfg/classification_hpc.yml
-uv run --project src/internvl --locked --extra cu126 internvl experiment evaluate --config_file cfg/classification_hpc.yml
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl experiment describe --config_file cfg/classification_hpc.yml
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl experiment index --config_file cfg/classification_hpc.yml
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl experiment evaluate --config_file cfg/classification_hpc.yml
 ```
 
 Use `experiment run` to execute all three stages in one command. For CPU runs,
-use `--extra cpu` throughout and set `embedding.device: cpu`.
+use `-e default` throughout and set `embedding.device: cpu`.
 
 `describe` skips generation when `embed_descriptions` is disabled and reuses
 `output_dir/descriptions.json` when it exists. Remove that file to generate new
@@ -213,7 +201,7 @@ You can run the unit test suite locally, without downloading CUDA dependencies
 with the following command:
 
 ```sh
-uv run --project src/internvl --locked --extra cpu pytest -c src/internvl/pyproject.toml
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e default test
 ```
 
 Routine checks use synthetic inputs, mocked model and Ollama backends, and
@@ -221,7 +209,7 @@ in-memory Qdrant. They do not establish model accuracy or GPU/HPC compatibility.
 
 ## Further reading
 
-- [Environment guide](src/internvl/README.md): dependency details, linting, type
+- [Environment guide](src/internvl/README.md): installation, linting, type
   checks, and explicit model and GPU checks.
 - [Image-workflow limitations](docs/experiments.md#image-workflow-limitations):
   current status of the YOLO/CLIP experiments and legacy commands.

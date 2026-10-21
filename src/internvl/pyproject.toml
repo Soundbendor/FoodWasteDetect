@@ -29,40 +29,12 @@ dependencies = [
 [project.scripts]
 internvl = "internvl.cli:main"
 
-[project.optional-dependencies]
-cpu = [
-    "torch==2.7.1",
-    "torchvision==0.22.1",
-]
-cu126 = [
-    "torch==2.7.1",
-    "torchvision==0.22.1",
-]
-
 [tool.setuptools]
 packages = ["internvl", "internvl.scripts"]
 package-dir = {internvl = "."}
 
 [tool.setuptools.package-data]
 internvl = ["scripts/*.sh"]
-
-[tool.uv]
-conflicts = [[{extra = "cpu"}, {extra = "cu126"}]]
-default-groups = ["dev", "test"]
-
-[tool.uv.sources]
-torch = [{index = "pytorch-cpu", extra = "cpu"}, {index = "pytorch-cu126", extra = "cu126"}]
-torchvision = [{index = "pytorch-cpu", extra = "cpu"}, {index = "pytorch-cu126", extra = "cu126"}]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
 
 [tool.ruff]
 line-length = 100
@@ -91,3 +63,62 @@ test = [
     "pytest",
     "pytest-cov",
 ]
+
+[tool.pixi.workspace]
+channels = ["conda-forge", "anaconda"]
+channel-priority = "strict"
+requires-pixi = ">=0.81.0"
+platforms = [
+    {name = "linux-64-cpu", platform = "linux-64", glibc = "2.28"},
+    {name = "linux-64-cu126", platform = "linux-64", glibc = "2.28", cuda = "12.9"},
+]
+
+[tool.pixi.workspace.conda-pypi-map]
+conda-forge = {mapping-mode = "overlay", mapping = {ollama = false}}
+
+[tool.pixi.dependencies]
+python = {version = "==3.13.13", build = "*_cp313"}
+qdrant = {version = "==1.19.0", channel = "anaconda"}
+
+[tool.pixi.pypi-dependencies]
+foodwaste-internvl = {path = ".", editable = true}
+transformers = "==4.57.6"
+sentence-transformers = "==5.7.0"
+datasets = "==4.8.5"
+build = "*"
+setuptools = ">=77"
+wheel = "*"
+
+[tool.pixi.feature.cpu]
+platforms = ["linux-64-cpu"]
+
+[tool.pixi.feature.cpu.dependencies]
+ollama = {version = "==0.9.6", build = "cpu_hba3e463_4"}
+
+[tool.pixi.feature.cpu.pypi-dependencies]
+torch = {version = "==2.7.1", index = "https://download.pytorch.org/whl/cpu"}
+torchvision = {version = "==0.22.1", index = "https://download.pytorch.org/whl/cpu"}
+
+[tool.pixi.feature.cu126]
+platforms = ["linux-64-cu126"]
+
+[tool.pixi.feature.cu126.dependencies]
+ollama = {version = "==0.9.6", build = "cuda_129h63bc95c_4"}
+# Ollama bundles CUDA 12.9; the cu126 environment name refers to PyTorch.
+cuda-version = "==12.9"
+
+[tool.pixi.feature.cu126.pypi-dependencies]
+torch = {version = "==2.7.1", index = "https://download.pytorch.org/whl/cu126"}
+torchvision = {version = "==0.22.1", index = "https://download.pytorch.org/whl/cu126"}
+
+[tool.pixi.environments]
+default = {features = ["cpu", "dev", "test"], solve-group = "cpu"}
+cu126 = {features = ["cu126", "dev", "test"], solve-group = "cu126"}
+
+[tool.pixi.tasks]
+internvl = {cmd = "python -m internvl", cwd = "../.."}
+test = {cmd = "pytest -c src/internvl/pyproject.toml", cwd = "../..", env = {CUDA_VISIBLE_DEVICES = "", HF_HUB_OFFLINE = "1"}}
+lint = {cmd = "ruff check src/internvl", cwd = "../.."}
+typecheck = {cmd = "ty check --project src/internvl", cwd = "../.."}
+build = {cmd = "python -m build --no-isolation src/internvl --outdir src/internvl/dist", cwd = "../.."}
+qdrant = {cmd = "bash scripts/start_qdrant.sh", cwd = "../.."}

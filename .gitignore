@@ -13,3 +13,5 @@ coverage.xml
 .pytest_cache/
 .ruff_cache/
 .ty_cache/
+
+.pixi/

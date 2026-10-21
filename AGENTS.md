@@ -28,7 +28,9 @@ Keep commits and pull requests local to this repository.
 
 Keep the root README focused on installation, configuration, usage, and a brief
 experiment overview. Record implementation contracts and developer constraints
-in this guide, and detailed environment checks in `src/internvl/README.md`.
+in this guide, and detailed environment checks in `docs/experiments.md`. Keep both READMEs
+focused on installation and running commands. Use create-readme and
+humanizer:humanizer for README updates; preserve verified commands in the prose pass.
 
 ## Data and compute boundaries
 
@@ -263,7 +265,8 @@ failure. The constructor receives `cfg["ollama"]`, requiring `llm`, `binary_path
 Existing Ollama endpoints are rejected with an error naming the full host;
 servers not started by this instance are never stopped. Before probing or launching,
 startup validates `ollama.binary_path` as an executable file, expands `~`, and
-resolves relative paths against the working directory without PATH discovery.
+resolves explicit relative paths against the working directory. Bare executable
+names resolve through PATH, allowing `ollama.binary_path: ollama` under Pixi.
 Missing/invalid installations and OS launch errors point to README.md: Ollama setup.
 No automatic binary or model installation is performed.
 Do not invoke real server startup as part of a smoke test.
@@ -475,15 +478,20 @@ stubbed components alone.
 
 ## Standalone internvl environment
 
-`src/internvl/pyproject.toml` and its committed `uv.lock` own the `internvl`
+`src/internvl/pyproject.toml` and its committed `pixi.lock` own the `internvl`
 package and console command; root package discovery excludes it. Use standard
-CPython 3.13.13 and select `--extra cpu` or `--extra cu126` consistently with
-`uv sync/run --project src/internvl --locked`. The legacy description method and
+CPython 3.13.13 and select `-e default` or `-e cu126` with
+`pixi install/run --manifest-path src/internvl/pyproject.toml --locked`.
+The environments are separate Linux x86-64 solve groups. They include native
+Ollama 0.9.6 (CPU or the pinned CUDA 12.9 build) and Qdrant 1.19.0.
+The Ollama SDK remains a separate PyPI dependency. Slurm scripts use `--as-is`
+and require the environment to be prepared before submission. The legacy description method and
 its `ClassDataset` protocol have been removed. See `src/internvl/README.md`
 for installation, Ruff, scoped ty checks, and pytest coverage commands.
 `internvl.scripts.smoke_jina` is an explicit real-model download check with
 temporary subprocess caches; it is never part of routine synthetic tests.
-The user authorized running it for both profiles during this environment setup.
+The user previously authorized running it during the uv environment setup;
+the Pixi migration uses synthetic checks without new model downloads.
 
 Real-model acceptance required Transformers `<5` (resolved 4.57.6), Sentence
 Transformers `>=5.4,<6` (5.7.0), and datasets `<5` (4.8.5). The initially proposed
@@ -496,11 +504,21 @@ CUDA execution and external services were not tested.
 The V100 compatibility migration pins both profiles to PyTorch 2.7.1 and
 torchvision 0.22.1 with Python >=3.13,<3.14. The GPU profile uses the explicit
 CUDA 12.6 index: PyTorch 2.11 CUDA 12.8 binaries dropped Volta support.
-Keep the CPU and CUDA extras mutually exclusive and select an extra on every
-sync/run. See the environment README for the manual V100 kernel check; routine
+Keep CPU and CUDA features in separate environments and select one on every
+install/run. See `docs/experiments.md` for the manual V100 kernel check; routine
 verification remains synthetic and CPU-only.
-Both current profiles installed and passed 79 synthetic tests with one existing
+Before Pixi, both uv profiles installed and passed 79 synthetic tests with one existing
 skip and 93% coverage on Python 3.13.13; the CUDA profile ran with GPUs hidden.
 Ruff, scoped ty, and CPU CLI help passed. Imports confirmed the pinned versions
 and the CUDA binary includes sm_70. No real-model or GPU execution was performed
 for this migration; historical real-model acceptance does not transfer to it.
+
+Pixi migration checks: both environments passed 81 synthetic tests, one existing
+skip, and 93% coverage, plus lint, scoped ty, CLI help, and builds. Repeated locked
+installation left the lockfile unchanged. Ollama uses the corrected CUDA 12.9
+build `cuda_129h63bc95c_4`; the originally selected CUDA 12.6 artifact lacked
+backend libraries. The target cluster driver is 580.178.04, which supports CUDA
+12.9. PyTorch remains on CUDA 12.6, so the environment name is still `cu126`.
+See `docs/experiments.md` for verification. Do not claim GPU Ollama acceptance
+from package inspection or synthetic tests. No live services, model downloads,
+or GPU kernels were run.
