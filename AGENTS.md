@@ -467,7 +467,7 @@ stubbed components alone.
 
 `src/internvl/pyproject.toml` and its committed `uv.lock` own the `internvl`
 package and console command; root package discovery excludes it. Use standard
-CPython 3.14.8 and select `--extra cpu` or `--extra cu128` consistently with
+CPython 3.13.13 and select `--extra cpu` or `--extra cu126` consistently with
 `uv sync/run --project src/internvl --locked`. The legacy description method and
 its `ClassDataset` protocol have been removed. See `src/internvl/README.md`
 for installation, Ruff, scoped ty checks, and pytest coverage commands.
@@ -478,5 +478,19 @@ The user authorized running it for both profiles during this environment setup.
 Real-model acceptance required Transformers `<5` (resolved 4.57.6), Sentence
 Transformers `>=5.4,<6` (5.7.0), and datasets `<5` (4.8.5). The initially proposed
 Transformers 5.5.4 stack failed image embedding validation in both profiles.
-Both final profiles passed real text/image encoding on CPU and temporary-cache
-cleanup. CUDA execution and external services were not tested.
+The previous Python 3.14.8 profiles (CPU PyTorch 2.14.1 and CUDA 12.8
+PyTorch 2.11.0) passed real text/image encoding on CPU and temporary-cache
+cleanup. These historical results do not validate the current PyTorch 2.7 profiles.
+CUDA execution and external services were not tested.
+
+The V100 compatibility migration pins both profiles to PyTorch 2.7.1 and
+torchvision 0.22.1 with Python >=3.13,<3.14. The GPU profile uses the explicit
+CUDA 12.6 index: PyTorch 2.11 CUDA 12.8 binaries dropped Volta support.
+Keep the CPU and CUDA extras mutually exclusive and select an extra on every
+sync/run. See the environment README for the manual V100 kernel check; routine
+verification remains synthetic and CPU-only.
+Both current profiles installed and passed 79 synthetic tests with one existing
+skip and 93% coverage on Python 3.13.13; the CUDA profile ran with GPUs hidden.
+Ruff, scoped ty, and CPU CLI help passed. Imports confirmed the pinned versions
+and the CUDA binary includes sm_70. No real-model or GPU execution was performed
+for this migration; historical real-model acceptance does not transfer to it.

@@ -19,46 +19,163 @@ baseline:
 
 ## Setup
 
-The whole-image experiment has a [standalone uv environment](src/internvl/README.md).
-Run from the repository root:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and run
+all commands from the repository root.
+
+### Install the environment
+
+To set up the UV environment:
 
 ```sh
-uv sync --project src/internvl --locked --extra cpu
+uv python install 3.13.13
+uv sync --project src/internvl --locked --extra cpu --managed-python
 uv run --project src/internvl --locked --extra cpu internvl --help
 ```
 
-Use `--extra cu128` for the CUDA 12.8 profile. Keep the selected extra on every
-`uv run` command. Configure dataset paths and Qdrant in `cfg/classification.yml`.
-The nested environment owns the `internvl` command. The legacy image package can
-still be installed with `python -m pip install -e .`; its runtime dependencies
-remain separately managed by the machine-specific `environment.yml`.
+For GPU experiments, use `--extra cu126` in both sync and run commands to
+install CUDA-specific dependencies. Check that PyTorch can access the GPU with:
+
+```sh
+uv sync --project src/internvl --locked --extra cu126 --managed-python
+uv run --project src/internvl --locked --extra cu126 python -c \
+  "import torch; print(torch.__version__); print('CUDA available:', torch.cuda.is_available())"
+```
+
+The profiles pin PyTorch 2.7.1 and torchvision 0.22.1 with Python 3.13.13.
+The CUDA 12.6 profile targets V100 compatibility; run the
+[V100 kernel check](src/internvl/README.md#v100-kernel-check) inside your allocation.
+The [environment guide](src/internvl/README.md) covers dependencies and checks.
+
+### Configure the dataset and services
+
+Copy the example for your experiment:
+
+```sh
+cp cfg/classification.yml cfg/classification_hpc.yml
+```
+
+Set `dataset.root` to a your food image dataset directory.
+
+Currently, this only supports FoodX251, and therefore expects a directory
+containing the following:
+
+```text
+annot/class_list.txt
+annot/train_info.csv
+annot/val_info.csv
+train/train_set/       # training images
+val/val_set/           # labeled validation images
+```
+
+Update these settings in your copied YAML:
+
+| Setting                    | Value to supply                                            |
+| -------------------------- | ---------------------------------------------------------- |
+| `embedding.device`         | `cuda` for GPU execution, or `cpu`                         |
+| `embedding.batch_size`     | Start with 32; reduce if memory is insufficient            |
+| `ollama.binary_path`       | Absolute path to the installed Ollama executable           |
+| `ollama.host`              | An unused local endpoint, such as `http://127.0.0.1:11434` |
+| `qdrant.connection.url`    | Running Qdrant service reachable from the compute node     |
+| `qdrant.collection_prefix` | A unique collection name for this reference strategy       |
+| `output_dir`               | Writable output directory outside the dataset              |
+
+Keep `embed_descriptions: true` and the other reference switches `false` for the
+example description-based experiment.
+
+### Qdrant setup
+
+Qdrant is a vector database that stores reference embeddings and retrieves
+similar examples for classification. See the
+[Qdrant installation guide on GitHub](https://github.com/qdrant/qdrant#client-server).
+Create a persistent storage directory, then choose Docker or Singularity:
+
+```sh
+mkdir -p qdrant_storage
+```
+
+With Docker:
+
+```sh
+docker run --rm -p 6333:6333 \
+  -v "$(pwd)/qdrant_storage:/qdrant/storage" qdrant/qdrant:v1.12.0
+```
+
+On HPC, pull the Singularity image on a node with internet access, then run it
+inside an approved allocation. Replace `{PORT}` with an available port, such as
+6333:
+
+```sh
+singularity pull qdrant.sif docker://qdrant/qdrant:v1.12.0
+singularity exec \
+  --bind "$(pwd)/qdrant_storage:/qdrant/storage" \
+  --env QDRANT__SERVICE__HTTP_PORT={PORT} qdrant.sif /qdrant/qdrant
+```
+
+Keep the service running during indexing and evaluation. Set
+`qdrant.connection.url` to `http://<service-node>:<port>`; use `localhost` only
+when Qdrant and the experiment run on the same node. These container commands
+have not been verified against the project's locked client.
 
 ### Ollama setup
 
-Ollama is used to to generate image captions and food item descriptions. Install
-the server using the [official instructions](https://docs.ollama.com/linux) In
-the `cfg/` file, be sure to set `ollama.binary_path` to the Ollama executable
-(the example uses `deps/ollama/bin/ollama`) and `ollama.host` to an unused local
-port.
-
-The description and download commands start and stop their own server and reject
-occupied endpoints. Download a model with:
+Install the [Ollama executable](https://docs.ollama.com/linux) separately.
+Choose persistent storage paths for your model cache, and export these variables
+in each job (replace the example paths):
 
 ```sh
-uv run --project src/internvl --locked --extra cpu internvl download_model gemma3:27b
+export HF_HOME=/your/storage/huggingface
+export OLLAMA_MODELS=/your/storage/ollama
 ```
 
-Optionally set `OLLAMA_MODELS` to choose model storage. This command downloads
-an Ollama model; the InternVL captioner checkpoint is configured separately.
+Set the Ollama binary and host in **both** your experiment YAML and
+`cfg/experiment_config_internvl.yml`: the download command always reads the
+latter and has no configuration flag. Then download the configured model:
+
+```sh
+uv run --project src/internvl --locked --extra cu126 internvl download_model gemma3:27b
+```
+
+Do not start Ollama manually: the download and description commands start and
+stop their own server. Embedding models should download automatically on first
+use. If compute nodes lack internet, populate its cache beforehand on a
+permitted node, using the same `HF_HOME` available to the job:
+
+```sh
+uv run --project src/internvl --locked --extra cu126 python -c \
+  "from internvl.embeddings import EmbeddingModel; EmbeddingModel('jinaai/jina-clip-v2', device='cpu')"
+```
+
+The temporary smoke test deletes its downloads and does not prepare this cache.
+
+### Run your first experiment
+
+Inside your allocation, run each stage separately to check setup:
+
+```sh
+uv run --project src/internvl --locked --extra cu126 internvl experiment describe --config_file cfg/classification_hpc.yml
+uv run --project src/internvl --locked --extra cu126 internvl experiment index --config_file cfg/classification_hpc.yml
+uv run --project src/internvl --locked --extra cu126 internvl experiment evaluate --config_file cfg/classification_hpc.yml
+```
+
+Use `experiment run` to execute all three stages in a later job. For CPU runs,
+use `--extra cpu` throughout and set `embedding.device: cpu`. Look under
+`output_dir` for `descriptions.json`, `index.json`, and
+`evaluation_<timestamp>/report.json`. Evaluation covers the complete labeled
+validation split, not official test accuracy.
+
+> [!IMPORTANT] Existing collections are reused without completeness checks.
+> After a failed index build, choose a new collection name before retrying. CUDA
+> execution and HPC behavior have not been verified by the local CPU checks.
 
 ## Commands
 
 ### Ollama downloads
 
-Run `uv run --project src/internvl --locked --extra cpu internvl download_model MODEL_NAME`.
-The positional model name is
-required. The command always reads `cfg/experiment_config_internvl.yml` from the
-working directory and accepts no configuration flag.
+Run
+`uv run --project src/internvl --locked --extra cpu internvl download_model MODEL_NAME`.
+The positional model name is required. The command always reads
+`cfg/experiment_config_internvl.yml` from the working directory and accepts no
+configuration flag.
 
 Generate class descriptions through the whole-image experiment:
 
@@ -238,10 +355,10 @@ hold cluster jobs; [tests/](tests) contains CPU checks.
 uv run --project src/internvl --locked --extra cpu pytest -c src/internvl/pyproject.toml
 ```
 
-See the [environment guide](src/internvl/README.md) for linting, scoped type checks,
-builds, CUDA library installation, and the explicit temporary real-model smoke test.
-Imports used by annotations remain ordinary runtime imports.
-Tests use synthetic fixtures and mocked backends plus a tiny synthetic Sentence
+See the [environment guide](src/internvl/README.md) for linting, scoped type
+checks, builds, CUDA library installation, and the explicit temporary real-model
+smoke test. Imports used by annotations remain ordinary runtime imports. Tests
+use synthetic fixtures and mocked backends plus a tiny synthetic Sentence
 Transformers module, without loading pretrained models or starting services;
 they do not establish model accuracy or real-model/remote-Qdrant/GPU/HPC
 integration. New tests use an in-memory Qdrant client, not a live service.
