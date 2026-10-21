@@ -26,6 +26,10 @@ captioner; Ollama class-description generation remains a separate task within it
 Before editing, inspect this repository's Git status and preserve unrelated work.
 Keep commits and pull requests local to this repository.
 
+Keep the root README focused on installation, configuration, usage, and a brief
+experiment overview. Record implementation contracts and developer constraints
+in this guide, and detailed environment checks in `src/internvl/README.md`.
+
 ## Data and compute boundaries
 
 - Do not download large models or datasets, start Ollama, use GPU/HPC resources,
@@ -81,7 +85,9 @@ without InternVL captioning or YOLO. Its three reference booleans select any
 nonempty combination of class names, generated descriptions, and training images.
 Use all official FoodX251 training references and labeled validation images for
 evaluation, recording `source_split="val"`; never claim official test accuracy.
-The composed dataset adapter rejects resolved-path overlap and preserves legacy names.
+The dataset adapter resolves image paths, preserves legacy names, and rejects
+duplicate source identities within each split. It does not compare training and
+validation paths or image contents for overlap.
 
 Full 1024-dimensional Jina embeddings use checkpoint preprocessing
 and an explicit device. By user choice, this whole-image experiment does not
@@ -90,10 +96,13 @@ it uses the library's default model loading and caching behavior, including
 downloads when needed during normal application execution. The no-download
 restriction applies to local development checks: mock pretrained construction
 and use synthetic encoders. Do not download weights or start real services for checks.
-Every selected record contributes one vote; ties use best similarity then class
-name. Completed evaluations cover the full validation split, with an evaluated count
-and per-class metrics. Empty retrieval abstains. Image-loading, embedding,
-and infrastructure errors fail the run without retries or exclusions; stage
+Retrieval uses exact cosine top-k search with configurable `k`. Every retrieved
+record contributes one vote; ties use best similarity then class name.
+`vote_fraction` is winning votes divided by the actual returned neighbor count,
+not calibrated confidence. Completed evaluations cover the full validation split,
+with an evaluated count and per-class metrics. Empty retrieval abstains and counts
+as incorrect. Image-loading, embedding, and infrastructure errors fail the run
+without retries or exclusions; stage
 failures propagate without saved partial reports. There is no top-five metric.
 
 Git revision, dependency-version, and timestamp provenance tracking has been
@@ -156,7 +165,8 @@ remain compatible. `train_path` points to the training images; `val_path` and
 `iter_batches(split, batch_size)` accepts `train`, `val`, or `validation`, enables
 image decoding, and uses `Dataset.iter()` with the final partial batch retained.
 Metadata access leaves images undecoded. The experiment embeds decoded PIL images
-and leaves their cleanup to garbage collection. Resolved-path checks remain. Image-content hashing and SHA-256 metadata were
+and leaves their cleanup to garbage collection. Paths must resolve within their
+split's image directory. Image-content hashing and SHA-256 metadata were
 removed by user request; do not restore them. Image files are read when batches
 are decoded, and loading failures propagate. No exclusion artifacts are written by new runs.
 Compare complete retrieval strategies, because changing reference sources also
@@ -182,8 +192,8 @@ Tests exercise real Sentence Transformers
 with synthetic vectors and mock pretrained construction; they do not establish
 real-model compatibility. `EmbeddingModel` has no backend injection parameter;
 encoding tests patch `_load_backend()` to return a fake or synthetic encoder.
-Install the small CPU dependencies listed in README for these tests; retain
-explicit skips when absent.
+Install the CPU environment described in `src/internvl/README.md` for these tests;
+retain explicit skips when dependencies are absent.
 These tests do not establish real model, dataset, GPU, Ollama, remote-Qdrant, or HPC
 compatibility. The historical workflow limitations below describe the removed
 legacy source, and must not be attributed to the new experiment runner.
@@ -456,7 +466,7 @@ model accuracy or external-library integration.
 Run checks appropriate to each change and report what was actually verified.
 For the extraction checks, use
 `PYTHONPATH=src python -m unittest discover -s tests -v`. Artifact and dataset
-checks require the small CPU dependencies documented in README.md; missing
+checks require the CPU dependencies documented in `src/internvl/README.md`; missing
 dependencies produce explicit skips. Keep all fixtures synthetic and local.
 Explicitly identify dataset, model, GPU, network, Qdrant, and HPC checks that could
 not be run. Do not claim an end-to-end experiment passed based on syntax checks or

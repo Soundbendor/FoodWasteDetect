@@ -1,7 +1,8 @@
 # Experiment notes
 
 These notes describe current behavior and limitations of the offline experiments.
-See the [README](../README.md) for setup, commands, and the module map.
+See the [README](../README.md) for setup and commands, and the
+[developer guide](../AGENTS.md) for source maps and implementation contracts.
 
 ## Text retrieval workflow (removed)
 
