@@ -24,6 +24,7 @@ dependencies = [
     "timm>=1.0.30",
     "tqdm>=4.70.1",
     "transformers<5",
+    "omegaconf>=2.3,<3",
 ]
 
 [project.scripts]
@@ -119,6 +120,6 @@ cu126 = {features = ["cu126", "dev", "test"], solve-group = "cu126"}
 internvl = {cmd = "python -m internvl", cwd = "../.."}
 test = {cmd = "pytest -c src/internvl/pyproject.toml", cwd = "../..", env = {CUDA_VISIBLE_DEVICES = "", HF_HUB_OFFLINE = "1"}}
 lint = {cmd = "ruff check src/internvl", cwd = "../.."}
-typecheck = {cmd = "ty check --project src/internvl", cwd = "../.."}
+typecheck = {cmd = 'ty check --project src/internvl --python "$CONDA_PREFIX"', cwd = "../.."}
 build = {cmd = "python -m build --no-isolation src/internvl --outdir src/internvl/dist", cwd = "../.."}
 qdrant = {cmd = "bash scripts/start_qdrant.sh", cwd = "../.."}

@@ -4,12 +4,16 @@ import contextlib
 import importlib.util
 import io
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, call, mock_open, patch
+
+import yaml
 
 from internvl.cli import main
 
@@ -30,72 +34,55 @@ class CommandTests(unittest.TestCase):
                 download.assert_not_called()
 
     def test_configuration_failures_propagate(self):
-        for command in (
-            ["experiment", "run", "--config_file", "selected.yml"],
-            ["download_model", "requested:tag"],
+        for command, loader in (
+            (
+                ["experiment", "run", "--config_file", "selected.yml"],
+                "internvl.cli.OmegaConf.load",
+            ),
+            (["download_model", "requested:tag"], "yaml.safe_load"),
         ):
             for source in ("open", "yaml"):
-                with self.subTest(command=command, source=source):
-                    backend = SimpleNamespace()
-                    backend.Experiment = MagicMock()
-                    descriptors = SimpleNamespace()
-                    descriptors.DescriberLLM = MagicMock()
-                    yaml = SimpleNamespace()
-                    yaml.safe_load = Mock()
-                    failure = (
-                        OSError("read failed")
-                        if source == "open"
-                        else ValueError("parse failed")
-                    )
-                    opened = mock_open()
+                failure = (
+                    OSError("read failed")
+                    if source == "open"
+                    else ValueError("parse failed")
+                )
+                with (
+                    self.subTest(command=command, source=source),
+                    patch("builtins.open", mock_open()) as opened,
+                    patch(loader) as load,
+                    patch("internvl.cli.Experiment") as experiment,
+                    patch("internvl.generate_descriptors.DescriberLLM") as descriptors,
+                    self.assertRaises(type(failure)) as error,
+                ):
                     if source == "open":
                         opened.side_effect = failure
                     else:
-                        yaml.safe_load.side_effect = failure
-                    with (
-                        patch.dict(
-                            sys.modules,
-                            {
-                                "yaml": yaml,
-                                "internvl.experiment": backend,
-                                "internvl.generate_descriptors": descriptors,
-                            },
-                        ),
-                        patch("internvl.cli.Experiment", backend.Experiment),
-                        patch("internvl.cli.yaml", yaml),
-                        patch("builtins.open", opened),
-                        self.assertRaises(type(failure)) as error,
-                    ):
-                        main(command)
-                    self.assertIs(error.exception, failure)
-                    backend.Experiment.assert_not_called()
-                    descriptors.DescriberLLM.assert_not_called()
+                        load.side_effect = failure
+                    main(command)
+                self.assertIs(error.exception, failure)
+                experiment.assert_not_called()
+                descriptors.assert_not_called()
 
     def test_experiment_failures_and_interrupts_propagate(self):
         for source in ("constructor", "run"):
             for failure in (RuntimeError("backend failed"), KeyboardInterrupt()):
-                with self.subTest(source=source, failure=type(failure).__name__):
-                    backend = SimpleNamespace()
-                    backend.Experiment = MagicMock()
+                with (
+                    self.subTest(source=source, failure=type(failure).__name__),
+                    patch("internvl.cli.Experiment") as experiment,
+                    patch(
+                        "builtins.open", mock_open(read_data="output_dir: synthetic")
+                    ),
+                    self.assertRaises(type(failure)) as error,
+                ):
                     target = (
-                        backend.Experiment
+                        experiment
                         if source == "constructor"
-                        else backend.Experiment.return_value.run
+                        else experiment.return_value.run
                     )
                     target.side_effect = failure
-                    yaml = SimpleNamespace()
-                    yaml.safe_load = Mock(return_value={"output_dir": "synthetic"})
-                    with (
-                        patch.dict(
-                            sys.modules, {"yaml": yaml, "internvl.experiment": backend}
-                        ),
-                        patch("internvl.cli.Experiment", backend.Experiment),
-                        patch("internvl.cli.yaml", yaml),
-                        patch("builtins.open", mock_open()),
-                        self.assertRaises(type(failure)) as error,
-                    ):
-                        main(["experiment", "run", "--config_file", "selected.yml"])
-                    self.assertIs(error.exception, failure)
+                    main(["experiment", "run", "--config_file", "selected.yml"])
+                self.assertIs(error.exception, failure)
 
     def test_download_reads_working_directory_config_and_exact_model(self):
         backend = SimpleNamespace()
@@ -234,31 +221,19 @@ class CommandTests(unittest.TestCase):
             ("evaluate", "evaluate"),
             ("run", "run"),
         ):
-            with self.subTest(stage=stage):
-                backend = SimpleNamespace()
-                backend.Experiment = MagicMock()
-                yaml = SimpleNamespace()
-                config = {"output_dir": "synthetic"}
-                yaml.safe_load = Mock(return_value=config)
-                with (
-                    patch.dict(
-                        sys.modules, {"internvl.experiment": backend, "yaml": yaml}
-                    ),
-                    patch("internvl.cli.Experiment", backend.Experiment),
-                    patch("internvl.cli.yaml", yaml),
-                    patch(
-                        "builtins.open",
-                        mock_open(read_data="output_dir: synthetic"),
-                    ) as opened,
-                ):
-                    main(["experiment", stage, "--config_file", "selected.yml"])
-                opened.assert_called_once_with("selected.yml", encoding="utf-8")
-                backend.Experiment.assert_called_once_with(config)
-                self.assertIs(backend.Experiment.call_args.args[0], config)
-                self.assertEqual(
-                    backend.Experiment.return_value.method_calls,
-                    [getattr(call, method)()],
-                )
+            with (
+                self.subTest(stage=stage),
+                patch("internvl.cli.Experiment") as experiment,
+                patch(
+                    "builtins.open", mock_open(read_data="output_dir: synthetic")
+                ) as opened,
+            ):
+                main(["experiment", stage, "--config_file", "selected.yml"])
+            opened.assert_called_once_with("selected.yml", encoding="utf-8")
+            experiment.assert_called_once_with({"output_dir": "synthetic"})
+            self.assertEqual(
+                experiment.return_value.method_calls, [getattr(call, method)()]
+            )
 
     @unittest.skipUnless(
         importlib.util.find_spec("yaml") is not None, "requires PyYAML"
@@ -283,6 +258,226 @@ class CommandTests(unittest.TestCase):
                 experiment.assert_called_once_with({"k": 7})
                 getattr(experiment.return_value, method).assert_called_once_with()
                 experiment.reset_mock()
+
+
+class ConfigOverrideTests(unittest.TestCase):
+    def setUp(self):
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.path = Path(directory) / "config.yml"
+        self.config = {
+            "ollama": {"llm": "original:tag", "host": "http://localhost:11434"},
+            "embedding": {"batch_size": 32},
+            "qdrant": {"connection": {"url": "http://localhost:6333"}},
+            "embed_images": True,
+            "k": 10,
+            "threshold": 0.5,
+            "labels": ["old"],
+            "optional": None,
+            "output_dir": "original",
+            "command": "a config key, not the subcommand",
+        }
+        self.content = yaml.safe_dump(self.config)
+        self.path.write_text(self.content)
+        self.experiment = self.enterContext(patch("internvl.cli.Experiment"))
+
+    def invoke(self, *overrides, stage="run"):
+        main(["experiment", stage, "--config_file", str(self.path), *overrides])
+        self.assertEqual(self.path.read_text(), self.content)
+        return self.experiment.call_args.args[0]
+
+    def test_nested_overrides_reach_every_stage(self):
+        for stage, method in (
+            ("describe", "generate_descriptions"),
+            ("index", "build_vector_database"),
+            ("evaluate", "evaluate"),
+            ("run", "run"),
+        ):
+            with self.subTest(stage=stage):
+                self.experiment.reset_mock()
+                actual = self.invoke(
+                    "--set",
+                    "ollama.llm=gemma3:27b",
+                    "--set",
+                    "embedding.batch_size=16",
+                    "--set",
+                    "embed_images=false",
+                    "--set",
+                    "threshold=0.75",
+                    "--set",
+                    "qdrant.connection.url=http://service:6333",
+                    "--set",
+                    "output_dir=path with spaces",
+                    "--set",
+                    "command=literal",
+                    stage=stage,
+                )
+                self.assertIs(type(actual), dict)
+                self.assertIs(type(actual["embedding"]), dict)
+                self.assertEqual(actual["ollama"]["llm"], "gemma3:27b")
+                self.assertEqual(
+                    actual["ollama"]["host"], self.config["ollama"]["host"]
+                )
+                self.assertEqual(actual["embedding"]["batch_size"], 16)
+                self.assertIs(actual["embed_images"], False)
+                self.assertEqual(actual["threshold"], 0.75)
+                self.assertEqual(
+                    actual["qdrant"]["connection"]["url"], "http://service:6333"
+                )
+                self.assertEqual(actual["output_dir"], "path with spaces")
+                self.assertEqual(actual["command"], "literal")
+                self.assertEqual(actual["k"], 10)
+                self.assertEqual(
+                    self.experiment.return_value.method_calls, [getattr(call, method)()]
+                )
+
+    def test_omitted_overrides_preserve_config(self):
+        self.assertEqual(self.invoke(), self.config)
+
+    def test_last_override_wins_and_values_can_contain_equals(self):
+        actual = self.invoke("--set", "k=3", "--set=k=7", "--set", "output_dir=a=b")
+        self.assertEqual(actual["k"], 7)
+        self.assertEqual(actual["output_dir"], "a=b")
+
+    def test_yaml_values_and_explicit_string_quotes(self):
+        for raw, expected in (
+            ("null", None),
+            ("[1, two]", [1, "two"]),
+            ("false", False),
+            ("9", 9),
+            ("1.5", 1.5),
+            ('"001"', "001"),
+            ('"false"', "false"),
+        ):
+            with self.subTest(raw=raw):
+                actual = self.invoke(
+                    "--set", "labels=[new, other]", "--set", f"optional={raw}"
+                )
+                self.assertEqual(actual["labels"], ["new", "other"])
+                self.assertEqual(actual["optional"], expected)
+                self.assertIs(type(actual["optional"]), type(expected))
+
+    def test_type_changes_reach_application_validation(self):
+        failure = ValueError("application validation failed")
+        self.experiment.side_effect = failure
+        with self.assertRaises(ValueError) as error:
+            self.invoke("--set", "embedding.batch_size=invalid")
+        self.assertIs(error.exception, failure)
+        self.assertEqual(
+            self.experiment.call_args.args[0]["embedding"]["batch_size"], "invalid"
+        )
+
+    def test_interpolations_resolve_before_dispatch(self):
+        actual = self.invoke("--set", "output_dir=${ollama.llm}")
+        self.assertEqual(actual["output_dir"], "original:tag")
+
+    def test_override_order_relative_to_stage_and_config(self):
+        for arguments in (
+            ["experiment", "--set", "k=5", "run", "--config_file", str(self.path)],
+            ["experiment", "--config_file", str(self.path), "--set", "k=5", "run"],
+            ["experiment", "run", "--set", "k=5", "--config_file", str(self.path)],
+        ):
+            with self.subTest(arguments=arguments):
+                main(arguments)
+                self.assertEqual(self.experiment.call_args.args[0]["k"], 5)
+
+    def test_invalid_overrides_fail_before_construction(self):
+        for overrides in (
+            ["--set", "ollama.lm=typo"],
+            ["--set", "new_key=1"],
+            ["--set", "k"],
+            ["--set", "=1"],
+            ["--set", " =1"],
+            ["--set"],
+            ["--set", "labels=["],
+            ["--ollama.llm", "old syntax"],
+            ["--se", "k=1"],
+        ):
+            with (
+                self.subTest(overrides=overrides),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    self.invoke(*overrides)
+                self.assertEqual(error.exception.code, 2)
+                self.experiment.assert_not_called()
+                self.assertEqual(self.path.read_text(), self.content)
+
+    def test_help_never_reads_config(self):
+        for arguments in (
+            ["experiment", "--help"],
+            ["experiment", "run", "--config_file", "nonexistent.yml", "--help"],
+        ):
+            output = io.StringIO()
+            with (
+                self.subTest(arguments=arguments),
+                patch("builtins.open") as opened,
+                contextlib.redirect_stdout(output),
+                self.assertRaises(SystemExit) as error,
+            ):
+                main(arguments)
+            self.assertEqual(error.exception.code, 0)
+            self.assertIn("--set PATH=VALUE", output.getvalue())
+            opened.assert_not_called()
+            self.experiment.assert_not_called()
+
+    def test_non_mapping_config_is_rejected(self):
+        self.path.write_text("[one, two]")
+        with self.assertRaisesRegex(ValueError, "YAML mapping"):
+            main(["experiment", "run", "--config_file", str(self.path)])
+        self.experiment.assert_not_called()
+
+
+@unittest.skipUnless(shutil.which("bash"), "requires bash")
+class SlurmOverrideTests(unittest.TestCase):
+    def test_wrappers_forward_arguments_and_keep_defaults(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            capture = temporary / "arguments"
+            pixi = temporary / "pixi"
+            pixi.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$CAPTURE_ARGUMENTS"\n')
+            pixi.chmod(0o755)
+            env = dict(
+                os.environ,
+                PATH=f"{temporary}:{os.environ.get('PATH', '')}",
+                SLURM_SUBMIT_DIR=str(root),
+                CAPTURE_ARGUMENTS=str(capture),
+            )
+            for script, stage in (
+                ("scripts/generate_descriptions.sbatch", "describe"),
+                ("sbatch/test_embedding.sbatch", "evaluate"),
+            ):
+                subprocess.run(["bash", "-n", str(root / script)], check=True)
+                for extra in (
+                    [],
+                    [
+                        "config with spaces.yml",
+                        "--set",
+                        "output_dir=output with spaces",
+                        "--set=k=3",
+                    ],
+                ):
+                    with self.subTest(script=script, extra=extra):
+                        subprocess.run(
+                            ["bash", str(root / script), *extra], env=env, check=True
+                        )
+                        actual = capture.read_bytes().decode().rstrip("\0").split("\0")
+                        self.assertEqual(
+                            actual,
+                            [
+                                "run",
+                                "--manifest-path",
+                                "src/internvl/pyproject.toml",
+                                "--as-is",
+                                "-e",
+                                "cu126",
+                                "internvl",
+                                "experiment",
+                                stage,
+                                "--config_file",
+                                *(extra or ["cfg/classification.yml"]),
+                            ],
+                        )
 
 
 if __name__ == "__main__":

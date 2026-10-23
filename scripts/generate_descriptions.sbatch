@@ -13,7 +13,9 @@
 # Adjust resources above and pass your cluster's partition/account to sbatch.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the repository root}"
+config_file="${1:-cfg/classification.yml}"
+if (( $# )); then shift; fi
 
 # DescriberLLM manages Ollama using the YAML configuration.
 pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl experiment describe \
-  --config_file "${1:-cfg/classification.yml}"
+  --config_file "$config_file" "$@"

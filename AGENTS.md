@@ -29,8 +29,15 @@ Keep commits and pull requests local to this repository.
 Keep the root README focused on installation, configuration, usage, and a brief
 experiment overview. Record implementation contracts and developer constraints
 in this guide, and detailed environment checks in `docs/experiments.md`. Keep both READMEs
-focused on installation and running commands. Use create-readme and
-humanizer:humanizer for README updates; preserve verified commands in the prose pass.
+focused on installation and running commands.
+
+Edit a `README.md` file only when the user explicitly requests or approves that
+README update. A request to change code does not by itself authorize README edits.
+When a change would benefit from a README update, suggest the update, explain
+briefly why it would help, and ask for permission before editing. Wait for explicit
+approval; do not treat silence as consent. For every approved README edit, always
+invoke the `create-readme` skill and use `humanizer:humanizer` for the prose pass;
+preserve verified commands. This rule applies to the root and package READMEs.
 
 ## Data and compute boundaries
 
@@ -82,6 +89,25 @@ The separate CLIP fine-tuning experiment and legacy image interfaces are unchang
 Use `python -m internvl experiment {describe,index,evaluate,run} --config_file
 cfg/classification.yml`. Parsing and YAML loading live in `internvl.cli`;
 `internvl.experiment` has no command-line entry point; use the shared CLI.
+All four experiment stages accept repeatable `--set PATH=VALUE` overrides, such
+as `--set ollama.llm=gemma3:27b` and `--set embedding.batch_size=16`. The CLI uses
+one argparse pass, then loads the YAML with OmegaConf, requires a mapping,
+rejects unknown keys with struct mode, and applies overrides in order. Values
+use YAML parsing rather than conversion to the original value's type; quote
+values within the assignment when a string would otherwise parse as another
+type, for example `--set 'output_dir="001"'`. Existing experiment/backend
+validation handles invalid setting types. OmegaConf's normal path and merge
+rules apply; repeated assignments use the last value. Overrides require a
+nonempty path and `=`; malformed assignments and unknown paths fail before
+construction. The resolved config becomes a plain nested dictionary before
+`Experiment` is constructed. Reports retain the effective configuration, and
+the YAML is never rewritten. `_run_experiment()` receives the merged dictionary.
+The former generated per-key flags are removed without compatibility aliases.
+Help describes `--set PATH=VALUE` without loading any config or dataset. The
+Slurm scripts forward arguments after their optional first config path and
+retain their default config and stages. Overrides do not add embedding
+backends, automatic artifact isolation, or service management.
+
 This independent whole-image baseline embeds pixels
 without InternVL captioning or YOLO. Its three reference booleans select any
 nonempty combination of class names, generated descriptions, and training images.
@@ -488,6 +514,8 @@ The Ollama SDK remains a separate PyPI dependency. Slurm scripts use `--as-is`
 and require the environment to be prepared before submission. The legacy description method and
 its `ClassDataset` protocol have been removed. See `src/internvl/README.md`
 for installation, Ruff, scoped ty checks, and pytest coverage commands.
+The Pixi typecheck task explicitly uses `$CONDA_PREFIX` so dependency resolution
+uses the selected Pixi environment even if an older `.venv` remains locally.
 `internvl.scripts.smoke_jina` is an explicit real-model download check with
 temporary subprocess caches; it is never part of routine synthetic tests.
 The user previously authorized running it during the uv environment setup;

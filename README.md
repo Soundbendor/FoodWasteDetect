@@ -16,8 +16,8 @@ image-retrieval experiments:
 
 ## Setup
 
-Install [Pixi](https://pixi.prefix.dev/latest/installation/) 0.81.0 or newer and run
-all commands from the repository root.
+Install [Pixi](https://pixi.prefix.dev/latest/installation/) 0.81.0 or newer and
+run all commands from the repository root.
 
 ### Install the environment
 
@@ -37,12 +37,13 @@ pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 python -c
   "import torch; print(torch.__version__); print('CUDA available:', torch.cuda.is_available())"
 ```
 
-The GPU environment uses PyTorch with CUDA 12.6 and Ollama with CUDA 12.9.
-Use a CUDA 12.9-compatible NVIDIA driver, such as 580.178.04. Run the
+The GPU environment uses PyTorch with CUDA 12.6 and Ollama with CUDA 12.9. Use a
+CUDA 12.9-compatible NVIDIA driver, such as 580.178.04. Run the
 [V100 kernel check](src/internvl/README.md#v100-kernel-check) inside your
-allocation. Prepare environments on a node with internet access before submitting
-jobs; use `pixi run --as-is` in jobs to avoid installing dependencies there.
-The [environment guide](src/internvl/README.md) lists development commands.
+allocation. Prepare environments on a node with internet access before
+submitting jobs; use `pixi run --as-is` in jobs to avoid installing dependencies
+there. The [environment guide](src/internvl/README.md) lists development
+commands.
 
 ### Configure the dataset and services
 
@@ -69,7 +70,7 @@ Update these settings in your copied YAML:
 | -------------------------- | ---------------------------------------------------------- |
 | `embedding.device`         | `cuda` for GPU execution, or `cpu`                         |
 | `embedding.batch_size`     | Start with 32; reduce based on available VRAM              |
-| `ollama.binary_path`       | `ollama` to use the Pixi executable           |
+| `ollama.binary_path`       | `ollama` to use the Pixi executable                        |
 | `ollama.host`              | An unused local endpoint, such as `http://127.0.0.1:11434` |
 | `qdrant.connection.url`    | Running Qdrant service reachable from the compute node     |
 | `qdrant.collection_prefix` | The exact Qdrant collection name                           |
@@ -104,14 +105,15 @@ cluster's access rules.
 
 Set `qdrant.connection.url` to `http://<service-node>:<port>`; use `localhost`
 only when the experiment runs on the same node. Use a fresh storage directory;
-see [existing database upgrades](docs/experiments.md#pixi-environment-maintenance)
+see
+[existing database upgrades](docs/experiments.md#pixi-environment-maintenance)
 before reusing an older database.
 
 ### Ollama setup
 
-Pixi includes the Ollama executable. Keep `ollama.binary_path: ollama` in your YAML.
-Choose persistent storage paths for your model cache, and export these variables
-in each job (replace the example paths):
+Pixi includes the Ollama executable. Keep `ollama.binary_path: ollama` in your
+YAML. Choose persistent storage paths for your model cache, and export these
+variables in each job (replace the example paths):
 
 ```sh
 export HF_HOME=/your/storage/huggingface
@@ -162,6 +164,37 @@ configuration path as its first argument and defaults to
 > checking compatibility or completeness. After a failed index build, choose a
 > new collection name before retrying. CUDA execution and HPC behavior have not
 > been verified by the local CPU checks.
+
+### Override configuration values
+
+Pass YAML keys as command-line flags to any experiment stage. Nested keys use
+dots, and command-line values take precedence for that invocation:
+
+```sh
+pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl experiment run \
+  --config_file cfg/classification_hpc.yml \
+  --ollama.llm "gemma3:27b" \
+  --embedding.batch_size 16 \
+  --embed_images false \
+  --output_dir assets/sweeps/run_01 \
+  --qdrant.collection_prefix sweep_run_01
+```
+
+List available overrides and their types without starting an experiment:
+
+```sh
+pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default internvl experiment run \
+  --config_file cfg/classification.yml --help
+```
+
+The description and evaluation Slurm scripts forward flags after the config
+path. For example, compare neighbor counts against an existing collection:
+
+```sh
+for k in 1 5 10; do
+  sbatch sbatch/test_embedding.sbatch cfg/classification_hpc.yml --k "$k"
+done
+```
 
 ## Whole-image classification
 

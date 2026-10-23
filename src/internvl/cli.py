@@ -1,9 +1,12 @@
-"""Parse commands and load runtime dependencies only when dispatching work."""
+"""Parse commands and merge experiment configuration overrides."""
 
 import argparse
 from collections.abc import Sequence
+from typing import Any, cast
 
 import yaml
+from omegaconf import DictConfig, OmegaConf
+from omegaconf.errors import OmegaConfBaseException
 
 from .experiment import Experiment
 
@@ -19,34 +22,63 @@ def download_model(model_name: str) -> None:
         llm.download_model(model_name)
 
 
+def _override_assignment(value: str) -> str:
+    path, separator, _ = value.partition("=")
+    if not separator or not path.strip():
+        raise argparse.ArgumentTypeError("expected a nonempty PATH followed by =VALUE")
+    return value
+
+
+def _load_config(config_file: str, overrides: Sequence[str]) -> dict[str, Any]:
+    with open(config_file, encoding="utf-8") as stream:
+        config = OmegaConf.load(stream)
+    if not isinstance(config, DictConfig):
+        raise ValueError("Experiment configuration must be a YAML mapping")
+    OmegaConf.set_struct(config, True)
+    try:
+        config.merge_with_dotlist(list(overrides))
+    except (OmegaConfBaseException, yaml.YAMLError) as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    return cast(dict[str, Any], OmegaConf.to_container(config, resolve=True))
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="internvl",
         description="FoodWasteDetect utilities and food image recognition experiments",
+        allow_abbrev=False,
     )
     commands = parser.add_subparsers(dest="command", required=True)
     experiment = commands.add_parser(
-        "experiment", help="Run a food image classification experiment."
+        "experiment",
+        help="Run a food image classification experiment.",
+        allow_abbrev=False,
     )
     experiment.add_argument(
         "stage",
         choices=("describe", "index", "evaluate", "run"),
         help="Run a specific stage of the food image classification experiment.",
     )
+    experiment.add_argument("--config_file", required=True, help="Path to experiment config YAML")
     experiment.add_argument(
-        "--config_file", required=True, help="Path to experiment config YAML"
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        type=_override_assignment,
+        metavar="PATH=VALUE",
+        help="Override an existing config path; repeat as needed (e.g. --set embedding.batch_size=16). Values use YAML syntax.",
     )
     download = commands.add_parser(
-        "download_model", help="Download weights for an Ollama model."
+        "download_model",
+        help="Download weights for an Ollama model.",
+        allow_abbrev=False,
     )
     download.add_argument("model_name", help="Ollama model name to download")
     return parser
 
 
-def _run_experiment(config_file: str, stage: str) -> None:
-
-    with open(config_file, encoding="utf-8") as stream:
-        config = yaml.safe_load(stream)
+def _run_experiment(config: dict[str, Any], stage: str) -> None:
     experiment = Experiment(config)
     stages = {
         "describe": experiment.generate_descriptions,
@@ -59,8 +91,13 @@ def _run_experiment(config_file: str, stage: str) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Parse Ollama download or whole-image experiment commands and dispatch them."""
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
     if args.command == "experiment":
-        _run_experiment(args.config_file, args.stage)
+        try:
+            config = _load_config(args.config_file, args.overrides)
+        except argparse.ArgumentTypeError as error:
+            parser.error(str(error))
+        _run_experiment(config, args.stage)
     elif args.command == "download_model":
         download_model(args.model_name)
