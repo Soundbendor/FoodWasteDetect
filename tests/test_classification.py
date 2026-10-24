@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from internvl.experiment import Experiment, _batch_rows, _prediction, validate_config
 from internvl.schemas import Neighbor, PointRecord
-from internvl.retrieval import QdrantIndex
+from internvl.retrieval import LanceDBIndex
 
 
 def available(*modules):
@@ -165,7 +165,7 @@ class DatasetTests(unittest.TestCase):
             with self.assertRaises(KeyError): FoodX251ImageDataset(root)
 
 
-@unittest.skipUnless(available('qdrant_client', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, qdrant-client and CPU fixture dependencies')
+@unittest.skipUnless(available('lancedb', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, lancedb and CPU fixture dependencies')
 class ExperimentTests(unittest.TestCase):
 
     def test_constructor_loads_metadata_but_defers_backends(self):
@@ -187,7 +187,7 @@ class ExperimentTests(unittest.TestCase):
             exp.evaluate()
             classes.assert_called_once()
             self.embedder_constructor.assert_called_once_with(batch_size=2)
-            self.client_constructor.assert_called_once_with()
+
         self.dataset_constructor.side_effect = FileNotFoundError('annotations')
         with self.assertRaisesRegex(FileNotFoundError, 'annotations'):
             Experiment(exp.config)
@@ -207,7 +207,7 @@ class ExperimentTests(unittest.TestCase):
         (exp.output / 'descriptions.json').write_text(json.dumps({
             'descriptions': {'Apple': [], 'Pear': []}
         }))
-        with self.assertRaisesRegex(ValueError, 'No records inserted into Qdrant'):
+        with self.assertRaisesRegex(ValueError, 'No records inserted into LanceDB'):
             exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
 
@@ -228,7 +228,7 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment()
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
-        exp.config['qdrant']['collection_prefix'] += '_new'
+        exp.config['lancedb']['table'] += '_new'
         with patch('internvl.experiment.Path.replace', side_effect=OSError('replace failed')):
             with self.assertRaisesRegex(OSError, 'replace failed'):
                 exp.build_vector_database()
@@ -287,13 +287,13 @@ class ExperimentTests(unittest.TestCase):
                     self.assert_no_failed_report(exp, stage)
 
     def test_database_failures_and_interrupts_propagate(self):
-        for stage, method in [('build_vector_database', 'upsert'), ('evaluate', 'query')]:
+        for stage, method in [('build_vector_database', 'append'), ('evaluate', 'query')]:
             for error in (ConnectionError('offline'), KeyboardInterrupt()):
                 with self.subTest(stage=stage, error=type(error).__name__):
                     exp = self.experiment((True, False, False), f'{stage}-{type(error).__name__}')
                     if stage == 'evaluate':
                         exp.build_vector_database()
-                    with patch.object(QdrantIndex, method, side_effect=error):
+                    with patch.object(LanceDBIndex, method, side_effect=error):
                         with self.assertRaises(type(error)) as raised:
                             getattr(exp, stage)()
                     self.assertIs(raised.exception, error)
@@ -309,31 +309,31 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment((True, False, False))
         with patch.object(self.dataset, 'train_set', side_effect=AssertionError('Extra metadata pass')):
             artifact = exp.build_vector_database()
-        stored, _ = self.client.scroll(artifact['collection'], with_vectors=True)
+        stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
         self.assertEqual(artifact['source_counts'], {'training_image': 3})
-        self.assertEqual({p.payload['source_identity'] for p in stored}, {'0', '1', 'extra'})
-        self.assertEqual(len({p.id for p in stored}), 3)
+        self.assertEqual({p['source_identity'] for p in stored}, {'0', '1', 'extra'})
+        self.assertEqual(len({p['id'] for p in stored}), 3)
         for point in stored:
-            self.assertEqual(point.vector, [0., 1.] if point.payload['source_identity'] == '1' else [1., 0.])
+            self.assertEqual(point['vector'], [0., 1.] if point['source_identity'] == '1' else [1., 0.])
 
     def test_failed_rebuild_preserves_previous_summary(self):
         exp = self.experiment((True, False, False))
         exp.batch_size = 1
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
-        exp.config['qdrant']['collection_prefix'] += '_new'
-        upsert = QdrantIndex.upsert
+        exp.config['lancedb']['table'] += '_new'
+        append = LanceDBIndex.append
         calls = 0
 
         def fail_second(index, records, vectors):
             nonlocal calls
             calls += 1
             if calls == 2:
-                raise ConnectionError('second upsert failed')
-            return upsert(index, records, vectors)
+                raise ConnectionError('second append failed')
+            return append(index, records, vectors)
 
-        with patch.object(QdrantIndex, 'upsert', new=fail_second):
-            with self.assertRaisesRegex(ConnectionError, 'second upsert'):
+        with patch.object(LanceDBIndex, 'append', new=fail_second):
+            with self.assertRaisesRegex(ConnectionError, 'second append'):
                 exp.build_vector_database()
         self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
         self.assertEqual(calls, 2)
@@ -353,9 +353,9 @@ class ExperimentTests(unittest.TestCase):
         self.describer_constructor.side_effect = AssertionError('Cached descriptions regenerated')
         report = exp.run()
         artifact = json.loads((exp.output / 'index.json').read_text())
-        self.assertEqual(set(artifact), {'collection', 'source_counts', 'config'})
+        self.assertEqual(set(artifact), {'table', 'uri', 'source_counts', 'config'})
         self.assertEqual(set(report), {'config', 'predictions',
-                                      'collection', 'reference_source_counts', 'metrics'})
+                                      'table', 'reference_source_counts', 'metrics'})
         folder = next(exp.output.glob('evaluation_*'))
         self.assertEqual([p.name for p in folder.iterdir()], ['report.json'])
         self.assertEqual(json.loads((folder / 'report.json').read_text()), report)
@@ -372,10 +372,11 @@ class ExperimentTests(unittest.TestCase):
         from datasets import Dataset, DatasetDict, Image as HFImage
         from internvl.image_dataset import FoodX251ImageDataset
         from PIL import Image
-        from qdrant_client import QdrantClient
+        import lancedb
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.client = QdrantClient(':memory:'); self.addCleanup(self.client.close)
+        self.db_path = self.root / 'database'
+        self.client = lancedb.connect(self.db_path)
         rows = []
         for i, label in enumerate(['Apple', 'Pear']):
             path = self.root / f'{i}.png'; Image.new('RGB', (3, 4), (i*100, 0, 0)).save(path)
@@ -403,25 +404,25 @@ class ExperimentTests(unittest.TestCase):
         self.dataset_constructor = self.enterContext(patch('internvl.experiment.load_dataset', return_value=self.dataset))
         self.embedder_constructor = self.enterContext(patch('internvl.experiment.EmbeddingModel', side_effect=Embedder))
         self.describer_constructor = self.enterContext(patch('internvl.experiment.DescriberLLM', side_effect=Describer))
-        self.client_constructor = self.enterContext(patch('internvl.experiment.QdrantClient', return_value=self.client))
+        self.client_constructor = self.enterContext(patch('internvl.retrieval.lancedb.connect', wraps=lancedb.connect))
 
     def experiment(self, flags=(False, True, False), name='run'):
         cfg = dict(zip(('embed_images','embed_class_labels','embed_descriptions'), flags))
         cfg.update(output_dir=str(self.root / name), embedding={'batch_size': 2},
-                   dataset={}, ollama={'llm':'fake'}, qdrant={'collection_prefix':f'fixture_{name}', 'connection': {}}, k=10,
+                   dataset={}, ollama={'llm':'fake'}, lancedb={'table': 'fixture_' + ''.join(c if c.isalnum() else '_' for c in name), 'uri': str(self.db_path)}, k=10,
                    description_count=5)
         return Experiment(cfg)
 
-    def test_point_records_round_trip_through_qdrant(self):
+    def test_point_records_round_trip_through_lancedb(self):
         exp = self.experiment()
         records = [PointRecord(label, 'class_name', label, label) for label in ['Apple', 'Pear']]
         self.assertTrue(all(isinstance(record, PointRecord) for record in records))
-        index = QdrantIndex(self.client, 'record_round_trip', 2)
-        index.create()
+        index = LanceDBIndex(self.db_path, 'record_round_trip')
+        index.create(2)
         vectors = exp.embedder.encode_text([record.value for record in records])
-        index.upsert(records, vectors)
-        stored = self.client.retrieve('record_round_trip', ids=[record.id for record in records])
-        payloads = {str(point.id): point.payload for point in stored}
+        index.append(records, vectors)
+        stored = self.client.open_table('record_round_trip').to_arrow().to_pylist()
+        payloads = {point['id']: {k: v for k, v in point.items() if k != 'vector'} for point in stored}
         for record in records:
             self.assertEqual(payloads[record.id], {
                 'id': record.id, 'class': record.label, 'source_kind': record.source_kind,
@@ -430,7 +431,7 @@ class ExperimentTests(unittest.TestCase):
         neighbor = index.query(vectors[0], 1)[0]
         self.assertEqual((neighbor['id'], neighbor['label']), (records[0].id, records[0].label))
 
-    def test_combinations_and_collection_reuse(self):
+    def test_combinations_and_table_reuse(self):
         for flags in itertools.product([False, True], repeat=3):
             if not any(flags): continue
             exp = self.experiment(flags, str(flags))
@@ -442,63 +443,102 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(report['reference_source_counts'], expected)
             self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
             self.assertEqual((exp.output / 'descriptions.json').exists(), flags[2])
-            collection = exp.config['qdrant']['collection_prefix']
-            self.assertEqual(report['collection'], collection)
+            table = exp.config['lancedb']['table']
+            self.assertEqual(report['table'], table)
             with self.assertLogs(level='WARNING') as logs:
                 self.assertIsNone(exp.build_vector_database())
-            self.assertIn(collection, logs.output[0])
-            self.assertEqual(self.client.count(collection).count, sum(expected.values()))
+            self.assertIn(table, logs.output[0])
+            self.assertEqual(self.client.open_table(table).count_rows(), sum(expected.values()))
             with self.assertLogs(level='WARNING'):
                 self.assertEqual(exp.run()['metrics']['evaluated'], 2)
-            self.assertEqual(self.client.count(collection).count, sum(expected.values()))
+            self.assertEqual(self.client.open_table(table).count_rows(), sum(expected.values()))
 
-    def test_existing_collection_skips_all_build_work(self):
+    def test_existing_table_skips_all_build_work(self):
         original = self.experiment()
         artifact = original.build_vector_database()
-        snapshot = self.client.scroll(artifact['collection'], with_vectors=True)
+        snapshot = self.client.open_table(artifact['table']).to_arrow().to_pylist()
         previous = (original.output / 'index.json').read_bytes()
         with self.assertLogs(level='WARNING'):
             self.assertIsNone(original.build_vector_database())
         self.assertEqual((original.output / 'index.json').read_bytes(), previous)
 
         reused = self.experiment((True, False, True), 'reused')
-        reused.config['qdrant']['collection_prefix'] = artifact['collection']
+        reused.config['lancedb']['table'] = artifact['table']
         self.embedder_constructor.reset_mock()
         with patch.object(reused, '_get_text_inputs', side_effect=AssertionError('Read text')), \
              patch.object(self.dataset, 'iter_batches', side_effect=AssertionError('Read images')), \
-             patch.object(QdrantIndex, 'create', side_effect=AssertionError('Create collection')), \
-             patch.object(QdrantIndex, 'upsert', side_effect=AssertionError('Insert records')), \
+             patch.object(LanceDBIndex, 'create', side_effect=AssertionError('Create table')), \
+             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('Insert records')), \
              self.assertLogs(level='WARNING') as logs:
             self.assertIsNone(reused.build_vector_database())
-        self.assertIn(artifact['collection'], logs.output[0])
+        self.assertIn(artifact['table'], logs.output[0])
         self.embedder_constructor.assert_not_called()
         self.assertFalse(reused.output.exists())
-        self.assertEqual(self.client.scroll(artifact['collection'], with_vectors=True), snapshot)
+        self.assertEqual(self.client.open_table(artifact['table']).to_arrow().to_pylist(), snapshot)
         report = reused.evaluate()
-        self.assertEqual(report['collection'], artifact['collection'])
+        self.assertEqual(report['table'], artifact['table'])
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
         self.assertNotIn('model', report)
         self.assertIsNone(report['reference_source_counts'])
 
-    def test_evaluation_uses_configured_collection_with_stale_summary(self):
+    def test_evaluation_uses_configured_table_with_stale_summary(self):
         exp = self.experiment()
         exp.build_vector_database()
         path = exp.output / 'index.json'
         summary = json.loads(path.read_text())
-        summary['collection'] = 'unrelated_collection'
+        summary['table'] = 'unrelated_table'
         path.write_text(json.dumps(summary))
         report = exp.evaluate()
-        self.assertEqual(report['collection'], exp.config['qdrant']['collection_prefix'])
+        self.assertEqual(report['table'], exp.config['lancedb']['table'])
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
         self.assertNotIn('model', report)
         self.assertIsNone(report['reference_source_counts'])
 
-    def test_collection_lookup_failure_propagates_without_building(self):
+    def test_summary_for_same_table_in_different_database_is_ignored(self):
         exp = self.experiment()
-        with patch.object(self.client, 'collection_exists', side_effect=ConnectionError('offline')) as exists:
+        exp.build_vector_database()
+        path = exp.output / 'index.json'
+        summary = json.loads(path.read_text())
+        summary['uri'] = str(self.root / 'other_database')
+        path.write_text(json.dumps(summary))
+        self.assertIsNone(exp.evaluate()['reference_source_counts'])
+
+    def test_evaluation_reads_read_only_database(self):
+        exp = self.experiment()
+        artifact = exp.build_vector_database()
+        table = self.client.open_table(artifact['table'])
+        version, rows = table.version, table.to_arrow()
+        paths = [self.db_path, *self.db_path.rglob('*')]
+        modes = {path: path.stat().st_mode for path in paths}
+        try:
+            for path in paths:
+                path.chmod(0o555 if path.is_dir() else 0o444)
+            with patch.object(LanceDBIndex, 'create', side_effect=AssertionError('write')), \
+                 patch.object(LanceDBIndex, 'append', side_effect=AssertionError('write')):
+                self.assertEqual(self.experiment().evaluate()['metrics']['evaluated'], 2)
+            reopened = self.client.open_table(artifact['table'])
+            self.assertEqual(reopened.version, version)
+            self.assertEqual(reopened.to_arrow(), rows)
+        finally:
+            for path, mode in modes.items():
+                path.chmod(mode)
+
+    def test_evaluation_missing_database_or_table_creates_nothing(self):
+        exp = self.experiment()
+        for uri in (self.root / 'absent', self.db_path):
+            exp.config['lancedb']['uri'] = str(uri)
+            before = sorted(self.root.rglob('*'))
+            with self.assertRaises((FileNotFoundError, ValueError)):
+                exp.evaluate()
+            self.assertEqual(sorted(self.root.rglob('*')), before)
+            self.embedder_constructor.assert_not_called()
+
+    def test_table_lookup_failure_propagates_without_building(self):
+        exp = self.experiment()
+        with patch.object(LanceDBIndex, 'exists', side_effect=ConnectionError('offline')) as exists:
             with self.assertRaisesRegex(ConnectionError, 'offline'):
                 exp.build_vector_database()
-        exists.assert_called_once_with(exp.config['qdrant']['collection_prefix'])
+        exists.assert_called_once_with()
         self.embedder_constructor.assert_not_called()
         self.assertFalse(exp.output.exists())
 
@@ -525,20 +565,20 @@ class ExperimentTests(unittest.TestCase):
 
     def test_query_failure_and_empty_evaluation(self):
         exp = self.experiment(); exp.build_vector_database()
-        with patch('internvl.retrieval.QdrantIndex.query', side_effect=ConnectionError('offline')):
+        with patch('internvl.retrieval.LanceDBIndex.query', side_effect=ConnectionError('offline')):
             with self.assertRaises(ConnectionError): exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
         self.dataset.splits['validation'] = self.dataset.splits['validation'].select([])
         with self.assertRaisesRegex(ValueError, 'No evaluation'): exp.evaluate()
 
-    def test_empty_generation_and_missing_collection(self):
+    def test_empty_generation_and_missing_table(self):
         exp = self.experiment((False, False, True))
         with patch.object(self.Describer, 'describe_class', return_value=SimpleNamespace(description='')):
             with self.assertRaises(ValueError): exp.generate_descriptions()
         self.assertFalse((exp.output/'descriptions.json').exists())
         exp = self.experiment(name='valid')
         artifact = exp.build_vector_database()
-        self.client.delete_collection(artifact['collection'])
+        self.client.drop_table(artifact['table'])
         with self.assertRaises(Exception): exp.evaluate()
 
     def test_embedding_failure_aborts_without_retry(self):
@@ -554,7 +594,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_empty_retrieval(self):
         exp = self.experiment(); exp.build_vector_database()
-        with patch('internvl.retrieval.QdrantIndex.query', return_value=[]):
+        with patch('internvl.retrieval.LanceDBIndex.query', return_value=[]):
             report = exp.evaluate()
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 0)
         self.assertTrue(all(p['prediction'] is None for p in report['predictions']))
@@ -572,13 +612,13 @@ class ExperimentTests(unittest.TestCase):
                 image.close()
         exp = self.experiment((True, False, False))
         artifact = exp.build_vector_database()
-        stored, _ = self.client.scroll(artifact['collection'], with_vectors=True)
+        stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
         self.assertEqual(len(stored), 2)
         for point in stored:
-            row = next(r for r in self.rows if r['source_id'] == point.payload['source_identity'])
-            self.assertEqual(point.payload, dict(id=str(point.id), source_kind='training_image',
+            row = next(r for r in self.rows if r['source_id'] == point['source_identity'])
+            self.assertEqual({k: v for k, v in point.items() if k != 'vector'}, dict(id=point['id'], source_kind='training_image',
                 source_identity=row['source_id'], value=row['fname'], **{'class': row['class']}))
-            self.assertEqual(point.vector, [1., 0.] if row['class'] == 'Apple' else [0., 1.])
+            self.assertEqual(point['vector'], [1., 0.] if row['class'] == 'Apple' else [0., 1.])
         report = exp.evaluate()
         self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1', '0'])
         self.assertEqual(report['metrics']['evaluated'], 3)

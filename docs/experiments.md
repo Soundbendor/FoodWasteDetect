@@ -57,6 +57,38 @@ caption CSV files are not migrated. Class-name descriptions and captions of
 labeled training images have different provenance; preserve that distinction
 when using historical artifacts.
 
+## Whole-image LanceDB storage
+
+The internvl experiment uses embedded LanceDB 0.40 with PyArrow declared directly.
+`lancedb.uri` resolves relative to the working directory and expands `~`;
+`lancedb.table` names the reference table. Storage is independent of `output_dir`.
+Existing Qdrant collections and historical artifacts are untouched. Rebuild
+references from inputs into a new LanceDB table. The native Qdrant package,
+Pixi task, and server scripts remain for the separate CLIP/YOLO experiments.
+
+Build once, then submit evaluation jobs against the completed table with separate
+output directories. Each reader opens one table handle and runs exact cosine
+searches without writes, index creation, optimization, or cleanup. Concurrent
+writers to the same table are outside the supported workflow. Shared storage
+must be accessible from every allocated node; local temporary-directory tests
+do not establish cluster filesystem behavior.
+
+The existing full-run and evaluation Slurm wrappers preserve resources and
+forward `--set lancedb.uri=...` and `--set lancedb.table=...`. The sweep assigns a
+separate table and output directory to each model run and requires no Qdrant
+service. After indexing completes, evaluations can share the URI/table while
+writing reports under distinct `output_dir` values.
+
+New index summaries store `table`, resolved `uri`, source counts, and configuration.
+Evaluation reports use `table` instead of `collection`. Source counts are attached
+only when the local summary identifies the same URI and table. Existing tables,
+including partial builds, are reused without compatibility or completeness checks.
+Failures propagate; no rollback, retries, or partial evaluation reports are added.
+
+Search uses explicit cosine distance and `bypass_vector_index()`, converting each
+distance to similarity with `1 - distance`; voting is unchanged. See the
+[LanceDB search documentation](https://docs.lancedb.com/search/vector-search).
+
 ## Historical text evaluation
 
 The removed text classification workflow compared retrieved labels with FoodX251 validation labels.
@@ -128,6 +160,27 @@ The annotation scripts under `src/util/` include scripts with hard-coded paths
 and import-time data writes, particularly `joint_labels.py`. Inspect them before
 use; do not import them merely to discover their behavior.
 
+
+## LanceDB migration verification
+
+Both locked Pixi environments install LanceDB 0.40.0 and PyArrow 26.0.0.
+Python 3.13.13, PyTorch 2.7.1, torchvision 0.22.1, CUDA, Ollama, and native Qdrant
+constraints remain unchanged. Each environment passed 100 synthetic tests with
+one existing Ollama-guard skip and 94% package coverage; GPUs were hidden and
+Hugging Face downloads disabled. Ruff, scoped ty, shell syntax and argument
+forwarding checks, sweep isolation, and wheel/source builds passed. The root
+package also built successfully.
+
+Real temporary LanceDB tests cover persistence, payloads, float32/float64 inputs,
+cosine ranking and scores, malformed vectors, empty retrieval, and overwrite
+protection. Three spawned processes synchronize before overlapping searches of a
+completed table; its contents and version remain unchanged. Evaluation passes
+with database directories set to 0555 and files to 0444 under an unprivileged
+user, while missing databases/tables fail without creating storage or reports.
+The local sandbox stalled in LanceDB connection construction; the synthetic
+suites completed outside that sandbox. No real models, datasets, services, GPUs,
+or Slurm jobs were used. Shared-filesystem behavior and cluster concurrency
+remain separate acceptance checks.
 
 ## Previous environment verification
 

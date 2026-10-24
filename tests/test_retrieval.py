@@ -3,16 +3,19 @@
 import importlib.util
 import itertools
 import unittest
-from contextlib import closing
+import multiprocessing
+from pathlib import Path
+import tempfile
 from unittest.mock import Mock
 
-if any(importlib.util.find_spec(name) is None for name in ("numpy", "qdrant_client")):
-    raise unittest.SkipTest("requires NumPy and qdrant-client")
+if any(importlib.util.find_spec(name) is None for name in ("numpy", "lancedb")):
+    raise unittest.SkipTest("requires NumPy and LanceDB")
 
 import numpy as np
-from qdrant_client import QdrantClient
+import lancedb
+import pyarrow as pa
 
-from internvl.retrieval import QdrantIndex, classify, metrics
+from internvl.retrieval import LanceDBIndex, classify, metrics
 from internvl.schemas import Neighbor, PointRecord, Prediction
 
 
@@ -108,46 +111,105 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics(predictions, []), expected)
 
 
-class QdrantTests(unittest.TestCase):
-    def test_length_mismatch_does_not_upsert(self):
-        client = Mock(spec=QdrantClient)
-        index = QdrantIndex(client, "fixture", 2)
+def concurrent_reader(uri, barrier, queue):
+    index = LanceDBIndex(uri, "fixture")
+    index.open()
+    barrier.wait(timeout=30)
+    results = [index.query(np.array([1., 0.]), 10) for _ in range(10)]
+    queue.put(results)
+
+
+class LanceDBTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.uri = Path(self.temp.name) / "db"
+        self.index = LanceDBIndex(self.uri, "fixture")
+
+    def populate(self, dtype=np.float32):
+        self.index.create(2)
+        records = [PointRecord(label, "class_name", label, label) for label in ("A", "B", "C")]
+        vectors = np.array([[3., 0.], [1., 1.], [-2., 0.]], dtype=dtype)
+        self.index.append(records[:2], vectors[:2])
+        self.index.append(records[2:], vectors[2:])
+        return records, vectors
+
+    def test_length_mismatch_does_not_append(self):
+        self.index.table = Mock()
         record = PointRecord("A", "class_name", "A", "A")
         for records, vectors in [([record], np.empty((0, 2))), ([], np.ones((1, 2)))]:
-            with self.subTest(records=records):
-                with self.assertRaisesRegex(
-                    ValueError, "^Record/vector count mismatch$"
-                ):
-                    index.upsert(records, vectors)
-                client.upsert.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "Record/vector count mismatch"):
+                self.index.append(records, vectors)
+        self.index.table.add.assert_not_called()
 
-    def test_round_trip_and_collection_protection(self):
+    def test_round_trip_and_table_protection(self):
         for dtype in (np.float32, np.float64):
-            with self.subTest(dtype=dtype), closing(QdrantClient(":memory:")) as client:
-                index = QdrantIndex(client, "fixture", 2)
-                index.create()
-                records = [
-                    PointRecord(label, "class_name", label, label)
-                    for label in ("A", "B")
-                ]
-                vectors = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=dtype)
-                index.upsert(records, vectors)
-                with self.assertRaisesRegex(
-                    ValueError, "^Refusing to overwrite an existing collection$"
-                ):
-                    index.create()
-                stored = client.retrieve(
-                    "fixture", ids=[r.id for r in records], with_vectors=True
-                )
-                by_id = {str(point.id): point for point in stored}
-                for record, vector in zip(records, vectors, strict=True):
-                    self.assertEqual(by_id[record.id].payload, record.to_payload())
-                    np.testing.assert_allclose(by_id[record.id].vector, vector)
-                neighbors = index.query(vectors[0], 10)
-                self.assertEqual([n["label"] for n in neighbors], ["A", "B"])
-                self.assertEqual(neighbors[0]["id"], records[0].id)
-                self.assertAlmostEqual(neighbors[0]["score"], 1.0)
-                self.assertEqual(classify(neighbors), ("A", 0.5))
+            self.index = LanceDBIndex(self.uri / dtype.__name__, "fixture")
+            records, vectors = self.populate(dtype)
+            with self.assertRaises(ValueError):
+                self.index.create(2)
+            reopened = LanceDBIndex(self.index.uri, "fixture")
+            reopened.open()
+            stored = reopened.table.to_arrow()
+            self.assertEqual(stored.schema.field("vector").type, pa.list_(pa.float32(), 2))
+            for record, vector, point in zip(records, vectors, stored.to_pylist(), strict=True):
+                self.assertEqual({k: v for k, v in point.items() if k != "vector"}, record.to_payload())
+                np.testing.assert_allclose(point["vector"], vector)
+            neighbors = reopened.query(np.array([2., 0.], dtype=dtype), 10)
+            self.assertEqual([n["label"] for n in neighbors], ["A", "B", "C"])
+            np.testing.assert_allclose([n["score"] for n in neighbors], [1., 2**-0.5, -1.], atol=1e-6)
+            self.assertEqual(neighbors[0]["id"], records[0].id)
+            self.assertEqual(len(reopened.query(vectors[0], 1)), 1)
+
+    def test_empty_and_bad_vectors(self):
+        self.index.create(2)
+        self.assertEqual(self.index.query(np.array([1., 0.]), 10), [])
+        for vector in ([[1., 2., 3.]], [[float("nan"), 1.]]):
+            with self.assertRaises((ValueError, pa.ArrowInvalid)):
+                self.index.append([PointRecord("A", "class_name", "A", "A")], np.array(vector))
+            self.assertEqual(self.index.table.count_rows(), 0)
+
+    def test_missing_storage_is_not_created(self):
+        self.assertFalse(self.index.exists())
+        with self.assertRaises(FileNotFoundError):
+            self.index.open()
+        self.assertFalse(self.uri.exists())
+        self.uri.mkdir()
+        with self.assertRaises(ValueError):
+            self.index.open()
+        self.assertEqual(list(self.uri.iterdir()), [])
+
+    def test_path_resolution(self):
+        self.assertEqual(LanceDBIndex("~/fixtures", "a").uri, Path.home() / "fixtures")
+        self.assertEqual(LanceDBIndex("fixtures", "a").uri, Path.cwd() / "fixtures")
+
+    def test_concurrent_readers_preserve_table(self):
+        self.populate()
+        before = self.index.table.to_arrow()
+        version = self.index.table.version
+        ctx = multiprocessing.get_context("spawn")
+        barrier, queue = ctx.Barrier(3), ctx.Queue()
+        processes = [ctx.Process(target=concurrent_reader, args=(str(self.uri), barrier, queue)) for _ in range(3)]
+        try:
+            for process in processes:
+                process.start()
+            for _ in processes:
+                results = queue.get(timeout=45)
+                for result in results:
+                    self.assertEqual([n["label"] for n in result], ["A", "B", "C"])
+                    np.testing.assert_allclose([n["score"] for n in result], [1., 2**-0.5, -1.], atol=1e-6)
+            for process in processes:
+                process.join(timeout=10)
+                self.assertEqual(process.exitcode, 0)
+        finally:
+            for process in processes:
+                if process.is_alive():
+                    process.terminate()
+                process.join(timeout=10)
+            queue.close()
+        self.index.open()
+        self.assertEqual(self.index.table.version, version)
+        self.assertEqual(self.index.table.to_arrow(), before)
 
 
 if __name__ == "__main__":

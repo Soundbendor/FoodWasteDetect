@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "foodwaste-internvl"
 version = "0.1.0"
-description = "Whole-image food classification with Jina CLIP and Qdrant"
+description = "Whole-image food classification with Jina CLIP and LanceDB"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -18,7 +18,8 @@ dependencies = [
     "pillow>=13.0.0",
     "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
-    "qdrant-client>=1.19.1",
+    "lancedb>=0.40,<0.41",
+    "pyarrow>=16",
     "requests>=2.34.2",
     "sentence-transformers>=5.4,<6",
     "timm>=1.0.30",

@@ -267,7 +267,7 @@ class ConfigOverrideTests(unittest.TestCase):
         self.config = {
             "ollama": {"llm": "original:tag", "host": "http://localhost:11434"},
             "embedding": {"batch_size": 32},
-            "qdrant": {"connection": {"url": "http://localhost:6333"}},
+            "lancedb": {"uri": "assets/lancedb", "table": "fixture"},
             "embed_images": True,
             "k": 10,
             "threshold": 0.5,
@@ -304,7 +304,9 @@ class ConfigOverrideTests(unittest.TestCase):
                     "--set",
                     "threshold=0.75",
                     "--set",
-                    "qdrant.connection.url=http://service:6333",
+                    "lancedb.uri=assets/other",
+                    "--set",
+                    "lancedb.table=other_table",
                     "--set",
                     "output_dir=path with spaces",
                     "--set",
@@ -321,8 +323,9 @@ class ConfigOverrideTests(unittest.TestCase):
                 self.assertIs(actual["embed_images"], False)
                 self.assertEqual(actual["threshold"], 0.75)
                 self.assertEqual(
-                    actual["qdrant"]["connection"]["url"], "http://service:6333"
+                    actual["lancedb"]["uri"], "assets/other"
                 )
+                self.assertEqual(actual["lancedb"]["table"], "other_table")
                 self.assertEqual(actual["output_dir"], "path with spaces")
                 self.assertEqual(actual["command"], "literal")
                 self.assertEqual(actual["k"], 10)
@@ -384,6 +387,7 @@ class ConfigOverrideTests(unittest.TestCase):
         for overrides in (
             ["--set", "ollama.lm=typo"],
             ["--set", "new_key=1"],
+            ["--set", "qdrant.collection_prefix=old"],
             ["--set", "k"],
             ["--set", "=1"],
             ["--set", " =1"],
@@ -429,6 +433,34 @@ class ConfigOverrideTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("bash"), "requires bash")
 class SlurmOverrideTests(unittest.TestCase):
+    def test_sweep_uses_separate_tables_and_outputs(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            capture = temporary / "arguments"
+            sbatch = temporary / "sbatch"
+            sbatch.write_text('#!/bin/bash\nprintf "%s\\0" "$@" >> "$CAPTURE_ARGUMENTS"\n')
+            sbatch.chmod(0o755)
+            env = dict(os.environ, PATH=f"{temporary}:{os.environ.get('PATH', '')}",
+                       CAPTURE_ARGUMENTS=str(capture))
+            script = root / "scripts/submit_embedding_sweep.sh"
+            subprocess.run(["bash", "-n", str(script)], check=True)
+            tables, outputs = [], []
+            for _ in range(2):
+                capture.write_bytes(b"")
+                subprocess.run(["bash", str(script)], cwd=root, env=env, check=True)
+                args = capture.read_bytes().decode().rstrip("\0").split("\0")
+                table = next(a.removeprefix("lancedb.table=") for a in args if a.startswith("lancedb.table="))
+                output = next(a.removeprefix("output_dir=") for a in args if a.startswith("output_dir="))
+                self.assertEqual(output, f"assets/sweeps/{table}")
+                self.assertIn("sbatch/run_embedding.sbatch", args)
+                self.assertIn("cfg/classification.yml", args)
+                self.assertFalse(any("qdrant" in a for a in args))
+                tables.append(table)
+                outputs.append(output)
+            self.assertEqual(len(set(tables)), 2)
+            self.assertEqual(len(set(outputs)), 2)
+
     def test_wrappers_forward_arguments_and_keep_defaults(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as directory:
@@ -446,6 +478,7 @@ class SlurmOverrideTests(unittest.TestCase):
             for script, stage in (
                 ("scripts/generate_descriptions.sbatch", "describe"),
                 ("sbatch/test_embedding.sbatch", "evaluate"),
+                ("sbatch/run_embedding.sbatch", "run"),
             ):
                 subprocess.run(["bash", "-n", str(root / script)], check=True)
                 for extra in (
@@ -455,6 +488,8 @@ class SlurmOverrideTests(unittest.TestCase):
                         "--set",
                         "output_dir=output with spaces",
                         "--set=k=3",
+                        "--set=lancedb.uri=shared db",
+                        "--set=lancedb.table=fixture",
                     ],
                 ):
                     with self.subTest(script=script, extra=extra):

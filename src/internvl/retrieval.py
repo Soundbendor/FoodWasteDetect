@@ -1,12 +1,13 @@
-"""Qdrant boundary and backend-independent voting/metrics."""
+"""LanceDB boundary and backend-independent voting/metrics."""
 
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from typing import TypedDict, cast
+from pathlib import Path
+from typing import TypedDict
 
+import lancedb
 import numpy as np
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, SearchParams, VectorParams
+import pyarrow as pa
 
 from .schemas import Neighbor, PointRecord, Prediction
 
@@ -29,17 +30,12 @@ def classify(neighbors: Sequence[Neighbor]) -> tuple[str | None, float]:
     if not neighbors:
         return None, 0.0
     votes = Counter(n["label"] for n in neighbors)
-    best = {
-        label: max(n["score"] for n in neighbors if n["label"] == label)
-        for label in votes
-    }
+    best = {label: max(n["score"] for n in neighbors if n["label"] == label) for label in votes}
     winner = min(votes, key=lambda label: (-votes[label], -best[label], label))
     return winner, votes[winner] / len(neighbors)
 
 
-def metrics(
-    predictions: Sequence[Prediction], classes: Iterable[str]
-) -> RetrievalMetrics:
+def metrics(predictions: Sequence[Prediction], classes: Iterable[str]) -> RetrievalMetrics:
     """Calculate accuracy and per-class recall for completed predictions."""
     evaluated = len(predictions)
     support: Counter[str] = Counter()
@@ -68,53 +64,66 @@ def metrics(
     }
 
 
-class QdrantIndex:
-    def __init__(self, client: QdrantClient, collection: str, dimension: int) -> None:
-        """Store the client and collection settings."""
-        self.client, self.collection, self.dimension = client, collection, dimension
+class LanceDBIndex:
+    def __init__(self, uri: str | Path, table: str) -> None:
+        self.uri = Path(uri).expanduser().resolve()
+        self.name = table
+        self.table = None
 
-    def create(self) -> None:
-        """Create a new cosine collection without overwriting one."""
-        if self.client.collection_exists(self.collection):
-            raise ValueError("Refusing to overwrite an existing collection")
-        self.client.create_collection(
-            self.collection,
-            vectors_config=VectorParams(size=self.dimension, distance=Distance.COSINE),
+    def exists(self) -> bool:
+        """Check without creating a missing database directory."""
+        return self.uri.is_dir() and self.name in lancedb.connect(self.uri)
+
+    def open(self) -> None:
+        """Open a completed table for reads without creating storage."""
+        if not self.uri.is_dir():
+            raise FileNotFoundError(f"LanceDB database does not exist: {self.uri}")
+        self.table = lancedb.connect(self.uri).open_table(self.name)
+
+    def create(self, dimension: int) -> None:
+        """Create a typed table; the backend refuses existing names."""
+        schema = pa.schema(
+            [
+                pa.field(name, pa.string(), nullable=False)
+                for name in ("id", "class", "source_kind", "source_identity", "value")
+            ]
+            + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)]
+        )
+        self.table = lancedb.connect(self.uri).create_table(
+            self.name, schema=schema, mode="create", exist_ok=False
         )
 
-    def upsert(
+    def append(
         self,
         records: Sequence[PointRecord],
         vectors: np.ndarray[tuple[int, int], np.dtype[np.float32 | np.float64]],
     ) -> None:
-        """Insert paired reference records and vectors."""
+        """Append paired records; malformed vectors fail backend validation."""
         if len(records) != len(vectors):
             raise ValueError("Record/vector count mismatch")
-        self.client.upsert(
-            self.collection,
-            points=[
-                PointStruct(id=r.id, vector=v.tolist(), payload=r.to_payload())
+        if self.table is None:
+            raise RuntimeError("Open or create the table before insertion")
+        self.table.add(
+            [
+                dict(r.to_payload(), vector=v.tolist())
                 for r, v in zip(records, vectors, strict=True)
             ],
-            wait=True,
+            on_bad_vectors="error",
         )
 
     def query(
         self, vector: np.ndarray[tuple[int], np.dtype[np.float32 | np.float64]], k: int
     ) -> list[Neighbor]:
-        """Retrieve exact cosine neighbors with their labels."""
-        points = self.client.query_points(
-            self.collection,
-            query=vector.tolist(),
-            limit=k,
-            search_params=SearchParams(exact=True),
-            with_payload=True,
-        ).points
+        """Retrieve exact cosine neighbors, converting distance to similarity."""
+        if self.table is None:
+            raise RuntimeError("Open or create the table before querying")
+        points = (
+            self.table.search(vector.tolist())
+            .distance_type("cosine")
+            .bypass_vector_index()
+            .limit(k)
+            .to_list()
+        )
         return [
-            Neighbor(
-                id=str(p.id),
-                label=cast(dict[str, str], p.payload)["class"],
-                score=float(p.score),
-            )
-            for p in points
+            Neighbor(id=p["id"], label=p["class"], score=1 - float(p["_distance"])) for p in points
         ]

@@ -136,13 +136,14 @@ failures propagate without saved partial reports. There is no top-five metric.
 Git revision, dependency-version, and timestamp provenance tracking has been
 removed from the whole-image runner by user request.
 Artifact validation is explicitly deferred by user request. Do not add hashes,
-compatibility checks, manifest comparisons, or collection-content verification.
+compatibility checks, manifest comparisons, or table-content verification.
 The runner preserves strict row/vector pairing and requires a nonempty validation
 split with exactly one prediction per image before saving a report.
 `Experiment(config)` loads dataset metadata and class names during construction,
 including for disabled or cached description commands. It stores batch size once,
 defaulting to 32, and creates directories only in writing stages. The embedder
-and Qdrant client are constructed on first use and reused. `run()` finishes
+is constructed on first use and reused. LanceDB tables are opened once per
+evaluation. `run()` finishes
 Ollama description generation before constructing the embedder. Constructor
 injection arguments and `_positive_integer()` have been removed.
 `validate_config()` requires boolean reference switches and at least one enabled
@@ -157,27 +158,39 @@ prompt. The experiment owns saved-file handling and the Ollama context. The lega
 `generate_descriptors(ds, save_path)` method has been removed; use
 `generate_descriptions(classes, count)` instead.
 Failures and interrupts propagate without retries or partial reports. A failed
-index build may leave a partial Qdrant collection; no rollback or cleanup is added.
+index build may leave a partial LanceDB table; no rollback or cleanup is added.
 The previous successful index summary remains intact after a failed rebuild.
 The `index` CLI command calls `Experiment.build_vector_database()`; the former
 Python method `index()` has been renamed. The `describe` CLI command calls
 `Experiment.generate_descriptions()`, formerly `describe()`.
-CLI commands and YAML keys remain unchanged; the Python constructor and new
-report formats intentionally change. Temporary-file JSON replacement remains.
-Existing descriptions load directly. `qdrant.collection_prefix` now supplies the
-exact collection name without an appended UUID. `build_vector_database()` checks
-existence before loading the embedder or reading training inputs. For an existing
-collection it warns and returns None, leaving vectors and index.json untouched.
-For a missing collection it inserts records and saves collection name, source
-counts and configuration in index.json after success. Select a
-new name to build again, or an older collection's full name to reuse it.
-No compatibility or completeness checks are added; partial collections are also
-reused. `run()` still generates or loads descriptions before the build stage.
-Evaluation queries the configured collection and uses a local index.json only
-for metadata about that same collection. Without a matching summary, reference_source_counts is null. This supports reuse across output directories
-without claiming knowledge of the stored vectors. A successful evaluation
-writes only `evaluation_<UTC timestamp>/report.json`, with configuration, collection,
-reference-source counts, predictions, and metrics. Prediction `value`, evaluation
+CLI stages remain unchanged. Storage uses `lancedb.uri` and `lancedb.table`;
+the old Qdrant configuration is removed. The URI is a filesystem path resolved
+from the working directory with `~` expansion, independent of `output_dir`.
+Temporary-file JSON replacement and saved description loading remain.
+`build_vector_database()` checks table existence before loading the embedder or
+reading reference inputs. Existing tables warn and return None, leaving vectors
+and index.json untouched. Missing tables use an explicit Arrow schema: string
+ID, class, source kind, source identity, value, and fixed-length float32 vector.
+Creation refuses overwrites; batches append with strict record/vector pairing
+and backend rejection of malformed vectors. UUIDs remain unchanged.
+A successful index.json saves `table`, resolved `uri`, source counts, and config.
+No compatibility or completeness checks are added; partial tables are also reused.
+`run()` still generates or loads descriptions before the build stage.
+Evaluation opens an existing database/table without creating storage. It performs
+only searches, using explicit cosine distance and `bypass_vector_index()` for
+exact retrieval; similarity is `1 - distance`. It reuses the opened table and
+performs no insertion, indexing, optimization, or cleanup. Local index.json source
+counts are used only when both resolved URI and table match; otherwise
+`reference_source_counts` is null. Each successful evaluation writes only
+`evaluation_<UTC timestamp>/report.json` with configuration, table,
+reference-source counts, predictions, and metrics.
+The supported workflow is one completed build followed by concurrent readers.
+Use a shared filesystem path accessible from every participating node and
+separate output directories for evaluation jobs. Concurrent writers to the same
+table are outside this contract. Rebuild from reference inputs; do not migrate
+or modify old Qdrant collections. The separate CLIP/YOLO Qdrant backend, native
+package, Pixi task, and server scripts remain unchanged.
+Prediction `value`, evaluation
 manifest, fixed retrieval settings, status/error fields, and separate prediction
 and metric files have been removed. Metrics retain evaluated count, majority-vote
 and nearest-neighbor accuracy, and per-class metrics; no intermediate counts or
@@ -201,12 +214,13 @@ Compare complete retrieval strategies, because changing reference sources also
 changes reference counts. No tuning or subsampling occurs.
 
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
-FoodX251 fixtures, Hugging Face datasets, and qdrant-client's in-memory backend.
+FoodX251 fixtures, Hugging Face datasets, and real LanceDB databases in temporary
+directories.
 Embedding contracts are isolated in `tests/test_embeddings.py` and require
 Sentence Transformers, CPU PyTorch, NumPy, and Pillow. `EmbeddingModel` wraps a
 `SentenceTransformer` directly; `encode()` owns inference batching and NumPy
-conversion. The wrapper does not request embedding normalization; Qdrant handles
-normalization for cosine retrieval. Model settings are recorded only through the saved experiment
+conversion. The wrapper does not request embedding normalization; LanceDB computes
+cosine distance on the stored vectors. Model settings are recorded only through the saved experiment
 configuration; the embedder has no metadata dictionary/property or separate artifact
 model field. The experiment iterates decoded dataset batches to bound
 image memory; `encode_images()` prepares the supplied batch without rebatching it.
@@ -222,7 +236,7 @@ real-model compatibility. `EmbeddingModel` has no backend injection parameter;
 encoding tests patch `_load_backend()` to return a fake or synthetic encoder.
 Install the CPU environment described in `src/internvl/README.md` for these tests;
 retain explicit skips when dependencies are absent.
-These tests do not establish real model, dataset, GPU, Ollama, remote-Qdrant, or HPC
+These tests do not establish real model, dataset, GPU, Ollama, shared-filesystem, or HPC
 compatibility. The historical workflow limitations below describe the removed
 legacy source, and must not be attributed to the new experiment runner.
 

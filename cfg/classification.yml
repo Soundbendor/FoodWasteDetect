@@ -15,11 +15,9 @@ ollama:
   host: http://127.0.0.1:11434
   startup_timeout: 120
   request_timeout: 600
-qdrant:
-  connection:
-    url: http://127.0.0.1:6333
-  # Exact collection name; an existing collection is reused without insertion.
-  collection_prefix: foodx251_whole_image
+lancedb:
+  uri: assets/lancedb
+  table: foodx251_whole_image
 k: 10
 description_count: 5
 output_dir: assets/classification/descriptions_v1

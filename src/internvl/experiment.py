@@ -10,12 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from qdrant_client import QdrantClient
-
 from .embeddings import EmbeddingModel
 from .generate_descriptors import DescriberLLM
 from .image_dataset import load_dataset
-from .retrieval import QdrantIndex, classify, metrics
+from .retrieval import LanceDBIndex, classify, metrics
 from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 
 
@@ -79,7 +77,7 @@ class Experiment:
 
     Uses Ollama (default: gemma3:27b) to generate description sentences for each class,
     generating an embedding vector for training class labels, images, and descriptor captions
-    with CLIP. Populates a Qdrant vector database with these embedding vectors. Uses cosine
+    with CLIP. Populates a LanceDB vector database with these embedding vectors. Uses cosine
     similarity search to classify samples at inference time.
     """
 
@@ -90,7 +88,7 @@ class Experiment:
         self.dataset = load_dataset(config["dataset"])
         self.classes = self.dataset.get_class_list()
         self.batch_size = config["embedding"].get("batch_size", 32)
-        self.client = None
+
         self._embedder = None
 
     @property
@@ -102,12 +100,8 @@ class Experiment:
             )
         return self._embedder
 
-    # TODO: Refactor QdrantClient and deprecate image class-specific adapter.
-    def _qdrant_adapter(self, collection: str):
-        """Initialize Qdrant wrapper."""
-        if self.client is None:
-            self.client = QdrantClient(**self.config["qdrant"]["connection"])
-        return QdrantIndex(self.client, collection, self.embedder.dimension)
+    def _lancedb_adapter(self):
+        return LanceDBIndex(**self.config["lancedb"])
 
     def generate_descriptions(self) -> dict[str, list[str]] | None:
         """Load saved descriptions or generate them in an owned Ollama context.
@@ -123,9 +117,7 @@ class Experiment:
             return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
         self.output.mkdir(parents=True, exist_ok=True)
         with DescriberLLM(self.config["ollama"]) as llm:
-            descriptions = llm.generate_descriptions(
-                self.classes, self.config["description_count"]
-            )
+            descriptions = llm.generate_descriptions(self.classes, self.config["description_count"])
         _write_json(path, dict(descriptions=descriptions))
         return descriptions
 
@@ -154,10 +146,10 @@ class Experiment:
         return records
 
     def _insert_text_records(self, index, records: list[PointRecord]) -> Counter:
-        """Generate embedding vectors from text inputs and save vectors in Qdrant.
+        """Generate embedding vectors from text inputs and save vectors in LanceDB.
 
         Args:
-            index: A QdrantIndex object, wrapping the vector database collection.
+            index: A LanceDBIndex object, wrapping the vector database table.
             records: A list of text records to embed and append.
 
         Returns:
@@ -166,15 +158,15 @@ class Experiment:
         counts = Counter()
         for start in range(0, len(records), self.batch_size):
             batch = records[start : start + self.batch_size]
-            index.upsert(batch, self.embedder.encode_text([r.value for r in batch]))
+            index.append(batch, self.embedder.encode_text([r.value for r in batch]))
             counts.update(r.source_kind for r in batch)
         return counts
 
     def _insert_image_records(self, index) -> Counter:
-        """Generate embedding vectors from images and save vectors in Qdrant.
+        """Generate embedding vectors from images and save vectors in LanceDB.
 
         Args:
-            index: A QdrantIndex object, wrapping the vector database collection.
+            index: A LanceDBIndex object, wrapping the vector database table.
         Returns:
             A Counter documenting how many records of each modality were inserted.
         """
@@ -182,12 +174,10 @@ class Experiment:
         image_classes = set()
         for batch in self.dataset.iter_batches("train", self.batch_size):
             records = [
-                PointRecord(
-                    row["class"], "training_image", row["source_id"], row["fname"]
-                )
+                PointRecord(row["class"], "training_image", row["source_id"], row["fname"])
                 for row in _batch_rows(batch)
             ]
-            index.upsert(records, self.embedder.encode_images(batch["image"]))
+            index.append(records, self.embedder.encode_images(batch["image"]))
             counts.update(r.source_kind for r in records)
             image_classes.update(r.label for r in records)
         if image_classes != set(self.classes):
@@ -197,30 +187,27 @@ class Experiment:
         return counts
 
     def build_vector_database(self) -> dict | None:
-        """Build the configured collection, or warn and return if it already exists."""
-        collection = self.config["qdrant"]["collection_prefix"]
-        if self.client is None:
-            self.client = QdrantClient(**self.config["qdrant"]["connection"])
-        if self.client.collection_exists(collection):
+        """Build the configured table, or warn and return if it already exists."""
+        table = self.config["lancedb"]["table"]
+        index = self._lancedb_adapter()
+        if index.exists():
             logging.warning(
-                "Qdrant collection %r already exists; reusing its precomputed vectors "
+                "LanceDB table %r already exists; reusing its precomputed vectors "
                 "without inserting records or checking compatibility.",
-                collection,
+                table,
             )
             return None
         self.output.mkdir(parents=True, exist_ok=True)
         records = self._get_text_inputs()
-        index = self._qdrant_adapter(collection)
-        index.create()
+        index.create(self.embedder.dimension)
         counts = self._insert_text_records(index, records)
         if self.config["embed_images"]:
             counts.update(self._insert_image_records(index))
         if not counts:
-            raise ValueError(
-                "No records inserted into Qdrant - check dataset and config."
-            )
+            raise ValueError("No records inserted into LanceDB - check dataset and config.")
         artifact = dict(
-            collection=collection,
+            table=table,
+            uri=str(index.uri),
             source_counts=counts,
             config=self.config,
         )
@@ -229,44 +216,42 @@ class Experiment:
 
     def evaluate(self) -> dict:
         """Classify the full validation split and save one report after success."""
-        collection = self.config["qdrant"]["collection_prefix"]
+        table = self.config["lancedb"]["table"]
+        index = self._lancedb_adapter()
+        index.open()
         artifact = {}
         path = self.output / "index.json"
-        # Resume from checkpoint: Run evaluation after training has been completed.
-        # TODO: We may want a config flag protecting this functionality.
         if path.exists():
             logging.info("Loading index.json from checkpoint...")
             summary = json.loads(path.read_text(encoding="utf-8"))
-            # Only attach saved metadata for the collection being queried.
-            if summary["collection"] == collection:
+            # Only attach metadata identifying this database and table.
+            saved_uri = summary.get("uri")
+            if (
+                summary.get("table") == table
+                and saved_uri is not None
+                and Path(saved_uri).expanduser().resolve() == index.uri
+            ):
                 artifact = summary
-        index = self._qdrant_adapter(collection)
         # Classify test-time samples based on majority-vote query to vdb
         predictions: list[Prediction] = []
         for batch in self.dataset.iter_batches("val", self.batch_size):
             rows = _batch_rows(batch)
             vectors = self.embedder.encode_images(batch["image"])
             for record, vector in zip(rows, vectors, strict=True):
-                predictions.append(
-                    _prediction(record, index.query(vector, self.config["k"]))
-                )
+                predictions.append(_prediction(record, index.query(vector, self.config["k"])))
         selected = len(self.dataset.test_set())
         if not selected:
             raise ValueError("No evaluation images; accuracy is undefined")
         if selected != len(predictions):
-            raise ValueError(
-                "Incomplete evaluation: validation and prediction counts differ"
-            )
+            raise ValueError("Incomplete evaluation: validation and prediction counts differ")
         report = dict(
             config=self.config,
-            collection=collection,
+            table=table,
             reference_source_counts=artifact.get("source_counts"),
             predictions=predictions,
             metrics=metrics(predictions, self.classes),
         )
-        run_dir = self.output / datetime.now(UTC).strftime(
-            "evaluation_%Y%m%dT%H%M%S_%fZ"
-        )
+        run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
         run_dir.mkdir(parents=True)
         _write_json(run_dir / "report.json", report)
         return report
