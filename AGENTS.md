@@ -111,7 +111,12 @@ backends, automatic artifact isolation, or service management.
 This independent whole-image baseline embeds pixels
 without InternVL captioning or YOLO. Its three reference booleans select any
 nonempty combination of class names, generated descriptions, and training images.
-Use all official FoodX251 training references and labeled validation images for
+Use all official FoodX251 training references by default. Optional
+`n_imgs_per_class` selects the first N training images per class in annotation
+order when image references are enabled. Omitted or null uses all images; other
+values must be positive integers (booleans are rejected). Selection occurs before
+decoding, does not mutate stored splits, and is independent of batch size.
+Text references are unchanged. Use the full labeled validation split for
 evaluation, recording `source_split="val"`; never claim official test accuracy.
 The dataset adapter resolves image paths, preserves legacy names, and rejects
 duplicate source identities within each split. It does not compare training and
@@ -203,7 +208,7 @@ typed Hugging Face `DatasetDict` (`splits['train']`, `splits['validation']`) and
 through `train_set()` and `test_set()`. Class ID mapping and naturalized names
 remain compatible. `train_path` points to the training images; `val_path` and
 `test_path` point to labeled validation images. No official test files are read.
-`iter_batches(split, batch_size)` accepts `train`, `val`, or `validation`, enables
+`iter_batches(split, batch_size, *, n_imgs_per_class=None)` accepts `train`, `val`, or `validation`, enables
 image decoding, and uses `Dataset.iter()` with the final partial batch retained.
 Metadata access leaves images undecoded. The experiment embeds decoded PIL images
 and leaves their cleanup to garbage collection. Paths must resolve within their
@@ -211,7 +216,11 @@ split's image directory. Image-content hashing and SHA-256 metadata were
 removed by user request; do not restore them. Image files are read when batches
 are decoded, and loading failures propagate. No exclusion artifacts are written by new runs.
 Compare complete retrieval strategies, because changing reference sources also
-changes reference counts. No tuning or subsampling occurs.
+changes reference counts. The optional image cap is deterministic, without random
+sampling or tuning. Saved configuration records the limit and source counts reflect
+inserted images. Existing tables remain reusable without modification; use a new
+`lancedb.table` to build references with a different limit. CLI overrides such as
+`--set n_imgs_per_class=20` require the key in custom YAML files.
 
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
 FoodX251 fixtures, Hugging Face datasets, and real LanceDB databases in temporary

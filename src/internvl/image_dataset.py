@@ -1,5 +1,6 @@
 """Local FoodX251 annotations and Hugging Face image datasets."""
 
+from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -88,9 +89,23 @@ class FoodX251ImageDataset:
         """Return the official labeled validation split used for evaluation."""
         return self.splits["validation"]
 
-    def iter_batches(self, split: str, batch_size: int) -> Iterator[dict[str, list]]:
+    def iter_batches(
+        self,
+        split: str,
+        batch_size: int,
+        *,
+        n_imgs_per_class: int | None = None,
+    ) -> Iterator[dict[str, list]]:
         """Yield decoded image batches in annotation order; caller closes images."""
         dataset = self.splits[SPLIT_NAMES.get(split, split)]
+        if n_imgs_per_class is not None:
+            counts: Counter[str] = Counter()
+            indices: list[int] = []
+            for index, label in enumerate(dataset["class"]):
+                if counts[label] < n_imgs_per_class:
+                    indices.append(index)
+                    counts[label] += 1
+            dataset = dataset.select(indices)
         return dataset.cast_column("image", Image()).iter(
             batch_size=batch_size, drop_last_batch=False
         )
