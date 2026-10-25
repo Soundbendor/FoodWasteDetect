@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, call, mock_open, patch
+from unittest.mock import ANY, MagicMock, Mock, call, mock_open, patch
 
 import yaml
 
@@ -19,6 +19,11 @@ from internvl.cli import main
 
 
 class CommandTests(unittest.TestCase):
+    def setUp(self):
+        # Dispatch-only tests use minimal settings; tracking/validation have dedicated tests.
+        self.enterContext(patch("internvl.cli.validate_config"))
+        self.enterContext(patch("internvl.cli.track_invocation"))
+
     def test_command_help_does_not_dispatch(self):
         for command in ([], ["experiment"], ["download_model"]):
             with (
@@ -37,7 +42,7 @@ class CommandTests(unittest.TestCase):
         for command, loader in (
             (
                 ["experiment", "run", "--config_file", "selected.yml"],
-                "internvl.cli.OmegaConf.load",
+                "internvl.cli.OmegaConf.create",
             ),
             (["download_model", "requested:tag"], "yaml.safe_load"),
         ):
@@ -229,8 +234,8 @@ class CommandTests(unittest.TestCase):
                 ) as opened,
             ):
                 main(["experiment", stage, "--config_file", "selected.yml"])
-            opened.assert_called_once_with("selected.yml", encoding="utf-8")
-            experiment.assert_called_once_with({"output_dir": "synthetic"})
+            opened.assert_called_once_with("selected.yml", encoding="utf-8", newline="")
+            experiment.assert_called_once_with({"output_dir": "synthetic"}, tracker=ANY)
             self.assertEqual(
                 experiment.return_value.method_calls, [getattr(call, method)()]
             )
@@ -255,13 +260,15 @@ class CommandTests(unittest.TestCase):
                     patch("internvl.cli.Experiment", experiment),
                 ):
                     main(["experiment", stage, "--config_file", str(config_path)])
-                experiment.assert_called_once_with({"k": 7})
+                experiment.assert_called_once_with({"k": 7}, tracker=ANY)
                 getattr(experiment.return_value, method).assert_called_once_with()
                 experiment.reset_mock()
 
 
 class ConfigOverrideTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch("internvl.cli.validate_config"))
+        self.enterContext(patch("internvl.cli.track_invocation"))
         directory = self.enterContext(tempfile.TemporaryDirectory())
         self.path = Path(directory) / "config.yml"
         self.config = {

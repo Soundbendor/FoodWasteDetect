@@ -8,7 +8,8 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
-from .experiment import Experiment
+from .experiment import Experiment, validate_config
+from .tracking import track_invocation
 
 
 def download_model(model_name: str) -> None:
@@ -29,9 +30,10 @@ def _override_assignment(value: str) -> str:
     return value
 
 
-def _load_config(config_file: str, overrides: Sequence[str]) -> dict[str, Any]:
-    with open(config_file, encoding="utf-8") as stream:
-        config = OmegaConf.load(stream)
+def _load_config(config_file: str, overrides: Sequence[str]) -> tuple[dict[str, Any], str]:
+    with open(config_file, encoding="utf-8", newline="") as stream:
+        source_yaml = stream.read()
+        config = OmegaConf.create(source_yaml)
     if not isinstance(config, DictConfig):
         raise ValueError("Experiment configuration must be a YAML mapping")
     OmegaConf.set_struct(config, True)
@@ -39,7 +41,7 @@ def _load_config(config_file: str, overrides: Sequence[str]) -> dict[str, Any]:
         config.merge_with_dotlist(list(overrides))
     except (OmegaConfBaseException, yaml.YAMLError) as error:
         raise argparse.ArgumentTypeError(str(error)) from error
-    return cast(dict[str, Any], OmegaConf.to_container(config, resolve=True))
+    return cast(dict[str, Any], OmegaConf.to_container(config, resolve=True)), source_yaml
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -78,15 +80,24 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_experiment(config: dict[str, Any], stage: str) -> None:
-    experiment = Experiment(config)
-    stages = {
-        "describe": experiment.generate_descriptions,
-        "index": experiment.build_vector_database,
-        "evaluate": experiment.evaluate,
-        "run": experiment.run,
-    }
-    stages[stage]()
+def _run_experiment(
+    config: dict[str, Any],
+    stage: str,
+    *,
+    config_path: str,
+    source_yaml: str,
+    overrides: Sequence[str],
+) -> None:
+    validate_config(config)
+    with track_invocation(config, stage, config_path, source_yaml, overrides) as tracker:
+        experiment = Experiment(config, tracker=tracker)
+        stages = {
+            "describe": experiment.generate_descriptions,
+            "index": experiment.build_vector_database,
+            "evaluate": experiment.evaluate,
+            "run": experiment.run,
+        }
+        stages[stage]()
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -95,9 +106,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.command == "experiment":
         try:
-            config = _load_config(args.config_file, args.overrides)
+            config, source_yaml = _load_config(args.config_file, args.overrides)
         except argparse.ArgumentTypeError as error:
             parser.error(str(error))
-        _run_experiment(config, args.stage)
+        _run_experiment(
+            config,
+            args.stage,
+            config_path=args.config_file,
+            source_yaml=source_yaml,
+            overrides=args.overrides,
+        )
     elif args.command == "download_model":
         download_model(args.model_name)

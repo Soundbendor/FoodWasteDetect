@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import httpx
@@ -166,17 +166,22 @@ class DescriberLLM:
         return self._describe_class(label, descriptor_prompt(label))
 
     def generate_descriptions(
-        self, classes: Sequence[str], count: int
+        self,
+        classes: Sequence[str],
+        count: int,
+        *,
+        on_description: Callable[[], None] | None = None,
     ) -> dict[str, list[str]]:
         """Generate the requested descriptions for each class, rejecting empty text."""
         descriptions = {}
         for label in classes:
-            descriptions[label] = [
-                self.describe_class(label).description for _ in range(count)
-            ]
-            if not descriptions[label] or any(
-                not text.strip() for text in descriptions[label]
-            ):
+            descriptions[label] = []
+            for _ in range(count):
+                description = self.describe_class(label).description
+                if on_description is not None:
+                    on_description()
+                descriptions[label].append(description)
+            if not descriptions[label] or any(not text.strip() for text in descriptions[label]):
                 raise ValueError(f"Empty generated description for {label}")
         return descriptions
 

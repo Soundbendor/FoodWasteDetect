@@ -26,6 +26,7 @@ dependencies = [
     "tqdm>=4.70.1",
     "transformers<5",
     "omegaconf>=2.3,<3",
+    "wandb>=0.28.1,<0.29",
 ]
 
 [project.scripts]
@@ -54,7 +55,7 @@ root = [".."]
 python-version = "3.13"
 
 [tool.ty.src]
-include = ["cli.py", "schemas.py"]
+include = ["cli.py", "schemas.py", "tracking.py"]
 
 [dependency-groups]
 dev = [

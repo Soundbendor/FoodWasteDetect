@@ -15,6 +15,7 @@ from .generate_descriptors import DescriberLLM
 from .image_dataset import load_dataset
 from .retrieval import LanceDBIndex, classify, metrics
 from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
+from .tracking import StageProgress, Tracker
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -81,7 +82,8 @@ class Experiment:
     similarity search to classify samples at inference time.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, *, tracker: Tracker | None = None):
+        self.tracker = tracker
         # Load dataset metadata and settings
         self.config = validate_config(config)
         self.output = Path(config["output_dir"]).expanduser().resolve()
@@ -109,17 +111,25 @@ class Experiment:
         Returns:
             A list of descriptions in {"class_name", ["desc1", "desc2",...]} format.
         """
-        if not self.config["embed_descriptions"]:
-            return None
-        path = self.output / "descriptions.json"
-        if path.exists():
-            logging.info(f"Loading existing descriptions at {path}")
-            return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
-        self.output.mkdir(parents=True, exist_ok=True)
-        with DescriberLLM(self.config["ollama"]) as llm:
-            descriptions = llm.generate_descriptions(self.classes, self.config["description_count"])
-        _write_json(path, dict(descriptions=descriptions))
-        return descriptions
+        with StageProgress(self.tracker, "descriptions") as progress:
+            if not self.config["embed_descriptions"]:
+                progress.state = "disabled"
+                return None
+            path = self.output / "descriptions.json"
+            if path.exists():
+                progress.state = "reused"
+                logging.info(f"Loading existing descriptions at {path}")
+                return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
+            progress.start(len(self.classes) * self.config["description_count"])
+            self.output.mkdir(parents=True, exist_ok=True)
+            with DescriberLLM(self.config["ollama"]) as llm:
+                descriptions = llm.generate_descriptions(
+                    self.classes,
+                    self.config["description_count"],
+                    on_description=progress.advance if self.tracker else None,
+                )
+            _write_json(path, dict(descriptions=descriptions))
+            return descriptions
 
     def _get_text_inputs(self) -> list[PointRecord]:
         """Build enabled text inputs in class order from names and saved descriptions.
@@ -145,7 +155,9 @@ class Experiment:
             ]
         return records
 
-    def _insert_text_records(self, index, records: list[PointRecord]) -> Counter:
+    def _insert_text_records(
+        self, index, records: list[PointRecord], progress: StageProgress
+    ) -> Counter:
         """Generate embedding vectors from text inputs and save vectors in LanceDB.
 
         Args:
@@ -160,9 +172,10 @@ class Experiment:
             batch = records[start : start + self.batch_size]
             index.append(batch, self.embedder.encode_text([r.value for r in batch]))
             counts.update(r.source_kind for r in batch)
+            progress.advance(len(batch))
         return counts
 
-    def _insert_image_records(self, index) -> Counter:
+    def _insert_image_records(self, index, progress: StageProgress) -> Counter:
         """Generate embedding vectors from images and save vectors in LanceDB.
 
         Args:
@@ -180,6 +193,7 @@ class Experiment:
             index.append(records, self.embedder.encode_images(batch["image"]))
             counts.update(r.source_kind for r in records)
             image_classes.update(r.label for r in records)
+            progress.advance(len(records))
         if image_classes != set(self.classes):
             raise ValueError(
                 f"Missing usable training references for {set(self.classes) - image_classes}"
@@ -188,73 +202,91 @@ class Experiment:
 
     def build_vector_database(self) -> dict | None:
         """Build the configured table, or warn and return if it already exists."""
-        table = self.config["lancedb"]["table"]
-        index = self._lancedb_adapter()
-        if index.exists():
-            logging.warning(
-                "LanceDB table %r already exists; reusing its precomputed vectors "
-                "without inserting records or checking compatibility.",
-                table,
+        with StageProgress(self.tracker, "reference_embedding") as progress:
+            table = self.config["lancedb"]["table"]
+            index = self._lancedb_adapter()
+            if index.exists():
+                progress.state = "reused"
+                logging.warning(
+                    "LanceDB table %r already exists; reusing its precomputed vectors "
+                    "without inserting records or checking compatibility.",
+                    table,
+                )
+                return None
+            self.output.mkdir(parents=True, exist_ok=True)
+            records = self._get_text_inputs()
+            if self.tracker:
+                progress.start(
+                    len(records)
+                    + (len(self.dataset.train_set()) if self.config["embed_images"] else 0)
+                )
+            index.create(self.embedder.dimension)
+            counts = self._insert_text_records(index, records, progress)
+            if self.config["embed_images"]:
+                counts.update(self._insert_image_records(index, progress))
+            if not counts:
+                raise ValueError("No records inserted into LanceDB - check dataset and config.")
+            artifact = dict(
+                table=table,
+                uri=str(index.uri),
+                source_counts=counts,
+                config=self.config,
             )
-            return None
-        self.output.mkdir(parents=True, exist_ok=True)
-        records = self._get_text_inputs()
-        index.create(self.embedder.dimension)
-        counts = self._insert_text_records(index, records)
-        if self.config["embed_images"]:
-            counts.update(self._insert_image_records(index))
-        if not counts:
-            raise ValueError("No records inserted into LanceDB - check dataset and config.")
-        artifact = dict(
-            table=table,
-            uri=str(index.uri),
-            source_counts=counts,
-            config=self.config,
-        )
-        _write_json(self.output / "index.json", artifact)
-        return artifact
+            _write_json(self.output / "index.json", artifact)
+            if self.tracker:
+                self.tracker.reference_counts(dict(counts))
+            return artifact
 
     def evaluate(self) -> dict:
         """Classify the full validation split and save one report after success."""
-        table = self.config["lancedb"]["table"]
-        index = self._lancedb_adapter()
-        index.open()
-        artifact = {}
-        path = self.output / "index.json"
-        if path.exists():
-            logging.info("Loading index.json from checkpoint...")
-            summary = json.loads(path.read_text(encoding="utf-8"))
-            # Only attach metadata identifying this database and table.
-            saved_uri = summary.get("uri")
-            if (
-                summary.get("table") == table
-                and saved_uri is not None
-                and Path(saved_uri).expanduser().resolve() == index.uri
-            ):
-                artifact = summary
-        # Classify test-time samples based on majority-vote query to vdb
-        predictions: list[Prediction] = []
-        for batch in self.dataset.iter_batches("val", self.batch_size):
-            rows = _batch_rows(batch)
-            vectors = self.embedder.encode_images(batch["image"])
-            for record, vector in zip(rows, vectors, strict=True):
-                predictions.append(_prediction(record, index.query(vector, self.config["k"])))
-        selected = len(self.dataset.test_set())
-        if not selected:
-            raise ValueError("No evaluation images; accuracy is undefined")
-        if selected != len(predictions):
-            raise ValueError("Incomplete evaluation: validation and prediction counts differ")
-        report = dict(
-            config=self.config,
-            table=table,
-            reference_source_counts=artifact.get("source_counts"),
-            predictions=predictions,
-            metrics=metrics(predictions, self.classes),
-        )
-        run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
-        run_dir.mkdir(parents=True)
-        _write_json(run_dir / "report.json", report)
-        return report
+        with StageProgress(self.tracker, "evaluation") as progress:
+            if self.tracker:
+                progress.start(len(self.dataset.test_set()))
+            table = self.config["lancedb"]["table"]
+            index = self._lancedb_adapter()
+            index.open()
+            artifact = {}
+            path = self.output / "index.json"
+            if path.exists():
+                logging.info("Loading index.json from checkpoint...")
+                summary = json.loads(path.read_text(encoding="utf-8"))
+                # Only attach metadata identifying this database and table.
+                saved_uri = summary.get("uri")
+                if (
+                    summary.get("table") == table
+                    and saved_uri is not None
+                    and Path(saved_uri).expanduser().resolve() == index.uri
+                ):
+                    artifact = summary
+            if self.tracker:
+                self.tracker.reference_counts(artifact.get("source_counts"))
+            # Classify test-time samples based on majority-vote query to vdb
+            predictions: list[Prediction] = []
+            for batch in self.dataset.iter_batches("val", self.batch_size):
+                rows = _batch_rows(batch)
+                vectors = self.embedder.encode_images(batch["image"])
+                for record, vector in zip(rows, vectors, strict=True):
+                    predictions.append(_prediction(record, index.query(vector, self.config["k"])))
+                progress.advance(len(rows))
+            selected = len(self.dataset.test_set())
+            if not selected:
+                raise ValueError("No evaluation images; accuracy is undefined")
+            if selected != len(predictions):
+                raise ValueError("Incomplete evaluation: validation and prediction counts differ")
+            report = dict(
+                config=self.config,
+                table=table,
+                reference_source_counts=artifact.get("source_counts"),
+                predictions=predictions,
+                metrics=metrics(predictions, self.classes),
+            )
+            run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
+            run_dir.mkdir(parents=True)
+            report_path = run_dir / "report.json"
+            _write_json(report_path, report)
+            if self.tracker:
+                self.tracker.evaluation(report, report_path)
+            return report
 
     def run(self) -> dict:
         """Describe, index, and evaluate, closing Ollama before loading the embedder."""
