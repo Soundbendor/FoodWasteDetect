@@ -116,6 +116,8 @@ Use all official FoodX251 training references by default. Optional
 order when image references are enabled. Omitted or null uses all images; other
 values must be positive integers (booleans are rejected). Selection occurs before
 decoding, does not mutate stored splits, and is independent of batch size.
+W&B reference progress totals count the capped training references from undecoded
+class metadata, plus enabled text records; existing tables still return before counting.
 Text references are unchanged. Use the full labeled validation split for
 evaluation, recording `source_split="val"`; never claim official test accuracy.
 The dataset adapter resolves image paths, preserves legacy names, and rejects

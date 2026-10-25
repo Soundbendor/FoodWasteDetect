@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 import pytest
 import test_classification
 import yaml
+
 from internvl.cli import main
 from internvl.tracking import StageProgress, Tracker
 
@@ -419,3 +420,29 @@ def test_description_callback_counts_returned_requests_and_propagates_errors():
         llm.generate_descriptions(["A"], 3, on_description=callback)
     assert caught.value is failure
     request.assert_called_once_with("A")
+
+
+@pytest.mark.parametrize("limit", [None, 1, 2, 20])
+@pytest.mark.parametrize("images_enabled", [False, True])
+def test_capped_reference_progress_matches_inserted_records(
+    experiment_case, sdk, limit, images_enabled
+):
+    experiment_case.interleaved_training()
+    exp = experiment_case.experiment((images_enabled, True, True))
+    exp.config["n_imgs_per_class"] = limit
+    exp.batch_size = 3
+    exp.tracker = Tracker(sdk)
+    exp.generate_descriptions()
+    artifact = exp.build_vector_database()
+    points = [
+        call.args[0]
+        for call in sdk.log.call_args_list
+        if "reference_embedding/completed" in call.args[0]
+    ]
+    expected_images = {None: 5, 1: 2, 2: 4, 20: 5}[limit] if images_enabled else 0
+    expected_total = 12 + expected_images
+    assert sum(artifact["source_counts"].values()) == expected_total
+    assert all(point["reference_embedding/total"] == expected_total for point in points)
+    assert points[-1]["reference_embedding/completed"] == expected_total
+    assert points[-1]["reference_embedding/fraction"] == 1.0
+    assert sdk.summary["reference_embedding/state"] == "completed"

@@ -221,10 +221,16 @@ class Experiment:
             self.output.mkdir(parents=True, exist_ok=True)
             records = self._get_text_inputs()
             if self.tracker:
-                progress.start(
-                    len(records)
-                    + (len(self.dataset.train_set()) if self.config["embed_images"] else 0)
-                )
+                image_count = 0
+                if self.config["embed_images"]:
+                    training = self.dataset.train_set()
+                    limit = self.config.get("n_imgs_per_class")
+                    image_count = (
+                        len(training)
+                        if limit is None
+                        else sum(min(limit, count) for count in Counter(training["class"]).values())
+                    )
+                progress.start(len(records) + image_count)
             index.create(self.embedder.dimension)
             counts = self._insert_text_records(index, records, progress)
             if self.config["embed_images"]:
