@@ -108,6 +108,34 @@ Slurm scripts forward arguments after their optional first config path and
 retain their default config and stages. Overrides do not add embedding
 backends, automatic artifact isolation, or service management.
 
+The CLI owns each experiment run through W&B's native `wandb.init(...)` context
+manager. Configuration parsing and validation precede initialization; help,
+invalid input, and model-download commands create no run. Configuration publishing,
+`Experiment` construction, and stage dispatch occur inside the context. Native
+W&B context exit handles success, failure, and interruption, including cleanup
+failures; there is no application wrapper preserving run-level exceptions.
+Authentication, destination, and mode use native `WANDB_*` settings. Automatic
+Git, code, system metadata, and dependency-list capture remain disabled.
+The configuration artifact contains only `resolved_config.yaml`, written through
+`artifact.new_file(..., encoding="utf-8")` with SDK-managed storage. Its contents
+match the resolved execution dictionary and W&B config after ordered overrides
+and interpolation. Source YAML, invocation metadata, and application-managed
+temporary files are not included. Stateless `Tracker.progress(stage, completed, total)`
+logs counts and fractions with a completed-count axis; W&B owns the global step.
+Reference counters remain local to the experiment; `DescriberLLM` owns its description
+counter and calls `on_description(completed, total)`. The experiment binds the stage
+name with `functools.partial` and logs initial zero progress. Descriptions advance per returned
+request, reference embeddings after each successful insertion, and evaluation after
+each fully processed batch. Tracking-only totals use undecoded metadata and respect
+image caps. Cached or disabled stages return without progress logging. There are
+no application-managed stage timers, throughput metrics, statuses, or cleanup updates.
+A fraction of 1.0 means counted work finished; later validation or artifact writes
+may still fail. Logging errors and interrupts propagate normally. Evaluation
+summaries and per-class reporting remain. Online SDK synchronization publishes
+progress to W&B; offline runs record it locally. Evaluation
+reports are uploaded only after a successful local write. Direct Python usage
+via `Experiment(config)` remains untracked by default.
+
 This independent whole-image baseline embeds pixels
 without InternVL captioning or YOLO. Its three reference booleans select any
 nonempty combination of class names, generated descriptions, and training images.

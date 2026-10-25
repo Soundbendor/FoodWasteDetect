@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,11 +16,11 @@ from .generate_descriptors import DescriberLLM
 from .image_dataset import load_dataset
 from .retrieval import LanceDBIndex, classify, metrics
 from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
-from .tracking import StageProgress, Tracker
+from .tracking import Tracker
 
 
 def _write_json(path: Path, value: Any) -> None:
-    """Write JSON via temporary-file replacement; reject nonfinite numbers."""
+    """Safely clean and write JSON config or results file."""
     temporary = path.with_suffix(".tmp")
     temporary.write_text(
         json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n",
@@ -114,25 +115,28 @@ class Experiment:
         Returns:
             A list of descriptions in {"class_name", ["desc1", "desc2",...]} format.
         """
-        with StageProgress(self.tracker, "descriptions") as progress:
-            if not self.config["embed_descriptions"]:
-                progress.state = "disabled"
-                return None
-            path = self.output / "descriptions.json"
-            if path.exists():
-                progress.state = "reused"
-                logging.info(f"Loading existing descriptions at {path}")
-                return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
-            progress.start(len(self.classes) * self.config["description_count"])
-            self.output.mkdir(parents=True, exist_ok=True)
-            with DescriberLLM(self.config["ollama"]) as llm:
-                descriptions = llm.generate_descriptions(
-                    self.classes,
-                    self.config["description_count"],
-                    on_description=progress.advance if self.tracker else None,
-                )
-            _write_json(path, dict(descriptions=descriptions))
-            return descriptions
+        if not self.config["embed_descriptions"]:
+            logging.info("Description generation is disabled")
+            return None
+        path = self.output / "descriptions.json"
+        if path.exists():
+            logging.info(f"Loading existing descriptions at {path}")
+            return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
+        on_description = None
+        if self.tracker:
+            total = len(self.classes) * self.config["description_count"]
+            self.tracker.progress("descriptions", 0, total)
+            on_description = partial(self.tracker.progress, "descriptions")
+
+        self.output.mkdir(parents=True, exist_ok=True)
+        with DescriberLLM(self.config["ollama"]) as llm:
+            descriptions = llm.generate_descriptions(
+                self.classes,
+                self.config["description_count"],
+                on_description=on_description,
+            )
+        _write_json(path, dict(descriptions=descriptions))
+        return descriptions
 
     def _get_text_inputs(self) -> list[PointRecord]:
         """Build enabled text inputs in class order from names and saved descriptions.
@@ -159,13 +163,15 @@ class Experiment:
         return records
 
     def _insert_text_records(
-        self, index, records: list[PointRecord], progress: StageProgress
+        self, index, records: list[PointRecord], *, callback: Callable[[int], None] | None = None
     ) -> Counter:
         """Generate embedding vectors from text inputs and save vectors in LanceDB.
 
         Args:
             index: A LanceDBIndex object, wrapping the vector database table.
             records: A list of text records to embed and append.
+            callback: Optional callback for W&B progress logging, called with the
+                batch length after each successful insertion. None disables logging.
 
         Returns:
             A Counter documenting how many records of each modality were inserted.
@@ -175,14 +181,20 @@ class Experiment:
             batch = records[start : start + self.batch_size]
             index.append(batch, self.embedder.encode_text([r.value for r in batch]))
             counts.update(r.source_kind for r in batch)
-            progress.advance(len(batch))
+            if callback is not None:
+                callback(len(batch))
         return counts
 
-    def _insert_image_records(self, index, progress: StageProgress) -> Counter:
+    def _insert_image_records(
+        self, index, *, callback: Callable[[int], None] | None = None
+    ) -> Counter:
         """Generate embedding vectors from images and save vectors in LanceDB.
 
         Args:
             index: A LanceDBIndex object, wrapping the vector database table.
+            callback: Optional callback for W&B progress logging, called with the
+                batch length after each successful insertion. None disables logging.
+
         Returns:
             A Counter documenting how many records of each modality were inserted.
         """
@@ -198,7 +210,8 @@ class Experiment:
             index.append(records, self.embedder.encode_images(batch["image"]))
             counts.update(r.source_kind for r in records)
             image_classes.update(r.label for r in records)
-            progress.advance(len(records))
+            if callback is not None:
+                callback(len(records))
         if image_classes != set(self.classes):
             raise ValueError(
                 f"Missing usable training references for {set(self.classes) - image_classes}"
@@ -207,97 +220,106 @@ class Experiment:
 
     def build_vector_database(self) -> dict | None:
         """Build the configured table, or warn and return if it already exists."""
-        with StageProgress(self.tracker, "reference_embedding") as progress:
-            table = self.config["lancedb"]["table"]
-            index = self._lancedb_adapter()
-            if index.exists():
-                progress.state = "reused"
-                logging.warning(
-                    "LanceDB table %r already exists; reusing its precomputed vectors "
-                    "without inserting records or checking compatibility.",
-                    table,
-                )
-                return None
-            self.output.mkdir(parents=True, exist_ok=True)
-            records = self._get_text_inputs()
-            if self.tracker:
-                image_count = 0
-                if self.config["embed_images"]:
-                    training = self.dataset.train_set()
-                    limit = self.config.get("n_imgs_per_class")
-                    image_count = (
-                        len(training)
-                        if limit is None
-                        else sum(min(limit, count) for count in Counter(training["class"]).values())
-                    )
-                progress.start(len(records) + image_count)
-            index.create(self.embedder.dimension)
-            counts = self._insert_text_records(index, records, progress)
-            if self.config["embed_images"]:
-                counts.update(self._insert_image_records(index, progress))
-            if not counts:
-                raise ValueError("No records inserted into LanceDB - check dataset and config.")
-            artifact = dict(
-                table=table,
-                uri=str(index.uri),
-                source_counts=counts,
-                config=self.config,
+        table = self.config["lancedb"]["table"]
+        index = self._lancedb_adapter()
+        if index.exists():
+            logging.warning(
+                "LanceDB table %r already exists; reusing its precomputed vectors "
+                "without inserting records or checking compatibility.",
+                table,
             )
-            _write_json(self.output / "index.json", artifact)
-            if self.tracker:
-                self.tracker.reference_counts(dict(counts))
-            return artifact
+            return None
+        self.output.mkdir(parents=True, exist_ok=True)
+        records = self._get_text_inputs()
+        callback = None
+        if self.tracker:
+            image_count = 0
+            if self.config["embed_images"]:
+                training = self.dataset.train_set()
+                limit = self.config.get("n_imgs_per_class")
+                image_count = (
+                    len(training)
+                    if limit is None
+                    else sum(min(limit, count) for count in Counter(training["class"]).values())
+                )
+            tracker = self.tracker
+            total = len(records) + image_count
+            completed = 0
+            tracker.progress("reference_embedding", completed, total)
+
+            def callback(count: int) -> None:
+                nonlocal completed
+                completed += count
+                tracker.progress("reference_embedding", completed, total)
+
+        index.create(self.embedder.dimension)
+        counts = self._insert_text_records(index, records, callback=callback)
+        if self.config["embed_images"]:
+            counts.update(self._insert_image_records(index, callback=callback))
+        if not counts:
+            raise ValueError("No records inserted into LanceDB - check dataset and config.")
+        artifact = dict(
+            table=table,
+            uri=str(index.uri),
+            source_counts=counts,
+            config=self.config,
+        )
+        _write_json(self.output / "index.json", artifact)
+        if self.tracker:
+            self.tracker.reference_counts(dict(counts))
+        return artifact
 
     def evaluate(self) -> dict:
         """Classify the full validation split and save one report after success."""
-        with StageProgress(self.tracker, "evaluation") as progress:
+        if self.tracker:
+            total = len(self.dataset.test_set())
+            self.tracker.progress("evaluation", 0, total)
+        table = self.config["lancedb"]["table"]
+        index = self._lancedb_adapter()
+        index.open()
+        artifact = {}
+        path = self.output / "index.json"
+        if path.exists():
+            logging.info("Loading index.json from checkpoint...")
+            summary = json.loads(path.read_text(encoding="utf-8"))
+            # Only attach metadata identifying this database and table.
+            saved_uri = summary.get("uri")
+            if (
+                summary.get("table") == table
+                and saved_uri is not None
+                and Path(saved_uri).expanduser().resolve() == index.uri
+            ):
+                artifact = summary
+        if self.tracker:
+            self.tracker.reference_counts(artifact.get("source_counts"))
+        # Classify test-time samples based on majority-vote query to vdb
+        predictions: list[Prediction] = []
+        for batch in self.dataset.iter_batches("val", self.batch_size):
+            rows = _batch_rows(batch)
+            vectors = self.embedder.encode_images(batch["image"])
+            for record, vector in zip(rows, vectors, strict=True):
+                predictions.append(_prediction(record, index.query(vector, self.config["k"])))
             if self.tracker:
-                progress.start(len(self.dataset.test_set()))
-            table = self.config["lancedb"]["table"]
-            index = self._lancedb_adapter()
-            index.open()
-            artifact = {}
-            path = self.output / "index.json"
-            if path.exists():
-                logging.info("Loading index.json from checkpoint...")
-                summary = json.loads(path.read_text(encoding="utf-8"))
-                # Only attach metadata identifying this database and table.
-                saved_uri = summary.get("uri")
-                if (
-                    summary.get("table") == table
-                    and saved_uri is not None
-                    and Path(saved_uri).expanduser().resolve() == index.uri
-                ):
-                    artifact = summary
-            if self.tracker:
-                self.tracker.reference_counts(artifact.get("source_counts"))
-            # Classify test-time samples based on majority-vote query to vdb
-            predictions: list[Prediction] = []
-            for batch in self.dataset.iter_batches("val", self.batch_size):
-                rows = _batch_rows(batch)
-                vectors = self.embedder.encode_images(batch["image"])
-                for record, vector in zip(rows, vectors, strict=True):
-                    predictions.append(_prediction(record, index.query(vector, self.config["k"])))
-                progress.advance(len(rows))
-            selected = len(self.dataset.test_set())
-            if not selected:
-                raise ValueError("No evaluation images; accuracy is undefined")
-            if selected != len(predictions):
-                raise ValueError("Incomplete evaluation: validation and prediction counts differ")
-            report = dict(
-                config=self.config,
-                table=table,
-                reference_source_counts=artifact.get("source_counts"),
-                predictions=predictions,
-                metrics=metrics(predictions, self.classes),
-            )
-            run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
-            run_dir.mkdir(parents=True)
-            report_path = run_dir / "report.json"
-            _write_json(report_path, report)
-            if self.tracker:
-                self.tracker.evaluation(report, report_path)
-            return report
+                self.tracker.progress("evaluation", len(predictions), total)
+        selected = len(self.dataset.test_set())
+        if not selected:
+            raise ValueError("No evaluation images; accuracy is undefined")
+        if selected != len(predictions):
+            raise ValueError("Incomplete evaluation: validation and prediction counts differ")
+        report = dict(
+            config=self.config,
+            table=table,
+            reference_source_counts=artifact.get("source_counts"),
+            predictions=predictions,
+            metrics=metrics(predictions, self.classes),
+        )
+        run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
+        run_dir.mkdir(parents=True)
+        report_path = run_dir / "report.json"
+        _write_json(report_path, report)
+        if self.tracker:
+            self.tracker.evaluation(report, report_path)
+        return report
 
     def run(self) -> dict:
         """Describe, index, and evaluate, closing Ollama before loading the embedder."""

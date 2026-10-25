@@ -73,9 +73,7 @@ class DescriberLLM:
                 response = probe.get(self.host.rstrip("/") + "/api/tags")
                 response.raise_for_status()
                 payload = response.json()
-                if not isinstance(payload, dict) or not isinstance(
-                    payload.get("models"), list
-                ):
+                if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
                     raise RuntimeError("Endpoint did not return an Ollama model list")
         except (httpx.ConnectError, httpx.TimeoutException):
             return False
@@ -88,9 +86,7 @@ class DescriberLLM:
             "See README.md: Ollama setup."
         )
         if not isinstance(self.binary_path, str) or not self.binary_path.strip():
-            raise ValueError(
-                f"ollama.binary_path must be a nonempty string. {guidance}"
-            )
+            raise ValueError(f"ollama.binary_path must be a nonempty string. {guidance}")
         binary = self.binary_path
         if "/" not in binary and not binary.startswith("~"):
             resolved = shutil.which(binary)
@@ -105,9 +101,7 @@ class DescriberLLM:
         if not path.is_file():
             raise ValueError(f"ollama.binary_path is not a file: {path}. {guidance}")
         if not os.access(path, os.X_OK):
-            raise PermissionError(
-                f"Ollama executable lacks execute permission: {path}. {guidance}"
-            )
+            raise PermissionError(f"Ollama executable lacks execute permission: {path}. {guidance}")
         return str(path)
 
     def start_server(self):
@@ -119,9 +113,7 @@ class DescriberLLM:
                 # If self._process was not set, but an Ollama instance is already running
                 # on this port, abort.
                 if self._is_ready(timeout=min(1, self.startup_timeout)):
-                    raise RuntimeError(
-                        f"An Ollama instance is already bound to {self.host}"
-                    )
+                    raise RuntimeError(f"An Ollama instance is already bound to {self.host}")
                 env = os.environ.copy()
                 env["OLLAMA_HOST"] = self.host
                 # Force Ollama subprocess to inherit model environment.
@@ -144,9 +136,7 @@ class DescriberLLM:
                     )
                 if self._is_ready(timeout=min(1, remaining)):
                     if self._process.poll() is not None:
-                        raise RuntimeError(
-                            "Ollama exited during startup; check its stderr"
-                        )
+                        raise RuntimeError("Ollama exited during startup; check its stderr")
                     return
                 time.sleep(min(0.25, max(0, deadline - time.monotonic())))
         except BaseException:
@@ -170,16 +160,20 @@ class DescriberLLM:
         classes: Sequence[str],
         count: int,
         *,
-        on_description: Callable[[], None] | None = None,
+        on_description: Callable[[int, int], None] | None = None,
     ) -> dict[str, list[str]]:
-        """Generate the requested descriptions for each class, rejecting empty text."""
+        """Generate descriptions, reporting (completed, total) after each returned request."""
         descriptions = {}
+        if on_description is not None:
+            completed = 0
+            total = len(classes) * count
         for label in classes:
             descriptions[label] = []
             for _ in range(count):
                 description = self.describe_class(label).description
                 if on_description is not None:
-                    on_description()
+                    completed += 1
+                    on_description(completed, total)
                 descriptions[label].append(description)
             if not descriptions[label] or any(not text.strip() for text in descriptions[label]):
                 raise ValueError(f"Empty generated description for {label}")

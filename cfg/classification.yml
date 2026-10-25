@@ -3,8 +3,7 @@ dataset:
   name: foodx251
   root: data/FoodX-251
 embed_images: false
-n_imgs_per_class: null  # null uses all training images; otherwise a positive integer
-# Choose a new lancedb.table when changing the limit; existing tables are reused.
+n_imgs_per_class: null  # set the number of images 
 embed_class_labels: false
 embed_descriptions: true
 embedding:

@@ -1,19 +1,21 @@
 """Synthetic W&B contracts: fake SDK publishing plus isolated native offline runs."""
 
+import io
 import itertools
 import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 import test_classification
 import yaml
 
 from internvl.cli import main
-from internvl.tracking import StageProgress, Tracker
+from internvl.tracking import Tracker
 
 
 class Artifact:
@@ -21,14 +23,23 @@ class Artifact:
         self.name, self.type = name, type
         self.files = {}
 
+    @contextmanager
+    def new_file(self, name, *, encoding):
+        assert encoding == "utf-8"
+        with io.StringIO() as stream:
+            yield stream
+            self.files[name] = stream.getvalue().encode(encoding)
+
     def add_file(self, path, *, name):
         self.files[name] = Path(path).read_bytes()
 
 
 @pytest.fixture
 def sdk(monkeypatch):
-    run = Mock(id="synthetic", summary={})
-    monkeypatch.setattr("internvl.tracking.wandb.init", Mock(return_value=run))
+    run = MagicMock(id="synthetic", summary={})
+    run.__enter__.return_value = run
+    run.__exit__.return_value = False
+    monkeypatch.setattr("internvl.cli.wandb.init", Mock(return_value=run))
     monkeypatch.setattr("internvl.tracking.wandb.Artifact", Artifact)
     return run
 
@@ -75,8 +86,21 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
     overrides = ["embedding.batch_size=4", "embedding.batch_size=3"]
     with (
         patch("internvl.cli.Experiment") as experiment,
-        patch("internvl.tracking.wandb.init", return_value=sdk) as initialize,
+        patch("internvl.cli.wandb.init", return_value=sdk) as initialize,
     ):
+        def assert_active(*args, **kwargs):
+            sdk.__enter__.assert_called_once_with()
+            sdk.__exit__.assert_not_called()
+
+        sdk.log_artifact.side_effect = assert_active
+
+        def construct(*args, **kwargs):
+            assert_active()
+            sdk.log_artifact.assert_called_once()
+            return experiment.return_value
+
+        experiment.side_effect = construct
+        getattr(experiment.return_value, method).side_effect = assert_active
         main(
             [
                 "experiment",
@@ -100,16 +124,13 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
     assert "mode" not in initialize.call_args.kwargs
     assert experiment.call_args.kwargs["tracker"].run is sdk
     getattr(experiment.return_value, method).assert_called_once_with()
-    sdk.finish.assert_called_once_with(exit_code=0)
+    sdk.__enter__.assert_called_once_with()
+    sdk.__exit__.assert_called_once_with(None, None, None)
+    sdk.finish.assert_not_called()
     artifact = sdk.log_artifact.call_args.args[0]
     assert artifact.name == "configuration-synthetic"
-    assert artifact.files["source_config.yaml"] == source.encode()
+    assert set(artifact.files) == {"resolved_config.yaml"}
     assert yaml.safe_load(artifact.files["resolved_config.yaml"]) == cfg
-    assert json.loads(artifact.files["invocation.json"]) == {
-        "stage": stage,
-        "config_path": str(path),
-        "overrides": overrides,
-    }
     assert path.read_bytes() == source.encode()
 
 
@@ -132,7 +153,7 @@ def test_no_run_for_non_experiments_or_invalid_input(sdk, tmp_path, kind):
     elif kind == "download":
         args = ["download_model", "fake"]
     with (
-        patch("internvl.tracking.wandb.init") as initialize,
+        patch("internvl.cli.wandb.init") as initialize,
         patch("internvl.cli.download_model"),
     ):
         if kind == "download":
@@ -144,18 +165,19 @@ def test_no_run_for_non_experiments_or_invalid_input(sdk, tmp_path, kind):
 
 
 @pytest.mark.parametrize(
-    "source", ["init", "artifact", "constructor", "stage", "interrupt", "finish"]
+    "source", ["init", "artifact", "constructor", "stage", "interrupt", "success"]
 )
 @pytest.mark.parametrize("cleanup_fails", [False, True])
-def test_lifecycle_errors_preserve_original(sdk, tmp_path, source, cleanup_fails):
+def test_native_context_exit_on_errors_and_success(sdk, tmp_path, source, cleanup_fails):
     path, _ = config_file(tmp_path)
     failure = KeyboardInterrupt() if source == "interrupt" else RuntimeError(source)
+    cleanup_error = RuntimeError("cleanup")
     with (
         patch("internvl.cli.Experiment") as experiment,
-        patch("internvl.tracking.wandb.init", return_value=sdk) as initialize,
+        patch("internvl.cli.wandb.init", return_value=sdk) as initialize,
     ):
         if cleanup_fails:
-            sdk.finish.side_effect = RuntimeError("cleanup")
+            sdk.__exit__.side_effect = cleanup_error
         if source == "init":
             initialize.side_effect = failure
         elif source == "artifact":
@@ -164,15 +186,27 @@ def test_lifecycle_errors_preserve_original(sdk, tmp_path, source, cleanup_fails
             experiment.side_effect = failure
         elif source in ("stage", "interrupt"):
             experiment.return_value.run.side_effect = failure
-        else:
-            sdk.finish.side_effect = failure
-        with pytest.raises(BaseException) as caught:
+        if source == "success" and not cleanup_fails:
             main(["experiment", "run", "--config_file", str(path)])
-        assert caught.value is failure
-        if source == "init":
-            sdk.finish.assert_not_called()
         else:
-            sdk.finish.assert_called_once_with(exit_code=0 if source == "finish" else 1)
+            with pytest.raises(BaseException) as caught:
+                main(["experiment", "run", "--config_file", str(path)])
+            expected = cleanup_error if cleanup_fails and source != "init" else failure
+            assert caught.value is expected
+        if source == "init":
+            sdk.__enter__.assert_not_called()
+            sdk.__exit__.assert_not_called()
+        else:
+            sdk.__enter__.assert_called_once_with()
+            sdk.__exit__.assert_called_once()
+            if source == "success":
+                assert sdk.__exit__.call_args.args == (None, None, None)
+            else:
+                exc_type, error, traceback = sdk.__exit__.call_args.args
+                assert exc_type is type(failure)
+                assert error is failure
+                assert traceback is not None
+        sdk.finish.assert_not_called()
         if source in ("init", "artifact"):
             experiment.assert_not_called()
 
@@ -196,15 +230,16 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
         assert points[-1][f"{stage}/completed"] == total
         assert all(p[f"{stage}/total"] == total for p in points)
         assert points[-1][f"{stage}/fraction"] == 1
-        assert sdk.summary[f"{stage}/state"] == "completed"
-        assert sdk.summary[f"{stage}/throughput"] >= 0
     if flags[2]:
         assert [
             p["descriptions/completed"] for p in history if "descriptions/completed" in p
         ] == list(range(11))
     else:
-        assert sdk.summary["descriptions/state"] == "disabled"
-        assert "descriptions/throughput" not in sdk.summary
+        assert not any("descriptions/completed" in p for p in history)
+    assert set(sdk.summary) == {
+        "reference_source_counts", "evaluation/evaluated",
+        "evaluation/majority_vote_accuracy", "evaluation/nearest_neighbor_accuracy",
+    }
     assert sdk.summary["reference_source_counts"] == report["reference_source_counts"]
     for key in ("evaluated", "majority_vote_accuracy", "nearest_neighbor_accuracy"):
         assert sdk.summary[f"evaluation/{key}"] == report["metrics"][key]
@@ -230,26 +265,26 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
     ):
         exp.generate_descriptions()
         exp.build_vector_database()
-    assert reused.summary["reference_embedding/state"] == "reused"
-    assert reused.summary["descriptions/state"] == ("reused" if flags[2] else "disabled")
-    assert not any("throughput" in key for key in reused.summary)
+    assert reused.summary == {}
+    reused.define_metric.assert_not_called()
     reused.log.assert_not_called()
 
 
 def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_case, sdk, tmp_path):
     exp = experiment_case.experiment()
-    with patch("internvl.tracking.wandb.init") as initialize:
-        exp.run()
+    with patch("internvl.cli.wandb.init") as initialize:
+        with patch.object(exp.dataset, "train_set", side_effect=AssertionError("tracking count")):
+            exp.run()
         initialize.assert_not_called()
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(experiment_case.experiment(name="cli").config))
-    with patch("internvl.tracking.wandb.init", return_value=sdk) as initialize:
+    with patch("internvl.cli.wandb.init", return_value=sdk) as initialize:
         main(["experiment", "run", "--config_file", str(path)])
     initialize.assert_called_once()
-    sdk.finish.assert_called_once_with(exit_code=0)
-    assert (
-        sdk.summary["reference_embedding/state"] == sdk.summary["evaluation/state"] == "completed"
-    )
+    sdk.__enter__.assert_called_once_with()
+    sdk.__exit__.assert_called_once_with(None, None, None)
+    sdk.finish.assert_not_called()
+    assert sdk.summary["evaluation/evaluated"] == 2
     assert [c.args[0].type for c in sdk.log_artifact.call_args_list] == [
         "configuration",
         "evaluation",
@@ -286,30 +321,30 @@ def test_progress_failure_aborts_after_completed_append(experiment_case, sdk):
     with pytest.raises(RuntimeError) as caught:
         exp.build_vector_database()
     assert caught.value is failure
-    assert sdk.summary["reference_embedding/state"] == "failed"
+    assert sdk.summary == {}
     assert experiment_case.client.open_table(exp.config["lancedb"]["table"]).count_rows() == 2
     assert not (exp.output / "index.json").exists()
 
 
-def test_stage_timing_axes_and_cleanup_preserve_interrupt(sdk):
-    with (
-        patch("internvl.tracking.perf_counter", side_effect=[10.0, 14.0]),
-        StageProgress(Tracker(sdk), "evaluation") as progress,
-    ):
-        progress.start(3)
-        progress.advance(2)
-        progress.advance(1)
-    assert sdk.summary["evaluation/elapsed_seconds"] == 4
-    assert sdk.summary["evaluation/throughput"] == 0.75
-    sdk.define_metric.assert_any_call("evaluation/*", step_metric="evaluation/completed")
-    assert all(not c.kwargs for c in sdk.log.call_args_list)
-    sdk.summary = Mock()
-    sdk.summary.update.side_effect = RuntimeError("cleanup")
-    failure = KeyboardInterrupt()
-    with pytest.raises(KeyboardInterrupt) as caught, StageProgress(Tracker(sdk), "evaluation"):
-        raise failure
-    assert caught.value is failure
-    assert "cleanup" in failure.__notes__[0]
+@pytest.mark.parametrize("total,completed", [(3, [0, 2, 3]), (0, [0])])
+def test_progress_payloads_axes_and_no_lifecycle_reporting(sdk, total, completed):
+    tracker = Tracker(sdk)
+    for count in completed:
+        tracker.progress("evaluation", count, total)
+    assert sdk.log.call_args_list == [
+        call({
+            "evaluation/completed": count,
+            "evaluation/total": total,
+            "evaluation/fraction": count / total if total else 0.0,
+        })
+        for count in completed
+    ]
+    assert sdk.define_metric.call_args_list == [
+        call("evaluation/completed"),
+        call("evaluation/*", step_metric="evaluation/completed"),
+    ]
+    assert sdk.summary == {}
+    assert vars(tracker) == {"run": sdk}
 
 
 @pytest.mark.parametrize("mode", ["disabled", "offline"])
@@ -318,20 +353,53 @@ def test_native_sdk_smoke(tmp_path, mode):
     script = r"""
 import json
 from pathlib import Path
-from internvl.tracking import StageProgress, track_invocation
+from unittest.mock import patch
+import wandb
+import yaml
+from internvl.cli import _run_experiment
+from internvl.tracking import Tracker
 report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
     "nearest_neighbor_accuracy": 1., "per_class": {
         "A": {"support": 1, "correct": 1, "recall": 1.},
         "B": {"support": 0, "correct": 0, "recall": None}}}}
 path = Path("report.json")
 path.write_text(json.dumps(report))
-with track_invocation({"k": 1}, "evaluate", "config.yaml", "# source\nk: 1\n", []) as tracker:
-    assert dict(tracker.run.config) == {"k": 1}
-    with StageProgress(tracker, "evaluation") as progress:
-        progress.start(1)
-        progress.advance()
-    tracker.reference_counts(None)
-    tracker.evaluation(report, path)
+config = {"k": 1, "embed_images": False, "embed_class_labels": True,
+          "embed_descriptions": False}
+original_configuration = Tracker.configuration
+
+def publish(tracker, config):
+    assert wandb.run is tracker.run
+    log_artifact = tracker.run.log_artifact
+    def inspect(artifact):
+        assert set(artifact.manifest.entries) == {"resolved_config.yaml"}
+        entry = artifact.manifest.entries["resolved_config.yaml"]
+        assert yaml.safe_load(Path(entry.local_path).read_text()) == config
+        return log_artifact(artifact)
+    with patch.object(tracker.run, "log_artifact", side_effect=inspect):
+        original_configuration(tracker, config)
+
+class Experiment:
+    def __init__(self, config, *, tracker):
+        assert wandb.run is tracker.run
+        assert dict(tracker.run.config) == config
+        self.tracker = tracker
+
+    def generate_descriptions(self):
+        raise AssertionError("unexpected stage")
+
+    build_vector_database = generate_descriptions
+    run = generate_descriptions
+
+    def evaluate(self):
+        tracker = self.tracker
+        tracker.progress("evaluation", 0, 1)
+        tracker.progress("evaluation", 1, 1)
+        tracker.reference_counts(None)
+        tracker.evaluation(report, path)
+
+with patch("internvl.cli.Experiment", Experiment), patch.object(Tracker, "configuration", publish):
+    _run_experiment(config, "evaluate")
 """
     env = {k: v for k, v in os.environ.items() if not k.startswith("WANDB_")}
     env.update(
@@ -379,7 +447,7 @@ def test_evaluation_partial_batch_only_advances_when_complete(experiment_case, s
     sdk.log.reset_mock()
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
-        patch("internvl.experiment.LanceDBIndex.query", side_effect=failure),
+        patch("internvl.experiment.LanceDBIndex.query", side_effect=[[], failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.evaluate()
@@ -391,9 +459,7 @@ def test_evaluation_partial_batch_only_advances_when_complete(experiment_case, s
     ]
     assert points == [0]
     assert list(exp.output.glob("evaluation_*/report.json")) == reports
-    assert sdk.summary["evaluation/state"] == (
-        "interrupted" if isinstance(failure, KeyboardInterrupt) else "failed"
-    )
+    assert not any(key.endswith("/state") for key in sdk.summary)
 
 
 def test_description_callback_counts_returned_requests_and_propagates_errors():
@@ -411,7 +477,8 @@ def test_description_callback_counts_returned_requests_and_propagates_errors():
         llm.generate_descriptions(["A"], 3, on_description=callback)
     assert caught.value is failure
     assert request.call_count == 2
-    callback.assert_called_once_with()
+    callback.assert_called_once_with(1, 3)
+    callback.reset_mock()
     callback.side_effect = failure
     with (
         patch.object(llm, "describe_class", return_value=Mock(description="one")) as request,
@@ -420,6 +487,26 @@ def test_description_callback_counts_returned_requests_and_propagates_errors():
         llm.generate_descriptions(["A"], 3, on_description=callback)
     assert caught.value is failure
     request.assert_called_once_with("A")
+    callback.assert_called_once_with(1, 3)
+
+
+def test_description_callback_counts_across_classes_before_validation():
+    from internvl.generate_descriptors import DescriberLLM
+
+    llm = DescriberLLM.__new__(DescriberLLM)
+    callback = Mock()
+    with patch.object(llm, "describe_class", return_value=Mock(description="one")):
+        assert llm.generate_descriptions(["A", "B"], 2, on_description=callback) == {
+            "A": ["one", "one"], "B": ["one", "one"],
+        }
+    assert callback.call_args_list == [call(1, 4), call(2, 4), call(3, 4), call(4, 4)]
+    callback.reset_mock()
+    with (
+        patch.object(llm, "describe_class", return_value=Mock(description=" ")),
+        pytest.raises(ValueError, match="Empty generated description for A"),
+    ):
+        llm.generate_descriptions(["A", "B"], 2, on_description=callback)
+    assert callback.call_args_list == [call(1, 4), call(2, 4)]
 
 
 @pytest.mark.parametrize("limit", [None, 1, 2, 20])
@@ -445,4 +532,43 @@ def test_capped_reference_progress_matches_inserted_records(
     assert all(point["reference_embedding/total"] == expected_total for point in points)
     assert points[-1]["reference_embedding/completed"] == expected_total
     assert points[-1]["reference_embedding/fraction"] == 1.0
-    assert sdk.summary["reference_embedding/state"] == "completed"
+    expected_completed = [0, 3, 6, 9, 12]
+    expected_completed += [12 + n for n in range(3, expected_images, 3)]
+    if expected_images:
+        expected_completed.append(expected_total)
+    assert [p["reference_embedding/completed"] for p in points] == expected_completed
+
+
+@pytest.mark.parametrize("images", [False, True])
+@pytest.mark.parametrize("failure", [RuntimeError("insert failed"), KeyboardInterrupt()])
+def test_failed_reference_batch_does_not_advance(experiment_case, sdk, images, failure):
+    exp = experiment_case.experiment((images, not images, False))
+    exp.batch_size = 1
+    exp.tracker = Tracker(sdk)
+    with (
+        patch("internvl.experiment.LanceDBIndex.append", side_effect=[None, failure]),
+        pytest.raises(type(failure)) as caught,
+    ):
+        exp.build_vector_database()
+    assert caught.value is failure
+    assert [c.args[0]["reference_embedding/completed"] for c in sdk.log.call_args_list] == [0, 1]
+    assert sdk.summary == {}
+    assert not (exp.output / "index.json").exists()
+
+
+@pytest.mark.parametrize("source", ["backend", "logging"])
+@pytest.mark.parametrize("failure", [RuntimeError("description failed"), KeyboardInterrupt()])
+def test_description_failure_has_no_cleanup_progress(experiment_case, sdk, source, failure):
+    exp = experiment_case.experiment((False, False, True))
+    exp.tracker = Tracker(sdk)
+    if source == "logging":
+        sdk.log.side_effect = [None, failure]
+    with patch.object(experiment_case.Describer, "describe_class") as request:
+        request.side_effect = [Mock(description="one"), failure]
+        with pytest.raises(type(failure)) as caught:
+            exp.generate_descriptions()
+    assert caught.value is failure
+    assert [c.args[0]["descriptions/completed"] for c in sdk.log.call_args_list] == [0, 1]
+    assert request.call_count == (1 if source == "logging" else 2)
+    assert sdk.summary == {}
+    assert not (exp.output / "descriptions.json").exists()

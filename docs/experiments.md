@@ -357,3 +357,22 @@ precompiled runtimes. GPU execution remains an explicit cluster acceptance step.
 Sources: [conda-forge package metadata](https://api.anaconda.org/package/conda-forge/ollama),
 [Ollama CUDA targets](https://github.com/ollama/ollama/blob/v0.9.6/CMakePresets.json),
 and [NVIDIA compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html).
+
+## W&B progress verification (October 24, 2026)
+
+The progress-only refactor passed the CPU suite with 158 tests passed, one
+existing skip, and 213 subtests passed (94% package coverage). Eight additional
+insertion/description failure and interruption cases passed in a targeted run.
+Native disabled and offline W&B smoke tests passed through the CLI-owned context.
+Targeted Ruff checks, scoped ty checks, and source/wheel builds also passed.
+Build outputs are in `/tmp/wandb-progress-dist`.
+
+Checks used `/tmp/pixi run --as-is -e default` with the existing manifest at
+`/home/theta/Projects/SmartCompostSensing/FoodWasteDetect-wandb_observability/src/internvl/pyproject.toml`.
+`PYTHONPATH` selected this checkout's `src`; GPUs were hidden and
+`HF_HUB_OFFLINE=1` prevented model downloads. The sandboxed run stalled in
+`lancedb.connect` during fixture setup. The approved run outside the sandbox
+completed, including real temporary LanceDB storage and local offline W&B sockets.
+No live uploads, Ollama servers, real models, GPUs, or HPC resources were used.
+These checks establish synthetic progress/reporting contracts, not model accuracy
+or online dashboard latency.

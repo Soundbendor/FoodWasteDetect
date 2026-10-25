@@ -22,7 +22,8 @@ class CommandTests(unittest.TestCase):
     def setUp(self):
         # Dispatch-only tests use minimal settings; tracking/validation have dedicated tests.
         self.enterContext(patch("internvl.cli.validate_config"))
-        self.enterContext(patch("internvl.cli.track_invocation"))
+        self.enterContext(patch("internvl.cli.wandb.init"))
+        self.enterContext(patch("internvl.cli.Tracker"))
 
     def test_command_help_does_not_dispatch(self):
         for command in ([], ["experiment"], ["download_model"]):
@@ -42,7 +43,7 @@ class CommandTests(unittest.TestCase):
         for command, loader in (
             (
                 ["experiment", "run", "--config_file", "selected.yml"],
-                "internvl.cli.OmegaConf.create",
+                "internvl.cli.OmegaConf.load",
             ),
             (["download_model", "requested:tag"], "yaml.safe_load"),
         ):
@@ -234,7 +235,7 @@ class CommandTests(unittest.TestCase):
                 ) as opened,
             ):
                 main(["experiment", stage, "--config_file", "selected.yml"])
-            opened.assert_called_once_with("selected.yml", encoding="utf-8", newline="")
+            opened.assert_called_once_with("selected.yml", encoding="utf-8")
             experiment.assert_called_once_with({"output_dir": "synthetic"}, tracker=ANY)
             self.assertEqual(
                 experiment.return_value.method_calls, [getattr(call, method)()]
@@ -268,7 +269,8 @@ class CommandTests(unittest.TestCase):
 class ConfigOverrideTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch("internvl.cli.validate_config"))
-        self.enterContext(patch("internvl.cli.track_invocation"))
+        self.enterContext(patch("internvl.cli.wandb.init"))
+        self.enterContext(patch("internvl.cli.Tracker"))
         directory = self.enterContext(tempfile.TemporaryDirectory())
         self.path = Path(directory) / "config.yml"
         self.config = {
