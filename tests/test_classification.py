@@ -81,6 +81,19 @@ class Contracts(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, key):
                         Experiment(cfg)
 
+    def test_image_limit_validation(self):
+        for enabled in (False, True):
+            cfg = dict(embed_images=enabled, embed_class_labels=True, embed_descriptions=False)
+            self.assertIs(validate_config(cfg), cfg)
+            for limit in (None, 1, 20):
+                cfg['n_imgs_per_class'] = limit
+                self.assertIs(validate_config(cfg), cfg)
+            for limit in (0, -1, True, False, '2', 1.0, [], {}):
+                cfg['n_imgs_per_class'] = limit
+                with self.subTest(enabled=enabled, limit=limit):
+                    with self.assertRaisesRegex(ValueError, 'n_imgs_per_class.*positive integer'):
+                        validate_config(cfg)
+
     def test_output_cannot_be_inside_raw_data(self):
         with tempfile.TemporaryDirectory() as directory:
             cfg = dict(embed_images=True, embed_class_labels=False, embed_descriptions=False,
@@ -238,7 +251,7 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment()
         exp.build_vector_database()
         original = self.dataset.iter_batches
-        with patch.object(self.dataset, 'iter_batches', side_effect=lambda split, size: itertools.islice(original(split, 1), 1)):
+        with patch.object(self.dataset, 'iter_batches', side_effect=lambda split, size, **kwargs: itertools.islice(original(split, 1, **kwargs), 1)):
             with self.assertRaisesRegex(ValueError, 'Incomplete evaluation'):
                 exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
@@ -270,8 +283,8 @@ class ExperimentTests(unittest.TestCase):
                     if stage == 'evaluate':
                         exp.build_vector_database()
 
-                    def batches(split, size):
-                        for batch in original(split, size):
+                    def batches(split, size, **kwargs):
+                        for batch in original(split, size, **kwargs):
                             if failure == 'columns':
                                 batch['source_id'] = batch['source_id'][:-1]
                             yield batch
@@ -341,6 +354,7 @@ class ExperimentTests(unittest.TestCase):
     def test_image_references_still_require_every_class(self):
         self.dataset.splits['train'] = self.dataset.splits['train'].select([0])
         exp = self.experiment((True, False, False))
+        exp.config['n_imgs_per_class'] = 1
         with self.assertRaisesRegex(ValueError, 'Missing usable training references'):
             exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
@@ -413,6 +427,102 @@ class ExperimentTests(unittest.TestCase):
                    description_count=5)
         return Experiment(cfg)
 
+    def interleaved_training(self):
+        from datasets import Dataset, Image as HFImage
+        from PIL import Image
+
+        rows = []
+        for i, label in enumerate(['Pear', 'Apple', 'Pear', 'Pear', 'Apple']):
+            path = self.root / f'interleaved-{i}.png'
+            Image.new('RGB', (3, 4), (0 if label == 'Apple' else 100, i, 0)).save(path)
+            rows.append(dict(fname=str(path), source_id=f'ref-{i}', source_split='train',
+                             image=str(path), **{'class': label}))
+        self.dataset.splits['train'] = Dataset.from_list(rows).cast_column('image', HFImage(decode=False))
+        return rows
+
+    def test_image_limits_preserve_order_alignment_and_splits(self):
+        rows = self.interleaved_training()
+        train = self.dataset.train_set()
+        validation = self.dataset.test_set()
+        for limit, selected in [(None, [0, 1, 2, 3, 4]), (1, [0, 1]), (2, [0, 1, 2, 4]), (20, [0, 1, 2, 3, 4])]:
+            for size in (1, 3, 8):
+                with self.subTest(limit=limit, size=size):
+                    batches = list(self.dataset.iter_batches('train', size, n_imgs_per_class=limit))
+                    self.assertEqual([sid for b in batches for sid in b['source_id']],
+                                     [rows[i]['source_id'] for i in selected])
+                    self.assertEqual([len(b['image']) for b in batches],
+                                     [min(size, len(selected) - start) for start in range(0, len(selected), size)])
+                    for batch in batches:
+                        for sid, label, image in zip(batch['source_id'], batch['class'], batch['image'], strict=True):
+                            i = int(sid.split('-')[1])
+                            self.assertEqual(label, rows[i]['class'])
+                            self.assertEqual(image.getpixel((0, 0))[1], i)
+                            image.close()
+        self.assertIs(self.dataset.train_set(), train)
+        self.assertIs(self.dataset.test_set(), validation)
+        self.assertFalse(train.features['image'].decode)
+        self.assertEqual(len(train), 5)
+
+    def test_capped_index_vectors_counts_and_full_evaluation(self):
+        rows = self.interleaved_training()
+        for limit, selected in [(None, [0, 1, 2, 3, 4]), (1, [0, 1]), (2, [0, 1, 2, 4]), (20, [0, 1, 2, 3, 4])]:
+            with self.subTest(limit=limit):
+                exp = self.experiment((True, True, True), f'limit-{limit}')
+                exp.config['n_imgs_per_class'] = limit
+                exp.batch_size = 3
+                exp.generate_descriptions()
+                seen = []
+                encode = exp.embedder.encode_images
+                def record(images):
+                    seen.append([image.getpixel((0, 0))[1] for image in images])
+                    return encode(images)
+                with patch.object(exp.embedder, 'encode_images', side_effect=record):
+                    artifact = exp.build_vector_database()
+                self.assertEqual(seen, [selected[start:start + 3] for start in range(0, len(selected), 3)])
+                self.assertEqual(artifact['source_counts'], {
+                    'training_image': len(selected), 'class_name': 2, 'generated_description': 10,
+                })
+                stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
+                images = [r for r in stored if r['source_kind'] == 'training_image']
+                self.assertEqual([r['source_identity'] for r in images], [rows[i]['source_id'] for i in selected])
+                for point, i in zip(images, selected, strict=True):
+                    self.assertEqual(point['value'], rows[i]['fname'])
+                    self.assertEqual(point['class'], rows[i]['class'])
+                    self.assertEqual(point['vector'], [1., 0.] if rows[i]['class'] == 'Apple' else [0., 1.])
+                report = exp.evaluate()
+                self.assertEqual(report['metrics']['evaluated'], len(self.dataset.test_set()))
+                self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1'])
+                self.assertEqual(report['config']['n_imgs_per_class'], limit)
+
+    def test_excluded_unreadable_images_are_not_decoded(self):
+        rows = self.interleaved_training()
+        Path(rows[2]['fname']).unlink()
+        Path(rows[3]['fname']).write_bytes(b'corrupt')
+        exp = self.experiment((True, False, False), 'excluded')
+        exp.config['n_imgs_per_class'] = 1
+        self.assertEqual(exp.build_vector_database()['source_counts'], {'training_image': 2})
+        for i, corrupt in ((0, False), (1, True)):
+            path = Path(rows[i]['fname'])
+            original = path.read_bytes()
+            if corrupt:
+                path.write_bytes(b'corrupt')
+            else:
+                path.unlink()
+            exp = self.experiment((True, False, False), f'selected-{i}')
+            exp.config['n_imgs_per_class'] = 1
+            with self.assertRaises(OSError):
+                exp.build_vector_database()
+            self.assertFalse((exp.output / 'index.json').exists())
+            path.write_bytes(original)
+
+    def test_disabled_images_ignore_limit_and_preserve_text_counts(self):
+        exp = self.experiment((False, True, True))
+        exp.config['n_imgs_per_class'] = 1
+        exp.generate_descriptions()
+        with patch.object(self.dataset, 'iter_batches', side_effect=AssertionError('Read images')):
+            artifact = exp.build_vector_database()
+        self.assertEqual(artifact['source_counts'], {'class_name': 2, 'generated_description': 10})
+
     def test_point_records_round_trip_through_lancedb(self):
         exp = self.experiment()
         records = [PointRecord(label, 'class_name', label, label) for label in ['Apple', 'Pear']]
@@ -464,6 +574,7 @@ class ExperimentTests(unittest.TestCase):
 
         reused = self.experiment((True, False, True), 'reused')
         reused.config['lancedb']['table'] = artifact['table']
+        reused.config['n_imgs_per_class'] = 1
         self.embedder_constructor.reset_mock()
         with patch.object(reused, '_get_text_inputs', side_effect=AssertionError('Read text')), \
              patch.object(self.dataset, 'iter_batches', side_effect=AssertionError('Read images')), \

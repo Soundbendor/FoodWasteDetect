@@ -40,6 +40,9 @@ def validate_config(config: dict) -> dict:
             raise ValueError(f"{key} must be a boolean")
     if not any(config[key] for key in sources):
         raise ValueError("Select at least one reference source")
+    limit = config.get("n_imgs_per_class")
+    if limit is not None and (type(limit) is not int or limit <= 0):
+        raise ValueError("n_imgs_per_class must be null or a positive integer")
     # Reject output paths equal to or nested inside the resolved raw dataset directory.
     raw = config.get("dataset", {}).get("root")
     if raw:
@@ -172,7 +175,9 @@ class Experiment:
         """
         counts = Counter()
         image_classes = set()
-        for batch in self.dataset.iter_batches("train", self.batch_size):
+        for batch in self.dataset.iter_batches(
+            "train", self.batch_size, n_imgs_per_class=self.config.get("n_imgs_per_class")
+        ):
             records = [
                 PointRecord(row["class"], "training_image", row["source_id"], row["fname"])
                 for row in _batch_rows(batch)

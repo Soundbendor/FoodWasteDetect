@@ -269,6 +269,7 @@ class ConfigOverrideTests(unittest.TestCase):
             "embedding": {"batch_size": 32},
             "lancedb": {"uri": "assets/lancedb", "table": "fixture"},
             "embed_images": True,
+            "n_imgs_per_class": None,
             "k": 10,
             "threshold": 0.5,
             "labels": ["old"],
@@ -332,6 +333,21 @@ class ConfigOverrideTests(unittest.TestCase):
                 self.assertEqual(
                     self.experiment.return_value.method_calls, [getattr(call, method)()]
                 )
+
+    def test_image_limit_overrides(self):
+        for raw, expected in (("20", 20), ("null", None)):
+            with self.subTest(raw=raw):
+                actual = self.invoke("--set", f"n_imgs_per_class={raw}")
+                self.assertEqual(actual["n_imgs_per_class"], expected)
+                self.assertIs(type(actual["n_imgs_per_class"]), type(expected))
+
+    def test_image_limit_override_requires_yaml_key(self):
+        del self.config["n_imgs_per_class"]
+        self.content = yaml.safe_dump(self.config)
+        self.path.write_text(self.content)
+        with self.assertRaises(SystemExit):
+            self.invoke("--set", "n_imgs_per_class=20")
+        self.experiment.assert_not_called()
 
     def test_omitted_overrides_preserve_config(self):
         self.assertEqual(self.invoke(), self.config)
