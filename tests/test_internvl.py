@@ -466,11 +466,12 @@ class SlurmOverrideTests(unittest.TestCase):
             sbatch = temporary / "sbatch"
             sbatch.write_text(
                 '#!/bin/bash\n'
+                '[[ "$INTERNVL_PIXI_ENV" == jina-cu126 || "$INTERNVL_PIXI_ENV" == cu126 ]] || exit 1\n'
                 '{ printf "%s\\0" "$@"; printf "\\0"; } >> "$CAPTURE_ARGUMENTS"\n'
             )
             sbatch.chmod(0o755)
             env = dict(os.environ, PATH=f"{temporary}:{os.environ.get('PATH', '')}",
-                       CAPTURE_ARGUMENTS=str(capture))
+                       CAPTURE_ARGUMENTS=str(capture), INTERNVL_PIXI_ENV="wrong-inherited-environment")
             script = root / "scripts/submit_embedding_sweep.sh"
             subprocess.run(["bash", "-n", str(script)], check=True)
             custom_config = temporary / "config with spaces.yml"
@@ -494,6 +495,7 @@ class SlurmOverrideTests(unittest.TestCase):
                     self.assertEqual(output, f"assets/sweeps/{table}")
                     expected = [
                         f"--job-name={table}",
+                        "--export=ALL,INTERNVL_PIXI_ENV=" + ("jina-cu126" if model.startswith("jinaai/") else "cu126"),
                         "sbatch/run_embedding.sbatch",
                         *(extra or ["cfg/classification.yml"]),
                         "--set", f"embedding.model_id={model}",
@@ -523,6 +525,7 @@ class SlurmOverrideTests(unittest.TestCase):
                 SLURM_SUBMIT_DIR=str(root),
                 CAPTURE_ARGUMENTS=str(capture),
             )
+            env.pop("INTERNVL_PIXI_ENV", None)
             for script, stage in (
                 ("scripts/generate_descriptions.sbatch", "describe"),
                 ("sbatch/test_embedding.sbatch", "evaluate"),
@@ -561,6 +564,28 @@ class SlurmOverrideTests(unittest.TestCase):
                                 *(extra or ["cfg/classification.yml"]),
                             ],
                         )
+
+
+    def test_wrappers_select_explicit_environment_and_forward_overrides(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            capture = temporary / "arguments"
+            pixi = temporary / "pixi"
+            pixi.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$CAPTURE_ARGUMENTS"\n')
+            pixi.chmod(0o755)
+            for stage, script in [("run", "run_embedding"), ("evaluate", "test_embedding")]:
+                for environment in ["jina-cu126", "cu126", "jina-cpu"]:
+                    env = dict(os.environ, PATH=f"{temporary}:{os.environ.get('PATH', '')}",
+                               SLURM_SUBMIT_DIR=str(root), CAPTURE_ARGUMENTS=str(capture),
+                               INTERNVL_PIXI_ENV=environment)
+                    extra = ["config with spaces.yml", "--set", "output_dir=with spaces", "--set=k=3"]
+                    subprocess.run(["bash", str(root / f"sbatch/{script}.sbatch"), *extra],
+                                   env=env, check=True)
+                    actual = capture.read_bytes().decode().rstrip("\0").split("\0")
+                    self.assertEqual(actual, ["run", "--manifest-path", "src/internvl/pyproject.toml",
+                                              "--as-is", "-e", environment, "internvl", "experiment",
+                                              stage, "--config_file", *extra])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Synthetic embedding contracts, independent of datasets and real models."""
 
 import importlib.util
+from importlib.metadata import version
 import tempfile
 import unittest
 from pathlib import Path
@@ -275,7 +276,12 @@ class V4EmbeddingTests(EmbeddingTests):
     image_options = dict(ENCODE_OPTIONS, task="retrieval")
 
 
-class BackendLoadingTests(unittest.TestCase):
+class MockFamilyTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch("internvl.embeddings._check_dependency_family"))
+
+
+class BackendLoadingTests(MockFamilyTests):
     def test_constructor_loads_sentence_transformer_with_model_settings(self):
         with patch("internvl.embeddings.SentenceTransformer") as constructor:
             del constructor.return_value[0].modalities
@@ -305,16 +311,16 @@ class BackendLoadingTests(unittest.TestCase):
             EmbeddingModel("jinaai/jina-clip-v2", device="cpu")
 
 
-class V4BackendLoadingTests(unittest.TestCase):
+class V4BackendLoadingTests(MockFamilyTests):
     def test_v4_uses_checkpoint_dtype_sdpa_and_modality_fallback(self):
         with patch("internvl.embeddings.SentenceTransformer") as constructor:
             del constructor.return_value[0].modalities
-            model = EmbeddingModel("jinaai/jina-embeddings-v4", device="cuda")
+            model = EmbeddingModel("jinaai/jina-embeddings-v4", device="cpu")
         self.assertEqual(model.dimension, 2048)
         self.assertEqual(model.model[0].modalities, ["text", "image"])
         constructor.assert_called_once_with(
             "jinaai/jina-embeddings-v4",
-            device="cuda",
+            device="cpu",
             trust_remote_code=True,
             truncate_dim=None,
             model_kwargs={"torch_dtype": "auto", "attn_implementation": "sdpa"},
@@ -338,7 +344,7 @@ class OpenAIEmbeddingTests(EmbeddingTests):
     dimension = 512
 
 
-class NewBackendLoadingTests(unittest.TestCase):
+class NewBackendLoadingTests(MockFamilyTests):
     def test_gemma_dtype_uses_selected_device_native_support(self):
         for device, native, expected in [
             ("cpu", False, torch.float32),
@@ -381,6 +387,7 @@ class NewBackendLoadingTests(unittest.TestCase):
         )
         self.assertFalse(hasattr(model.model[0], "modalities"))
 
+    @unittest.skipUnless(version("transformers").startswith("5."), "modern stack only")
     def test_embedding_gemma2_architecture_imports_without_weights(self):
         from transformers import EmbeddingGemma2Config, EmbeddingGemma2Model
 
@@ -388,6 +395,7 @@ class NewBackendLoadingTests(unittest.TestCase):
         self.assertTrue(issubclass(EmbeddingGemma2Model, torch.nn.Module))
 
 
+@unittest.skipUnless(version("transformers").startswith("5."), "modern stack only")
 class ProjectedCLIPIntegrationTests(unittest.TestCase):
     def test_real_clip_projects_both_modalities_and_truncates_text(self):
         from transformers import (
@@ -443,3 +451,87 @@ class ProjectedCLIPIntegrationTests(unittest.TestCase):
                         pixel_values=features["pixel_values"]
                     ).pooler_output
                 np.testing.assert_allclose(images, expected.numpy(), atol=1e-6)
+
+
+class DependencyFamilyTests(unittest.TestCase):
+    def test_dependency_families_before_pretrained_construction(self):
+        from internvl.embeddings import _check_dependency_family
+
+        stacks = [
+            {"sentence-transformers": "5.7.0", "transformers": "4.57.6", "peft": "0.17.1"},
+            {"sentence-transformers": "6.2.0", "transformers": "5.20.2", "peft": "0.21.2"},
+        ]
+        for model_id in ("jinaai/jina-clip-v2", "jinaai/jina-embeddings-v4",
+                         "google/embeddinggemma-2", "openai/clip-vit-base-patch32"):
+            for stack in stacks:
+                with self.subTest(model=model_id, stack=stack), patch(
+                    "internvl.embeddings.version", side_effect=stack.__getitem__
+                ), patch("internvl.embeddings.SentenceTransformer") as constructor:
+                    compatible = model_id.startswith("jinaai/") == stack["transformers"].startswith("4.")
+                    if compatible:
+                        _check_dependency_family(model_id)
+                    else:
+                        with self.assertRaises(RuntimeError) as caught:
+                            EmbeddingModel(model_id, device="cpu")
+                        message = str(caught.exception)
+                        self.assertIn(model_id, message)
+                        for package, value in stack.items():
+                            self.assertIn(f"{package}={value}", message)
+                        self.assertIn("jina-cpu or jina-cu126" if model_id.startswith("jinaai/")
+                                      else "default or cu126", message)
+                    constructor.assert_not_called()
+
+    def test_missing_dependency_is_actionable(self):
+        from importlib.metadata import PackageNotFoundError
+        with patch("internvl.embeddings.version", side_effect=PackageNotFoundError), patch(
+            "internvl.embeddings.SentenceTransformer"
+        ) as constructor, self.assertRaisesRegex(RuntimeError, "peft=missing"):
+            EmbeddingModel("jinaai/jina-clip-v2", device="cpu")
+        constructor.assert_not_called()
+
+    @unittest.skipUnless(version("transformers").startswith("4."), "Jina stack only")
+    def test_jina_apis_and_peft_import_without_weights(self):
+        from transformers.models.clip.modeling_clip import clip_loss
+        from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+        from peft import PeftModel
+
+        self.assertTrue(callable(clip_loss))
+        self.assertTrue(callable(ROPE_INIT_FUNCTIONS["default"]))
+        self.assertTrue(issubclass(PeftModel, torch.nn.Module))
+
+
+class V4HardwareTests(MockFamilyTests):
+    def test_checks_selected_device_before_loading(self):
+        for device, resolved, native, allowed in [
+            ("cpu", "cpu", False, True),
+            ("cuda", "cuda", True, True),
+            ("cuda", "cuda", False, False),
+            ("cuda:1", "cuda:1", True, True),
+            ("cuda:1", "cuda:1", False, False),
+            ("auto", "cuda:1", True, True),
+            ("auto", "cuda:1", False, False),
+            ("auto", "cpu", False, True),
+            ("mps", "mps", False, False),
+            ("xpu", "xpu", False, False),
+        ]:
+            with self.subTest(device=device, native=native), patch(
+                "sentence_transformers.util.get_device_name", return_value=resolved
+            ), patch("torch.cuda.device") as selected, patch(
+                "torch.cuda.is_bf16_supported", return_value=native
+            ) as support, patch("internvl.embeddings.SentenceTransformer") as constructor:
+                support.side_effect = lambda **kwargs: (
+                    selected.return_value.__enter__.assert_called_once() or native
+                )
+                if allowed:
+                    EmbeddingModel("jinaai/jina-embeddings-v4", device=device)
+                    self.assertEqual(constructor.call_args.kwargs["device"], resolved)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, f"jinaai/jina-embeddings-v4 on {resolved}"):
+                        EmbeddingModel("jinaai/jina-embeddings-v4", device=device)
+                    constructor.assert_not_called()
+                if resolved.startswith("cuda"):
+                    selected.assert_called_once_with(resolved)
+                    support.assert_called_once_with(including_emulation=False)
+                else:
+                    selected.assert_not_called()
+                    support.assert_not_called()

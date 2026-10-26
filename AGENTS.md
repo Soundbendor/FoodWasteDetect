@@ -289,16 +289,39 @@ reference inputs; old CLIP vectors are incompatible even with same-size v4
 truncation. Existing-table reuse still performs no compatibility checks. Keep
 identical reference inputs, including saved descriptions, for model comparisons.
 The default YAML and submission scripts remain CLIP v2; use CLI overrides to
-select v4 and start with batch size 1. PEFT and its dependencies are locked in
-both Pixi profiles. The shared requirements are Sentence Transformers `>=6.1,<7`
-and Transformers `>=5.20.2,<6`, pinned to `6.2.0` and `5.20.2` in Pixi.
-Python `3.13.13`, PyTorch `2.7.1` (CPU/cu126), torchvision `0.22.1`, and native
-dependencies remain pinned. No audio/video extras are added. Upstream Jina CLIP v2
-repairs for Transformers 5 are deferred by user choice; synthetic coverage does
-not establish real-checkpoint compatibility. V4's upstream code explicitly uses BF16 autocast: loading
-FP16 weights alone is not a V100 workaround. Real V100 text/image acceptance
-is unverified; use the available H100 if necessary. Do not introduce a local
-precision adaptation without separately extending this scope.
+select v4 and start with batch size 1. The independent `modern` and `jina` Pixi features select these stacks:
+
+| Environments | Models | Sentence Transformers | Transformers | PEFT |
+| --- | --- | --- | --- | --- |
+| `default`, `cu126` | EmbeddingGemma2, OpenAI CLIP | 6.2.0 | 5.20.2 | 0.21.2 |
+| `jina-cpu`, `jina-cu126` | Jina CLIP v2, Jina Embeddings v4 | 5.7.0 | 4.57.6 | 0.17.1 |
+
+Each environment has an independent solve group. Shared requirements admit both
+families; feature pins and the lockfile select exact versions. Python 3.13.13,
+PyTorch 2.7.1 (CPU/cu126), torchvision 0.22.1, and native packages remain unchanged.
+The loader checks installed Sentence Transformers, Transformers, and PEFT families
+before pretrained construction, reporting the selected model, installed versions,
+and suitable environments on mismatch. This is a dependency guard, not model
+revision or artifact validation. Keep the existing default YAML at Jina CLIP v2;
+select its environment explicitly.
+
+V4 resolves `auto` before checking hardware. CPU remains available; CUDA requires
+native BF16 on the selected device, checked within its device context with
+`including_emulation=False`. Unsupported CUDA and other accelerators fail before
+pretrained construction. V4 retains checkpoint dtype and SDPA; Gemma retains its
+FP32 fallback. Do not add a local V4 precision adaptation. Scheduling stays manual.
+Run/evaluation Slurm wrappers accept `INTERNVL_PIXI_ENV`, defaulting to `cu126`.
+The four-model sweep explicitly exports `jina-cu126` for Jina and `cu126` for the
+other models, retaining V4 batch size 1 and separate tables/output directories.
+
+The failures in `aispdzi7` (`clip_loss` import) and `a3shaxva`
+(`ROPE_INIT_FUNCTIONS["default"]`) occurred before reference insertion. Isolated
+older dependencies replace compatibility patches. Real checkpoint acceptance on
+this stack remains pending: separately authorize text/image smoke checks, native
+BF16 hardware for V4, and repeat indexing and validation with identical references
+and retrieval settings in fresh tables/outputs. Synthetic checks are insufficient. Both locked CPU suites passed (modern: 205
+passed, 2 skipped; Jina: 204 passed, 3 skipped). See `docs/experiments.md` for
+version checks, scope, and the stale local CUDA installation.
 
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
 FoodX251 fixtures, Hugging Face datasets, and real LanceDB databases in temporary
@@ -612,7 +635,8 @@ stubbed components alone.
 
 `src/internvl/pyproject.toml` and its committed `pixi.lock` own the `internvl`
 package and console command; root package discovery excludes it. Use standard
-CPython 3.13.13 and select `-e default` or `-e cu126` with
+CPython 3.13.13 and select `-e default` / `-e cu126` for modern models or
+`-e jina-cpu` / `-e jina-cu126` for Jina with
 `pixi install/run --manifest-path src/internvl/pyproject.toml --locked`.
 The environments are separate Linux x86-64 solve groups. They include native
 Ollama 0.9.6 (CPU or the pinned CUDA 12.9 build) and Qdrant 1.19.0.

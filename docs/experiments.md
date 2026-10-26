@@ -530,9 +530,9 @@ These are normal experiment commands and may download weights. Default YAML,
 Slurm scripts, experiment orchestration, and the separate YOLO pipeline are
 unchanged. Neither README was edited.
 
-### Shared environment
+### Shared environment (superseded by isolated Jina profiles below)
 
-Both Pixi solve groups now pin Sentence Transformers 6.2.0 and Transformers
+The two Pixi solve groups initially pinned Sentence Transformers 6.2.0 and Transformers
 5.20.2; project requirements are `sentence-transformers>=6.1,<7` and
 `transformers>=5.20.2,<6`. The solve updated huggingface-hub to 1.33.0 and tokenizers
 to 0.23.3, with required CLI dependencies. Python 3.13.13, PyTorch 2.7.1 CPU/cu126,
@@ -566,3 +566,87 @@ Package Ruff, scoped ty, CLI experiment help, and wheel/sdist builds passed.
 Builds are in `/tmp/embedding-extension-dist`. No pretrained weights, datasets,
 GPU kernels, live Ollama services, or HPC resources were used. These checks do
 not establish checkpoint, GPU, real-dataset, or shared-storage compatibility.
+
+
+## Isolated Jina environments
+
+The supplied diagnosis records two construction failures from complete W&B console
+logs and progress summaries: [royal-bird-17](https://forge.coreweave.com/wandb/soundbendor/food-waste-detection/runs/aispdzi7/logs)
+failed importing `clip_loss`, and [dutiful-elevator-14](https://forge.coreweave.com/wandb/soundbendor/food-waste-detection/runs/a3shaxva/logs)
+failed at `ROPE_INIT_FUNCTIONS["default"]`. Both completed 0 / 6,275 references.
+Their installed dependency versions were not recorded. The implementation change
+isolates the Jina backends on older libraries instead of patching remote model code.
+
+| Environments | Models | Sentence Transformers | Transformers | PEFT |
+| --- | --- | --- | --- | --- |
+| `default`, `cu126` | EmbeddingGemma2, OpenAI CLIP | 6.2.0 | 5.20.2 | 0.21.2 |
+| `jina-cpu`, `jina-cu126` | Both Jina models | 5.7.0 | 4.57.6 | 0.17.1 |
+
+The four solve groups preserve Python 3.13.13, PyTorch 2.7.1, torchvision 0.22.1,
+and native package resolutions. Existing modern profiles retain their package
+resolutions. The loader rejects mismatched library families before pretrained
+construction and names the model, installed versions, and suitable environments.
+The YAML default remains Jina CLIP v2 and requires an explicit Jina environment.
+
+Prepare environments before submission, from the repository root:
+
+```bash
+pixi install --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu
+pixi install --manifest-path src/internvl/pyproject.toml --locked -e jina-cu126
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu test
+```
+
+For an authorized allocation and prepared model caches, use the existing config
+and override forwarding:
+
+```bash
+INTERNVL_PIXI_ENV=jina-cu126 sbatch sbatch/run_embedding.sbatch cfg/classification.yml \
+  --set lancedb.table=jina_clip_retry --set output_dir=outputs/jina_clip_retry
+INTERNVL_PIXI_ENV=jina-cu126 sbatch sbatch/test_embedding.sbatch cfg/classification.yml \
+  --set lancedb.table=jina_clip_retry --set output_dir=outputs/jina_clip_validation
+```
+
+The wrappers retain `cu126` as their default. The four-model sweep exports the
+appropriate environment per model, keeps V4 batch size 1, and creates separate
+tables and outputs. Scheduling remains manual: choose suitable resources with
+Slurm options. V4 requires native BF16 on the selected CUDA device (including
+nondefault GPUs); automatic device selection is resolved first. V100 is rejected.
+CPU remains available; other accelerator types are rejected. V4 keeps checkpoint
+dtype and SDPA, and Gemma keeps its FP32 fallback.
+
+Real-checkpoint acceptance remains pending. Separately authorize real text/image
+smoke checks, using native-BF16 hardware for V4, then repeat both failed runs with
+the same reference inputs and retrieval settings in fresh tables and outputs.
+Acceptance requires completed indexing and validation reports. Routine checks
+remain offline, synthetic, and CPU-only; they do not establish checkpoint, GPU,
+shared-filesystem, or cluster compatibility.
+
+
+### Verification of isolated profiles
+
+Both CPU environments were installed from the regenerated lockfile. All 92 modern
+and 86 Jina installed PyPI dependencies matched their locked versions. Comparing
+lockfile entries confirmed that both modern profiles retained every prior package
+resolution and both Jina profiles retained the matching modern native packages.
+The existing local `cu126` installation is stale: Sentence Transformers 5.7.0,
+Transformers 4.57.6, and no PEFT metadata. It was inspected without GPU execution;
+reinstall it with `--locked` before use. `jina-cu126` was resolved but not installed.
+
+With `CUDA_VISIBLE_DEVICES=""`, `HF_HUB_OFFLINE=1`, and `PYTHONPATH=src`, the full
+suite passed in both environments: **205 passed, 2 skipped, 278 subtests** in
+`default`; **204 passed, 3 skipped, 278 subtests** in `jina-cpu`. The skips comprise
+one existing skip plus checks specific to the other dependency family. The initial
+sandboxed runs stalled and were interrupted; successful runs used unrestricted
+execution for temporary LanceDB databases and local offline W&B sockets.
+
+Checks cover real Sentence Transformers synthetic batching, order, dimensions,
+prompts, finite nonzero vectors, image ownership, and shared experiment behavior.
+Jina imports include `clip_loss`, the default RoPE initializer, and PEFT. Modern
+checks retain the miniature projected CLIP/truncation test and EmbeddingGemma2
+architecture import. Mocked checks reject dependency mismatches and unsupported
+V4 hardware before pretrained construction, including automatic and nondefault
+CUDA selection. Fake Slurm/Pixi tests cover explicit environments, inherited
+values, defaults, argument forwarding, V4 batch size, and separate tables/outputs;
+the final focused rerun passed all three script tests. Ruff, scoped ty, and
+`git diff --check` passed. No model weights, real datasets, GPUs, live services,
+or cluster jobs were used.
