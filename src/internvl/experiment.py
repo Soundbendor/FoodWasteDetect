@@ -17,6 +17,7 @@ from .image_dataset import load_dataset
 from .retrieval import LanceDBIndex, classify, metrics
 from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 from .tracking import Tracker
+from .vertex_embeddings import VertexEmbeddingModel
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -106,9 +107,14 @@ class Experiment:
     def embedder(self):
         """Construct the embedder on first use and reuse it across stages."""
         if self._embedder is None:
-            self._embedder = EmbeddingModel(
-                **dict(self.config["embedding"], batch_size=self.batch_size)
-            )
+            options = dict(self.config["embedding"], batch_size=self.batch_size)
+            vertex = options.pop("vertex", {})
+            if options.get("model_id") == "google/ge-v2":
+                self._embedder = VertexEmbeddingModel(
+                    truncate_dim=options.get("truncate_dim"), **vertex
+                )
+            else:
+                self._embedder = EmbeddingModel(**options)
         return self._embedder
 
     def _lancedb_adapter(self):

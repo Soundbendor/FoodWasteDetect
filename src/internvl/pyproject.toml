@@ -29,6 +29,7 @@ dependencies = [
     "omegaconf>=2.3,<3",
     "wandb>=0.28.1,<0.29",
     "peft>=0.15.2",
+    "google-genai==2.33.0",
 ]
 
 [project.scripts]
@@ -57,7 +58,7 @@ root = [".."]
 python-version = "3.13"
 
 [tool.ty.src]
-include = ["cli.py", "schemas.py", "tracking.py"]
+include = ["cli.py", "schemas.py", "tracking.py", "vertex_embeddings.py"]
 
 [dependency-groups]
 dev = [

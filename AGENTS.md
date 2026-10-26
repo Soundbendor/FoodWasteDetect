@@ -375,6 +375,49 @@ These tests do not establish real model, dataset, GPU, Ollama, shared-filesystem
 compatibility. The historical workflow limitations below describe the removed
 legacy source, and must not be attributed to the new experiment runner.
 
+## Vertex Gemini Embedding 2 whole-image comparison
+
+`google/ge-v2` is an application alias for Vertex AI `gemini-embedding-2`,
+implemented separately in `internvl.vertex_embeddings.VertexEmbeddingModel`.
+`Experiment.embedder` routes it lazily and reuses the wrapper. Local model IDs
+ignore the `embedding.vertex` section. The Vertex route does not construct a
+Sentence Transformer or use its preprocessing. The local Hugging Face dataset
+adapter remains unchanged.
+
+Use standalone `cfg/ge_v2.yml` with `--set embedding.vertex.project=PROJECT_ID`.
+Its defaults retain description references from the shared vocabulary, disable
+class-name/training-image references, and use `foodx251_ge_v2` with output directory
+`assets/classification/ge_v2`. Enable training images with `--set embed_images=true`.
+`device` is ignored; `batch_size` still bounds dataset and insertion batches.
+Credentials use Application Default Credentials outside YAML. Live cloud requests
+and spending require explicit authorization; local checks use mocked transports.
+
+The SDK is `google-genai==2.33.0`, using Vertex, explicit project/location, and API
+`v1`. Project is required; location defaults to `global`. One context-managed
+client serves each nonempty encode call with at most four worker threads by default.
+Each request contains one text record or one RGB inline PNG image without resizing,
+filenames, labels, or dataset metadata. Caller-owned images stay open. Results
+retain input order as NumPy float32 matrices. Empty calls avoid authentication.
+Native dimension is 3072; `truncate_dim` accepts integer dimensions 128–3072,
+excluding booleans, and maps to API `output_dimensionality`. Responses require
+exactly one finite nonzero vector per record; no local normalization or slicing.
+
+`embedding.vertex.classification_prompt` defaults to false. When true, text starts
+with `task: classification | query: `; image requests put that same text part before
+the image. This applies to all reference and validation inputs; no `task_type` is
+sent. Changing model, dimension, or prompt mode requires fresh tables/output paths
+and re-embedding every reference. Existing-table compatibility remains unchecked.
+
+Vertex settings validate before client construction: nonempty project/location,
+positive integer `max_concurrency` and `max_attempts`, positive finite seconds for
+`request_timeout`, and boolean `classification_prompt`. SDK retries default to five
+total attempts with one-second initial delay, base two, one-second jitter, and a
+60-second delay cap. Connection/timeouts and HTTP 408/429/500/502/503/504 retry;
+other errors propagate. Timeout defaults to 60 seconds per attempt. Failure or
+interruption cancels queued work, waits for running requests, and closes the client.
+Batches return no partial vectors. Existing partial-table and failed-evaluation
+behavior, configuration recording, and batch progress contracts still apply.
+
 ## InternVL text architecture and experiment pipeline (historical)
 
 The following describes the removed workflow. Its source remains in Git history;

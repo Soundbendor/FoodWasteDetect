@@ -1,0 +1,34 @@
+# One reference strategy per output directory. All paths resolve from the CWD.
+dataset:
+  name: foodx251
+  root: data/FoodX-251
+embed_images: false
+n_imgs_per_class: null  # set the number of images
+embed_class_labels: false
+embed_descriptions: true
+# Read-only vocabulary; null generates/reuses output_dir/descriptions.json.
+descriptions_file: assets/classification/descriptions_v1/descriptions.json
+embedding:
+  model_id: google/ge-v2
+  device: cpu  # Ignored by Vertex.
+  batch_size: 32
+  truncate_dim: null
+  vertex:
+    project: null  # Required; credentials use Application Default Credentials.
+    location: global
+    max_concurrency: 4
+    max_attempts: 5
+    request_timeout: 60  # Seconds per attempt.
+    classification_prompt: false
+ollama:
+  llm: gemma3:27b
+  binary_path: ollama
+  host: http://127.0.0.1:11434
+  startup_timeout: 120
+  request_timeout: 600
+lancedb:
+  uri: assets/lancedb
+  table: foodx251_ge_v2
+k: 10
+description_count: 5
+output_dir: assets/classification/ge_v2

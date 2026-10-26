@@ -703,3 +703,79 @@ no new failures remain. One warning reports Sentence Transformers' deprecated
 import remains compatible with both installed library families. Production-loader
 Ruff and `git diff --check` passed. No model weights, datasets, GPUs, real services,
 or cluster jobs were used. README files and dependency manifests were unchanged.
+
+## Vertex Gemini Embedding 2 comparison (October 26, 2026)
+
+Implemented in branch `feat/ge-v2-vertex`, isolated at
+`/tmp/FoodWasteDetect-ge-v2` from `28746cb`. The original checkout remained clean
+at that commit. The dedicated `cfg/ge_v2.yml` preserves the classification
+reference defaults and shared description vocabulary while selecting separate
+storage destinations. Both existing classification YAML files, README files,
+Slurm scripts, and sweeps remain unchanged.
+
+The configuration alias `google/ge-v2` sends requests to `gemini-embedding-2`
+through Vertex AI. The [Google multimodal embedding contract](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/embeddings/get-multimodal-embeddings)
+provides the service model name, dimensionality setting, and classification
+instruction format. The wrapper uses inline RGB PNG images and individual text
+records; it leaves preprocessing beyond RGB conversion and service normalization
+to the API. `truncate_dim` selects 128–3072 output dimensions, with 3072 by default.
+Optional classification instructions apply to both reference and evaluation data.
+Use fresh tables and output directories when changing this setting or dimensions.
+
+`google-genai==2.33.0` was added with `pixi add --pypi` from this worktree.
+The lock change adds the SDK and its dependencies to all four environments;
+existing dependency versions and modern/Jina feature pins are unchanged. The
+[SDK retry implementation](https://github.com/googleapis/python-genai/blob/v2.33.0/google/genai/_api_client.py)
+owns retry selection and exponential backoff. The application configures five
+total attempts, a 60-second timeout per attempt, and four concurrent requests by
+default. It cancels queued requests on failure and waits for running calls before
+closing the shared client. It does not return partial batches.
+
+After separate cloud authorization, run from the repository root with ADC
+configured outside YAML:
+
+```bash
+python -m internvl experiment run --config_file cfg/ge_v2.yml \
+  --set embedding.vertex.project=YOUR_PROJECT_ID
+```
+
+The default references are saved descriptions; evaluation uses labeled validation
+images. Add `--set embed_images=true` for training-image references. No live API
+acceptance, cloud quota, latency, cost, or classification-quality claim is made.
+
+### CPU verification
+
+All checks ran in the isolated worktree. Both locked CPU suites used
+`CUDA_VISIBLE_DEVICES=""` and `HF_HUB_OFFLINE=1` through the Pixi `test` task.
+No model weights or datasets were downloaded, and no live cloud requests, Ollama
+servers, GPU allocations, or cluster jobs were used. SDK tests supplied synthetic
+credentials and an in-memory HTTP transport; retry delays were zeroed only in the
+test client while production retry settings were asserted separately.
+
+The 59 new tests pass. They cover lazy alias routing, unchanged local forwarding,
+text/image payloads and prompts, original image dimensions and ownership, empty
+inputs, dimension and settings validation, invalid response cardinality/vectors,
+ordered concurrent results, worker limits, every retryable HTTP status, connection
+and timeout recovery/exhaustion, nonretryable errors, interruption, queued-work
+cancellation, and client cleanup. A miniature local FoodX251 fixture and real
+LanceDB exercise all three reference types, partial batches, cached builds with no
+client construction, full evaluation, and a later failed batch with no new report.
+CLI tests load the standalone YAML and exercise strict nested overrides.
+
+Final commands and results:
+
+- `pixi run --manifest-path src/internvl/pyproject.toml --locked -e default test --tb=short -q`:
+  **267 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- `pixi run --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu test --tb=short -q`:
+  **267 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- Focused Vertex suite: **59 passed**; wrapper statement coverage is 100% in both
+  full suites. This does not establish real-service acceptance.
+- Ruff on the changed Python files, scoped ty including the new wrapper, and
+  `git diff --check` passed.
+
+All full-suite failures are in the unchanged `tests/test_embeddings.py` against
+unchanged `embeddings.py`: the already documented absent dependency-family and
+V4 hardware guards, including loader setup that patches the absent guard.
+The Jina stack skips the EmbeddingGemma2 architecture test, producing one fewer
+failure. Both suites also retain the existing synthetic Sentence Transformers
+import deprecation warning. Guard restoration remains outside this feature.
