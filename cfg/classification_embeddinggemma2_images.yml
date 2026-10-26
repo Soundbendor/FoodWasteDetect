@@ -1,0 +1,25 @@
+# Image-only references; all paths resolve from the working directory.
+dataset:
+  name: foodx251
+  root: data/FoodX-251
+embed_images: true
+n_imgs_per_class: 1
+embed_class_labels: false
+embed_descriptions: false
+descriptions_file: null
+embedding:
+  model_id: google/embeddinggemma-2
+  device: cuda
+  batch_size: 32
+ollama:
+  llm: gemma3:27b
+  binary_path: ollama
+  host: http://127.0.0.1:11434
+  startup_timeout: 120
+  request_timeout: 600
+lancedb:
+  uri: assets/lancedb
+  table: foodx251_embeddinggemma2_images
+k: 10
+description_count: 5
+output_dir: assets/classification/embeddinggemma2_images
