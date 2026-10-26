@@ -11,6 +11,9 @@ embedding:
   model_id: google/embeddinggemma-2
   device: cuda
   batch_size: 32
+  # null keeps native dimensions; otherwise use an integer from 1 to the native size.
+  # Changing this requires a fresh table/output directory and rebuilding all references.
+  truncate_dim: null
 ollama:
   llm: gemma3:27b
   binary_path: ollama

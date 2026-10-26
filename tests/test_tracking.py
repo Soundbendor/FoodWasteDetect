@@ -572,3 +572,40 @@ def test_description_failure_has_no_cleanup_progress(experiment_case, sdk, sourc
     assert request.call_count == (1 if source == "logging" else 2)
     assert sdk.summary == {}
     assert not (exp.output / "descriptions.json").exists()
+
+
+def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
+    from sentence_transformers import SentenceTransformer
+    from test_embeddings import SyntheticEncoder
+    from internvl.embeddings import EmbeddingModel
+
+    exp = experiment_case.experiment((True, True, True), 'truncated-v4')
+    exp.config['embedding'].update(
+        model_id='jinaai/jina-embeddings-v4', device='cpu', truncate_dim=None,
+    )
+    path = tmp_path / 'truncated.yaml'
+    path.write_text(yaml.safe_dump(exp.config))
+    experiment_case.embedder_constructor.side_effect = EmbeddingModel
+    encoder = SyntheticEncoder(2048)
+    backend = SentenceTransformer(
+        modules=[encoder], device='cpu', prompts={'passage': 'Passage: '},
+    )
+    backend.module_kwargs = {'0': ['task', 'truncate_dim']}
+    with patch('internvl.embeddings._load_backend', return_value=backend):
+        main(['experiment', 'run', '--config_file', str(path),
+              '--set', 'embedding.truncate_dim=1024'])
+    experiment_case.embedder_constructor.assert_called_once_with(
+        model_id='jinaai/jina-embeddings-v4', device='cpu', batch_size=2,
+        truncate_dim=1024,
+    )
+    table = experiment_case.client.open_table(exp.config['lancedb']['table'])
+    assert table.schema.field('vector').type.list_size == 1024
+    assert table.count_rows() == 14
+    report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
+    assert report['metrics']['evaluated'] == 2
+    assert report['config']['embedding']['truncate_dim'] == 1024
+    from internvl.cli import wandb
+    assert wandb.init.call_args.kwargs['config'] == report['config']
+    artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
+    config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
+    assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == report['config']

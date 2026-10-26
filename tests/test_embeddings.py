@@ -535,3 +535,67 @@ class V4HardwareTests(MockFamilyTests):
                 else:
                     selected.assert_not_called()
                     support.assert_not_called()
+
+
+class TruncationTests(unittest.TestCase):
+    models = [
+        ('jinaai/jina-clip-v2', 1024, ''),
+        ('jinaai/jina-embeddings-v4', 2048, 'Passage: '),
+        ('google/embeddinggemma-2', 768, 'Document: '),
+        ('openai/clip-vit-base-patch32', 512, ''),
+    ]
+
+    def test_dimensions_with_real_library_for_text_and_images(self):
+        for model_id, native, prefix in self.models:
+            for options in ({}, {'truncate_dim': None}, {'truncate_dim': 1},
+                            {'truncate_dim': native // 2}, {'truncate_dim': native}):
+                with self.subTest(model=model_id, options=options):
+                    encoder = SyntheticEncoder(native)
+                    backend = SentenceTransformer(
+                        modules=[encoder], device='cpu',
+                        prompts={'passage': 'Passage: ', 'Document': 'Document: '},
+                    )
+                    backend.module_kwargs = {'0': ['task', 'truncate_dim']}
+                    with patch('internvl.embeddings._load_backend', return_value=backend):
+                        model = EmbeddingModel(model_id, 2, device='cpu', **options)
+                    dimension = options.get('truncate_dim') or native
+                    self.assertEqual(model.dimension, dimension)
+                    texts = ['pie', 'a bowl of rice', 'pear']
+                    expected = np.ones((3, dimension), dtype=np.float32)
+                    expected[:, 0] = [len(prefix + t) for t in texts]
+                    np.testing.assert_array_equal(model.encode_text(texts), expected)
+                    self.assertEqual(encoder.batch_sizes, [2, 1])
+                    encoder.batch_sizes.clear()
+                    images = [Image.new('RGB', (2, 2), (n, 0, 0)) for n in (7, 3, 9)]
+                    try:
+                        expected[:, 0] = [7, 3, 9]
+                        np.testing.assert_array_equal(model.encode_images(images), expected)
+                    finally:
+                        for image in images:
+                            image.close()
+                    self.assertEqual(encoder.batch_sizes, [2, 1])
+                    task = 'retrieval' if model_id.endswith('v4') else None
+                    self.assertEqual(encoder.tasks, [task] * 4)
+                    for encode in (model.encode_text, model.encode_images):
+                        empty = encode([])
+                        self.assertEqual(empty.shape, (0, dimension))
+                        self.assertEqual(empty.dtype, np.float32)
+
+    def test_invalid_dimensions_fail_before_loading(self):
+        for model_id, native, _ in self.models:
+            for value in (True, False, 0, -1, native + 1, 1.0, '1', [], {}):
+                with self.subTest(model=model_id, value=value), patch(
+                    'internvl.embeddings._load_backend'
+                ) as loader:
+                    with self.assertRaisesRegex(ValueError, 'truncate_dim'):
+                        EmbeddingModel(model_id, truncate_dim=value)
+                    loader.assert_not_called()
+
+    def test_output_validation_uses_selected_dimension(self):
+        with patch('internvl.embeddings._load_backend') as loader:
+            model = EmbeddingModel('jinaai/jina-embeddings-v4', truncate_dim=1024)
+        for values in (np.ones((1, 2048)), np.zeros((1, 1024)),
+                       np.full((1, 1024), np.nan)):
+            loader.return_value.encode.return_value = values
+            with self.assertRaises(ValueError):
+                model.encode_text(['pie'])

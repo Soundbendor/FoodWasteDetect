@@ -82,7 +82,7 @@ def _prepare_rgb_image(image: ImageInput) -> Image.Image:
 
 
 class EmbeddingModel:
-    """Batch text and images into full-size model vectors."""
+    """Batch text and images into optionally truncated model vectors."""
 
     def __init__(
         self,
@@ -90,15 +90,27 @@ class EmbeddingModel:
         batch_size: int = 32,
         *,
         device: str = "auto",
+        truncate_dim: int | None = None,
     ) -> None:
         """Load a supported model with the requested device and batch size."""
         if model_id not in _MODEL_SPECS:
             raise ValueError(
                 f"Unsupported model {model_id!r}. Supported models: {list(_MODEL_SPECS)}"
             )
+        native_dimension = _MODEL_SPECS[model_id]["dimension"]
+        if truncate_dim is not None and (
+            isinstance(truncate_dim, bool)
+            or not isinstance(truncate_dim, int)
+            or not 1 <= truncate_dim <= native_dimension
+        ):
+            raise ValueError(
+                f"truncate_dim must be None or an integer between 1 and {native_dimension} "
+                f"for {model_id}"
+            )
+        self.truncate_dim = truncate_dim
         self.batch_size = batch_size
         self.model_id = model_id
-        self.dimension = _MODEL_SPECS[model_id]["dimension"]
+        self.dimension = native_dimension if truncate_dim is None else truncate_dim
         self.model = _load_backend(model_id, device)
 
     def _encode(
@@ -108,6 +120,8 @@ class EmbeddingModel:
         if not inputs:
             return np.empty((0, self.dimension), dtype=np.float32)
         options = {**_MODEL_SPECS[self.model_id].get("encode", {}), **options}
+        if self.truncate_dim is not None:
+            options["truncate_dim"] = self.truncate_dim
         values = self.model.encode(
             inputs,
             batch_size=self.batch_size,

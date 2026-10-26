@@ -273,14 +273,31 @@ image ownership apply to all models. No extra normalization is requested.
 Use a separate table and output directory for each model and rebuild all references;
 the runner still does not validate compatibility of existing tables.
 
-The constructor and encode method signatures remain unchanged. CLIP v2 retains
+`EmbeddingModel` accepts keyword-only `truncate_dim: int | None = None`.
+`embedding.truncate_dim` defaults to null in both classification YAML files.
+Omitted or null preserves native dimensions; integers from 1 through the model's
+native dimension select the output size. Booleans, other types, nonpositive and
+oversized values fail before backend loading when the lazy embedder is constructed.
+Non-null values pass to Sentence Transformers' shared `encode()` for class names,
+descriptions, training images, and evaluation images. The library owns truncation;
+no extra normalization is requested. Output validation, empty arrays, and the
+LanceDB schema use the selected dimension. Arbitrary valid dimensions are allowed
+for all four models; retrieval quality must be measured.
+Use `--set embedding.model_id=jinaai/jina-embeddings-v4 --set embedding.truncate_dim=1024`
+for the 1024-dimensional v4 experiment. Custom YAML files must include
+`embedding.truncate_dim` before strict CLI overrides can target it. Changing the
+dimension requires a fresh table and output directory and rebuilding every enabled
+reference source with the same setting used for evaluation. Existing-table reuse
+still adds no compatibility validation, migration, or automatic naming.
+
+The encode method signatures remain unchanged. CLIP v2 retains
 its float32 loading and CLIP-specific attention configuration. V4 uses checkpoint
 dtype (`torch_dtype="auto"`) and SDPA, with no CLIP configuration flags. Both
 custom modules receive text/image modality metadata only when it is absent.
 V4 encodes every input with `task="retrieval"`; class names and descriptions
 add `prompt_name="passage"`, while training and validation images have no text
-prompt. This fixed protocol uses single-vector retrieval with no truncation;
-there are no task or dimension configuration switches. Both models return finite,
+prompt. This protocol uses single-vector retrieval with optional dimension
+truncation; there is no task configuration switch. Both models return finite,
 nonzero NumPy float32 matrices in input order. V4's upstream normalization is
 preserved without adding application normalization.
 
