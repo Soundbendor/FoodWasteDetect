@@ -543,6 +543,7 @@ class TruncationTests(unittest.TestCase):
         ('jinaai/jina-embeddings-v4', 2048, 'Passage: '),
         ('google/embeddinggemma-2', 768, 'Document: '),
         ('openai/clip-vit-base-patch32', 512, ''),
+        ('Qwen/Qwen3-VL-Embedding-8B', 4096, ''),
     ]
 
     def test_dimensions_with_real_library_for_text_and_images(self):
@@ -599,3 +600,48 @@ class TruncationTests(unittest.TestCase):
             loader.return_value.encode.return_value = values
             with self.assertRaises(ValueError):
                 model.encode_text(['pie'])
+
+
+class QwenEmbeddingTests(EmbeddingTests):
+    model_id = "Qwen/Qwen3-VL-Embedding-8B"
+    dimension = 4096
+
+
+class QwenLoadingAndBatchingTests(unittest.TestCase):
+    def test_checkpoint_loading_options(self):
+        module = torch.nn.Identity()
+        with patch("internvl.embeddings.SentenceTransformer") as constructor:
+            constructor.return_value.__getitem__.return_value = module
+            model = EmbeddingModel("Qwen/Qwen3-VL-Embedding-8B", 8, device="cuda")
+        constructor.assert_called_once_with(
+            "Qwen/Qwen3-VL-Embedding-8B", device="cuda", truncate_dim=None,
+            model_kwargs={"torch_dtype": "auto", "attn_implementation": "sdpa"},
+        )
+        self.assertEqual(model.dimension, 4096)
+        self.assertFalse(hasattr(module, "modalities"))
+
+    def test_full_and_partial_batches_preserve_order_and_normalization(self):
+        from sentence_transformers.models import Normalize
+
+        encoder = SyntheticEncoder(4096)
+        backend = SentenceTransformer(modules=[encoder, Normalize()], device="cpu")
+        with patch("internvl.embeddings._load_backend", return_value=backend):
+            model = EmbeddingModel("Qwen/Qwen3-VL-Embedding-8B", 8, device="cpu")
+        values = [3, 9, 1, 8, 2, 7, 4, 6, 5, 10]
+        expected = np.ones((10, 4096), dtype=np.float32)
+        expected[:, 0] = values
+        expected /= np.linalg.norm(expected, axis=1, keepdims=True)
+        vectors = model.encode_text(["a" * n for n in values])
+        np.testing.assert_allclose(vectors, expected, atol=1e-7)
+        self.assertEqual(encoder.batch_sizes, [8, 2])
+        encoder.batch_sizes.clear()
+        images = [Image.new("L", (3, 2), n) for n in values]
+        try:
+            vectors = model.encode_images(images)
+            np.testing.assert_allclose(vectors, expected, atol=1e-7)
+            self.assertEqual([image.getpixel((0, 0)) for image in images], values)
+        finally:
+            for image in images:
+                image.close()
+        self.assertEqual(vectors.dtype, np.float32)
+        self.assertEqual(encoder.batch_sizes, [8, 2])

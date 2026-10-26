@@ -543,29 +543,33 @@ class ExperimentTests(unittest.TestCase):
         import numpy as np
         from internvl.embeddings import EmbeddingModel
 
-        for model_id, dimension in [
-            ("openai/clip-vit-base-patch32", 512),
-            ("google/embeddinggemma-2", 768),
-            ("jinaai/jina-clip-v2", 1024),
-            ("jinaai/jina-embeddings-v4", 2048),
+        for model_id, native, truncate_dim in [
+            ("openai/clip-vit-base-patch32", 512, None),
+            ("google/embeddinggemma-2", 768, None),
+            ("jinaai/jina-clip-v2", 1024, None),
+            ("jinaai/jina-embeddings-v4", 2048, None),
+            ("Qwen/Qwen3-VL-Embedding-8B", 4096, None),
+            ("Qwen/Qwen3-VL-Embedding-8B", 4096, 128),
         ]:
-            with self.subTest(model_id=model_id):
+            with self.subTest(model_id=model_id, truncate_dim=truncate_dim):
+                dimension = truncate_dim or native
                 def encode(inputs, **kwargs):
-                    vectors = np.zeros((len(inputs), dimension), dtype=np.float32)
+                    vectors = np.zeros((len(inputs), native), dtype=np.float32)
                     for i, item in enumerate(inputs):
                         if isinstance(item, dict):
                             item = item['image']
                         apple = 'Apple' in item if isinstance(item, str) else item.getpixel((0, 0))[0] == 0
-                        vectors[i, 0 if apple else -1] = 1
-                    return vectors
+                        vectors[i, 0 if apple else 1] = 1
+                    return vectors[:, :kwargs.get("truncate_dim", native)]
 
                 with patch('internvl.embeddings._load_backend') as loader:
                     loader.return_value.encode.side_effect = encode
-                    model = EmbeddingModel(model_id, device='cpu')
+                    model = EmbeddingModel(model_id, device='cpu', truncate_dim=truncate_dim)
                 self.embedder_constructor.side_effect = None
                 self.embedder_constructor.return_value = model
                 exp = self.experiment((True, True, False), f'dim-{dimension}')
                 exp.config['embedding']['model_id'] = model_id
+                exp.config['embedding']['truncate_dim'] = truncate_dim
                 artifact = exp.build_vector_database()
                 table = self.client.open_table(artifact['table'])
                 self.assertEqual(table.schema.field('vector').type.list_size, dimension)

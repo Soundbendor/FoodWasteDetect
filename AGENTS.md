@@ -253,7 +253,7 @@ inserted images. Existing tables remain reusable without modification; use a new
 `lancedb.table` to build references with a different limit. CLI overrides such as
 `--set n_imgs_per_class=20` require the key in custom YAML files.
 
-The whole-image embedder accepts four models through `embedding.model_id`:
+The whole-image embedder accepts five models through `embedding.model_id`:
 
 | Model | Dimensions | Text | Images |
 | --- | ---: | --- | --- |
@@ -261,8 +261,9 @@ The whole-image embedder accepts four models through `embedding.model_id`:
 | `jinaai/jina-embeddings-v4` | 2048 | Retrieval task, passage prompt | Retrieval task, RGB PIL inputs |
 | `google/embeddinggemma-2` | 768 | `prompt_name="Document"` | Separate `{"image": rgb_PIL}` records, no text prompt |
 | `openai/clip-vit-base-patch32` | 512 | Plain text, explicit 77-token truncation | Checkpoint image preprocessing |
+| `Qwen/Qwen3-VL-Embedding-8B` | 4096 | Checkpoint default instruction | RGB PIL inputs |
 
-All four use Sentence Transformers through an internal specification table.
+All five use Sentence Transformers through an internal specification table.
 EmbeddingGemma2 disables the audio tower with `config_kwargs={"audio_config": None}`.
 It uses BF16 only with native support on the selected CUDA device (no emulation);
 otherwise it loads FP32, never FP16. OpenAI CLIP loads FP32 and uses projected
@@ -282,7 +283,7 @@ Non-null values pass to Sentence Transformers' shared `encode()` for class names
 descriptions, training images, and evaluation images. The library owns truncation;
 no extra normalization is requested. Output validation, empty arrays, and the
 LanceDB schema use the selected dimension. Arbitrary valid dimensions are allowed
-for all four models; retrieval quality must be measured.
+for all five models; retrieval quality must be measured.
 Use `--set embedding.model_id=jinaai/jina-embeddings-v4 --set embedding.truncate_dim=1024`
 for the 1024-dimensional v4 experiment. Custom YAML files must include
 `embedding.truncate_dim` before strict CLI overrides can target it. Changing the
@@ -310,26 +311,33 @@ select v4 and start with batch size 1. The independent `modern` and `jina` Pixi 
 
 | Environments | Models | Sentence Transformers | Transformers | PEFT |
 | --- | --- | --- | --- | --- |
-| `default`, `cu126` | EmbeddingGemma2, OpenAI CLIP | 6.2.0 | 5.20.2 | 0.21.2 |
+| `default`, `cu126` | EmbeddingGemma2, OpenAI CLIP, Qwen | 6.2.0 | 5.20.2 | 0.21.2 |
 | `jina-cpu`, `jina-cu126` | Jina CLIP v2, Jina Embeddings v4 | 5.7.0 | 4.57.6 | 0.17.1 |
 
 Each environment has an independent solve group. Shared requirements admit both
 families; feature pins and the lockfile select exact versions. Python 3.13.13,
 PyTorch 2.7.1 (CPU/cu126), torchvision 0.22.1, and native packages remain unchanged.
-The loader checks installed Sentence Transformers, Transformers, and PEFT families
-before pretrained construction, reporting the selected model, installed versions,
-and suitable environments on mismatch. This is a dependency guard, not model
-revision or artifact validation. Keep the existing default YAML at Jina CLIP v2;
-select its environment explicitly.
-
-V4 resolves `auto` before checking hardware. CPU remains available; CUDA requires
-native BF16 on the selected device, checked within its device context with
-`including_emulation=False`. Unsupported CUDA and other accelerators fail before
-pretrained construction. V4 retains checkpoint dtype and SDPA; Gemma retains its
-FP32 fallback. Do not add a local V4 precision adaptation. Scheduling stays manual.
-Run/evaluation Slurm wrappers accept `INTERNVL_PIXI_ENV`, defaulting to `cu126`.
-The four-model sweep explicitly exports `jina-cu126` for Jina and `cu126` for the
+The default YAML remains Jina CLIP v2; select its environment explicitly.
+The dependency-family and V4 hardware guards described in earlier verification
+notes are absent from the current implementation. Existing guard tests fail;
+restoring these guards is separate work. Environment and hardware selection remain
+manual. Run/evaluation Slurm wrappers accept `INTERNVL_PIXI_ENV`, defaulting to
+`cu126`. The five-model sweep exports `jina-cu126` for Jina and `cu126` for the
 other models, retaining V4 batch size 1 and separate tables/output directories.
+
+Qwen uses checkpoint dtype (`torch_dtype="auto"`) and SDPA through the existing
+Sentence Transformers loader. Its published configuration owns preprocessing,
+default instruction, last-token pooling, and normalization; the application adds
+no prompt, pooling, normalization, or remote-code override. Native output is 4096
+dimensions; the shared `truncate_dim` contract applies to text and images.
+Use fresh tables and output directories, with identical reference sources, saved
+descriptions, image caps, and retrieval settings across models.
+The sweep sets Qwen batch size 8. Target native BF16 on A100/H100-class hardware;
+select the partition manually (for example through `SBATCH_PARTITION`) because the
+wrapper still defaults to `dgx2`. There is no hardware guard or batch-size fallback
+for Qwen. Keep the modern dependency stack unchanged. Real-checkpoint and GPU
+acceptance remain pending separate authorization; synthetic checks do not establish
+memory requirements or throughput. See `docs/experiments.md` for verification.
 
 The failures in `aispdzi7` (`clip_loss` import) and `a3shaxva`
 (`ROPE_INIT_FUNCTIONS["default"]`) occurred before reference insertion. Isolated

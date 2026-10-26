@@ -481,13 +481,14 @@ class SlurmOverrideTests(unittest.TestCase):
                 "jinaai/jina-embeddings-v4",
                 "google/embeddinggemma-2",
                 "openai/clip-vit-base-patch32",
+                "Qwen/Qwen3-VL-Embedding-8B",
             ]
             tables, outputs = [], []
             for extra in ([], [str(custom_config)]):
                 capture.write_bytes(b"")
                 subprocess.run(["bash", str(script), *extra], cwd=root, env=env, check=True)
                 submissions = capture.read_bytes().decode().removesuffix("\0\0").split("\0\0")
-                self.assertEqual(len(submissions), 4)
+                self.assertEqual(len(submissions), 5)
                 for model, submission in zip(models, submissions, strict=True):
                     args = submission.split("\0")
                     table = next(a.removeprefix("lancedb.table=") for a in args if a.startswith("lancedb.table="))
@@ -505,11 +506,13 @@ class SlurmOverrideTests(unittest.TestCase):
                     ]
                     if model == "jinaai/jina-embeddings-v4":
                         expected.extend(["--set", "embedding.batch_size=1"])
+                    elif model == "Qwen/Qwen3-VL-Embedding-8B":
+                        expected.extend(["--set", "embedding.batch_size=8"])
                     self.assertEqual(args, expected)
                     tables.append(table)
                     outputs.append(output)
-            self.assertEqual(len(set(tables)), 8)
-            self.assertEqual(len(set(outputs)), 8)
+            self.assertEqual(len(set(tables)), 10)
+            self.assertEqual(len(set(outputs)), 10)
 
     def test_wrappers_forward_arguments_and_keep_defaults(self):
         root = Path(__file__).resolve().parents[1]

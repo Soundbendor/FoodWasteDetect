@@ -650,3 +650,56 @@ values, defaults, argument forwarding, V4 batch size, and separate tables/output
 the final focused rerun passed all three script tests. Ruff, scoped ty, and
 `git diff --check` passed. No model weights, real datasets, GPUs, live services,
 or cluster jobs were used.
+
+## Qwen whole-image embedding integration (October 26, 2026)
+
+`Qwen/Qwen3-VL-Embedding-8B` is the fifth supported whole-image model. The
+[model card](https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B) specifies native
+4096-dimensional embeddings. The loader uses Sentence Transformers with
+`torch_dtype="auto"` and `attn_implementation="sdpa"`, leaving the checkpoint's
+instruction, preprocessing, last-token pooling, and normalization intact. Text
+and RGB PIL images use the existing encoding methods. Shared optional truncation
+also applies; changing dimensions requires rebuilding references in a fresh table.
+
+The sweep selects `cu126` and explicitly sets Qwen batch size 8. Select an
+A100/H100-class partition manually using `SBATCH_PARTITION` before running the
+sweep; the Slurm wrapper still defaults to `dgx2`. The target precision is native
+BF16 through checkpoint dtype. No precision adaptation, hardware guard, automatic
+batch reduction, quantization, prompt tuning, or dependency changes were added.
+Keep reference sources, saved descriptions, image caps, and retrieval settings
+identical across models, with separate tables and output directories.
+
+The supplied investigation reports CPU text/image forwards with a tiny randomly
+initialized Qwen3-VL model. This integration did not repeat that probe or load the
+real checkpoint. Real-checkpoint acceptance requires separate authorization on
+the selected GPU: encode text and images at batch size 8, measure peak memory and
+throughput with representative and large images, then build fresh references and
+evaluate the full labeled validation split. Memory failures propagate normally.
+
+### CPU verification
+
+Checks used the existing modern `default` environment with
+`CUDA_VISIBLE_DEVICES=""`, `HF_HUB_OFFLINE=1`, and `PYTHONPATH=src`. Pretrained
+loading was mocked. New Qwen tests cover loader options, text/image routing,
+input order, RGB ownership, empty inputs, invalid vectors, float32 outputs,
+truncation, and real Sentence Transformers batching with eight inputs plus a
+final two-input batch. A synthetic normalization module verifies that normalized
+outputs are preserved. Temporary LanceDB tests index and evaluate native 4096
+and truncated 128-dimensional vectors. Fake `sbatch` checks cover five jobs,
+selected environments, batch sizes, and unique tables/output directories.
+
+The pre-change targeted guard baseline reproduced **3 failures and 1 skip**.
+Running the original embedding source and tests from `HEAD` in a temporary
+directory gave **10 failures, 35 passed, 1 skipped**: the same absent guard also
+breaks seven loader tests through their shared setup. These guard repairs remain
+out of scope. Earlier notes claiming the guards exist describe prior verification,
+not the current source. The sandboxed combined run stalled during LanceDB checks;
+verification was resumed outside the sandbox, still offline and CPU-only.
+
+The final full modern CPU suite reported **208 passed, 2 skipped, 10 failed,
+339 subtests passed**. All ten failures match the pre-change embedding baseline;
+no new failures remain. One warning reports Sentence Transformers' deprecated
+`sentence_transformers.models` import in the synthetic normalization test; that
+import remains compatible with both installed library families. Production-loader
+Ruff and `git diff --check` passed. No model weights, datasets, GPUs, real services,
+or cluster jobs were used. README files and dependency manifests were unchanged.

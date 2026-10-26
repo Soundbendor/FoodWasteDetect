@@ -42,6 +42,12 @@ _MODEL_SPECS = {
             "processor_kwargs": {"model_max_length": 77},
         },
     },
+    "Qwen/Qwen3-VL-Embedding-8B": {
+        "dimension": 4096,
+        "load": {
+            "model_kwargs": {"torch_dtype": "auto", "attn_implementation": "sdpa"},
+        },
+    },
 }
 ImageInput = str | Path | Image.Image
 

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Run from the repository root with cu126 and jina-cu126, model caches, and shared LanceDB storage prepared.
+# Select an A100/H100 partition manually (SBATCH_PARTITION); dgx2 is the wrapper default.
 # Jobs sharing a node need distinct Ollama endpoints when generating descriptions.
 config="${1:-cfg/classification.yml}"
 if (( $# > 1 )); then
@@ -20,6 +21,7 @@ models=(
   "jinaai/jina-embeddings-v4"
   "google/embeddinggemma-2"
   "openai/clip-vit-base-patch32"
+  "Qwen/Qwen3-VL-Embedding-8B"
 )
 
 for i in "${!models[@]}"; do
@@ -32,6 +34,8 @@ for i in "${!models[@]}"; do
   overrides=()
   if [[ "$model" == "jinaai/jina-embeddings-v4" ]]; then
     overrides+=(--set "embedding.batch_size=1")
+  elif [[ "$model" == "Qwen/Qwen3-VL-Embedding-8B" ]]; then
+    overrides+=(--set "embedding.batch_size=8")
   fi
 
   echo "Submitting $model as $run_id"
