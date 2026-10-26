@@ -494,6 +494,43 @@ class ExperimentTests(unittest.TestCase):
                 self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1'])
                 self.assertEqual(report['config']['n_imgs_per_class'], limit)
 
+    def test_all_model_dimensions_index_and_evaluate(self):
+        import numpy as np
+        from internvl.embeddings import EmbeddingModel
+
+        for model_id, dimension in [
+            ("openai/clip-vit-base-patch32", 512),
+            ("google/embeddinggemma-2", 768),
+            ("jinaai/jina-clip-v2", 1024),
+            ("jinaai/jina-embeddings-v4", 2048),
+        ]:
+            with self.subTest(model_id=model_id):
+                def encode(inputs, **kwargs):
+                    vectors = np.zeros((len(inputs), dimension), dtype=np.float32)
+                    for i, item in enumerate(inputs):
+                        if isinstance(item, dict):
+                            item = item['image']
+                        apple = 'Apple' in item if isinstance(item, str) else item.getpixel((0, 0))[0] == 0
+                        vectors[i, 0 if apple else -1] = 1
+                    return vectors
+
+                with patch('internvl.embeddings._load_backend') as loader:
+                    loader.return_value.encode.side_effect = encode
+                    model = EmbeddingModel(model_id, device='cpu')
+                self.embedder_constructor.side_effect = None
+                self.embedder_constructor.return_value = model
+                exp = self.experiment((True, True, False), f'dim-{dimension}')
+                exp.config['embedding']['model_id'] = model_id
+                artifact = exp.build_vector_database()
+                table = self.client.open_table(artifact['table'])
+                self.assertEqual(table.schema.field('vector').type.list_size, dimension)
+                self.assertEqual(table.count_rows(), 4)
+                report = exp.evaluate()
+                self.assertEqual(report['metrics']['evaluated'], 2)
+                self.assertEqual(report['metrics']['majority_vote_accuracy'], 1.0)
+                self.assertEqual(report['metrics']['nearest_neighbor_accuracy'], 1.0)
+                self.assertEqual([p['prediction'] for p in report['predictions']], ['Apple', 'Pear'])
+
     def test_excluded_unreadable_images_are_not_decoded(self):
         rows = self.interleaved_training()
         Path(rows[2]['fname']).unlink()

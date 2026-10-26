@@ -79,7 +79,8 @@ text-retrieval/training commands. `workflows.py` and its legacy workflows have
 been deleted without a compatibility module. The
 `finetune-embeddings`, `internvl build-db`, and top-level `evaluate` CLI commands
 are also removed and produce ordinary argparse errors. Use `experiment index`
-and `experiment evaluate` for the current alternatives. `embeddings.py` is inference-only Jina CLIP v2;
+and `experiment evaluate` for the current alternatives. `embeddings.py` supports inference-only Jina CLIP v2, Jina Embeddings v4,
+EmbeddingGemma2, and OpenAI CLIP;
 the historical BGE training/triplet implementation has been removed. References
 to that implementation below describe the retired workflow, not a supported API.
 The caption, merge, conversion, and duplicate description CLI commands are removed.
@@ -152,8 +153,8 @@ The dataset adapter resolves image paths, preserves legacy names, and rejects
 duplicate source identities within each split. It does not compare training and
 validation paths or image contents for overlap.
 
-Full 1024-dimensional Jina embeddings use checkpoint preprocessing
-and an explicit device. By user choice, this whole-image experiment does not
+Full Jina embeddings use checkpoint preprocessing and an explicit device:
+CLIP v2 returns 1024 dimensions; Embeddings v4 returns 2048 dimensions. By user choice, this whole-image experiment does not
 configure or track model/code revisions, including nested text-encoder revisions;
 it uses the library's default model loading and caching behavior, including
 downloads when needed during normal application execution. The no-download
@@ -251,6 +252,53 @@ sampling or tuning. Saved configuration records the limit and source counts refl
 inserted images. Existing tables remain reusable without modification; use a new
 `lancedb.table` to build references with a different limit. CLI overrides such as
 `--set n_imgs_per_class=20` require the key in custom YAML files.
+
+The whole-image embedder accepts four models through `embedding.model_id`:
+
+| Model | Dimensions | Text | Images |
+| --- | ---: | --- | --- |
+| `jinaai/jina-clip-v2` (default) | 1024 | Checkpoint defaults | RGB PIL inputs |
+| `jinaai/jina-embeddings-v4` | 2048 | Retrieval task, passage prompt | Retrieval task, RGB PIL inputs |
+| `google/embeddinggemma-2` | 768 | `prompt_name="Document"` | Separate `{"image": rgb_PIL}` records, no text prompt |
+| `openai/clip-vit-base-patch32` | 512 | Plain text, explicit 77-token truncation | Checkpoint image preprocessing |
+
+All four use Sentence Transformers through an internal specification table.
+EmbeddingGemma2 disables the audio tower with `config_kwargs={"audio_config": None}`.
+It uses BF16 only with native support on the selected CUDA device (no emulation);
+otherwise it loads FP32, never FP16. OpenAI CLIP loads FP32 and uses projected
+512-dimensional features, not vision hidden states. Only Jina enables remote code
+and receives missing modality metadata. `device="auto"` resolves through Sentence
+Transformers' device selection helper. Output validation, library batching, and
+image ownership apply to all models. No extra normalization is requested.
+Use a separate table and output directory for each model and rebuild all references;
+the runner still does not validate compatibility of existing tables.
+
+The constructor and encode method signatures remain unchanged. CLIP v2 retains
+its float32 loading and CLIP-specific attention configuration. V4 uses checkpoint
+dtype (`torch_dtype="auto"`) and SDPA, with no CLIP configuration flags. Both
+custom modules receive text/image modality metadata only when it is absent.
+V4 encodes every input with `task="retrieval"`; class names and descriptions
+add `prompt_name="passage"`, while training and validation images have no text
+prompt. This fixed protocol uses single-vector retrieval with no truncation;
+there are no task or dimension configuration switches. Both models return finite,
+nonzero NumPy float32 matrices in input order. V4's upstream normalization is
+preserved without adding application normalization.
+
+Use a new LanceDB table and output directory for v4. Re-embed all enabled
+reference inputs; old CLIP vectors are incompatible even with same-size v4
+truncation. Existing-table reuse still performs no compatibility checks. Keep
+identical reference inputs, including saved descriptions, for model comparisons.
+The default YAML and submission scripts remain CLIP v2; use CLI overrides to
+select v4 and start with batch size 1. PEFT and its dependencies are locked in
+both Pixi profiles. The shared requirements are Sentence Transformers `>=6.1,<7`
+and Transformers `>=5.20.2,<6`, pinned to `6.2.0` and `5.20.2` in Pixi.
+Python `3.13.13`, PyTorch `2.7.1` (CPU/cu126), torchvision `0.22.1`, and native
+dependencies remain pinned. No audio/video extras are added. Upstream Jina CLIP v2
+repairs for Transformers 5 are deferred by user choice; synthetic coverage does
+not establish real-checkpoint compatibility. V4's upstream code explicitly uses BF16 autocast: loading
+FP16 weights alone is not a V100 workaround. Real V100 text/image acceptance
+is unverified; use the available H100 if necessary. Do not introduce a local
+precision adaptation without separately extending this scope.
 
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
 FoodX251 fixtures, Hugging Face datasets, and real LanceDB databases in temporary

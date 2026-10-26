@@ -161,6 +161,23 @@ class LanceDBTests(unittest.TestCase):
             self.assertEqual(neighbors[0]["id"], records[0].id)
             self.assertEqual(len(reopened.query(vectors[0], 1)), 1)
 
+    def test_full_v4_vectors_round_trip_with_cosine_search(self):
+        self.index.create(2048)
+        records = [PointRecord(label, "class_name", label, label) for label in ("A", "B")]
+        vectors = np.zeros((2, 2048), dtype=np.float32)
+        vectors[0, -1] = 3
+        vectors[1, 0] = 2
+        self.index.append(records, vectors)
+        reopened = LanceDBIndex(self.uri, "fixture")
+        reopened.open()
+        self.assertEqual(
+            reopened.table.schema.field("vector").type, pa.list_(pa.float32(), 2048)
+        )
+        neighbors = reopened.query(vectors[0] * 2, 10)
+        self.assertEqual([n["id"] for n in neighbors], [r.id for r in records])
+        np.testing.assert_allclose([n["score"] for n in neighbors], [1., 0.], atol=1e-6)
+        self.assertEqual(classify(neighbors), ("A", 0.5))
+
     def test_empty_and_bad_vectors(self):
         self.index.create(2)
         self.assertEqual(self.index.query(np.array([1., 0.]), 10), [])

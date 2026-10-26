@@ -464,27 +464,50 @@ class SlurmOverrideTests(unittest.TestCase):
             temporary = Path(directory)
             capture = temporary / "arguments"
             sbatch = temporary / "sbatch"
-            sbatch.write_text('#!/bin/bash\nprintf "%s\\0" "$@" >> "$CAPTURE_ARGUMENTS"\n')
+            sbatch.write_text(
+                '#!/bin/bash\n'
+                '{ printf "%s\\0" "$@"; printf "\\0"; } >> "$CAPTURE_ARGUMENTS"\n'
+            )
             sbatch.chmod(0o755)
             env = dict(os.environ, PATH=f"{temporary}:{os.environ.get('PATH', '')}",
                        CAPTURE_ARGUMENTS=str(capture))
             script = root / "scripts/submit_embedding_sweep.sh"
             subprocess.run(["bash", "-n", str(script)], check=True)
+            custom_config = temporary / "config with spaces.yml"
+            custom_config.write_text((root / "cfg/classification.yml").read_text())
+            models = [
+                "jinaai/jina-clip-v2",
+                "jinaai/jina-embeddings-v4",
+                "google/embeddinggemma-2",
+                "openai/clip-vit-base-patch32",
+            ]
             tables, outputs = [], []
-            for _ in range(2):
+            for extra in ([], [str(custom_config)]):
                 capture.write_bytes(b"")
-                subprocess.run(["bash", str(script)], cwd=root, env=env, check=True)
-                args = capture.read_bytes().decode().rstrip("\0").split("\0")
-                table = next(a.removeprefix("lancedb.table=") for a in args if a.startswith("lancedb.table="))
-                output = next(a.removeprefix("output_dir=") for a in args if a.startswith("output_dir="))
-                self.assertEqual(output, f"assets/sweeps/{table}")
-                self.assertIn("sbatch/run_embedding.sbatch", args)
-                self.assertIn("cfg/classification.yml", args)
-                self.assertFalse(any("qdrant" in a for a in args))
-                tables.append(table)
-                outputs.append(output)
-            self.assertEqual(len(set(tables)), 2)
-            self.assertEqual(len(set(outputs)), 2)
+                subprocess.run(["bash", str(script), *extra], cwd=root, env=env, check=True)
+                submissions = capture.read_bytes().decode().removesuffix("\0\0").split("\0\0")
+                self.assertEqual(len(submissions), 4)
+                for model, submission in zip(models, submissions, strict=True):
+                    args = submission.split("\0")
+                    table = next(a.removeprefix("lancedb.table=") for a in args if a.startswith("lancedb.table="))
+                    output = next(a.removeprefix("output_dir=") for a in args if a.startswith("output_dir="))
+                    self.assertEqual(output, f"assets/sweeps/{table}")
+                    expected = [
+                        f"--job-name={table}",
+                        "sbatch/run_embedding.sbatch",
+                        *(extra or ["cfg/classification.yml"]),
+                        "--set", f"embedding.model_id={model}",
+                        "--set", "embedding.device=cuda",
+                        "--set", f"output_dir={output}",
+                        "--set", f"lancedb.table={table}",
+                    ]
+                    if model == "jinaai/jina-embeddings-v4":
+                        expected.extend(["--set", "embedding.batch_size=1"])
+                    self.assertEqual(args, expected)
+                    tables.append(table)
+                    outputs.append(output)
+            self.assertEqual(len(set(tables)), 8)
+            self.assertEqual(len(set(outputs)), 8)
 
     def test_wrappers_forward_arguments_and_keep_defaults(self):
         root = Path(__file__).resolve().parents[1]

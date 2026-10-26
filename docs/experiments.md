@@ -376,3 +376,193 @@ completed, including real temporary LanceDB storage and local offline W&B socket
 No live uploads, Ollama servers, real models, GPUs, or HPC resources were used.
 These checks establish synthetic progress/reporting contracts, not model accuracy
 or online dashboard latency.
+
+
+## Jina Embeddings v4 alongside CLIP v2
+
+The `internvl` whole-image runner selects either model using
+`embedding.model_id`. CLIP v2 remains the default. V4 uses 2048-dimensional
+single vectors, the retrieval adapter, and passage prompts for text references.
+Training images and validation images use the same retrieval adapter without
+text prompts. LanceDB exact cosine retrieval and voting are unchanged. This
+migration does not affect the separate YOLO/CLIP pipeline.
+
+The implementation follows the [Jina model card](https://huggingface.co/jinaai/jina-embeddings-v4)
+and [Sentence Transformers module](https://huggingface.co/jinaai/jina-embeddings-v4/blob/main/custom_st.py).
+V4 uses checkpoint dtype and SDPA. The upstream module explicitly uses BF16
+autocast, so an FP16 loading override alone would not establish V100 compatibility.
+V100 real-model execution remains a manual acceptance gate; H100 is the agreed
+alternative. No local precision workaround or FlashAttention dependency is added.
+
+### Rebuild references and compare
+
+Prepare the locked `cu126` environment before submitting a job. Run each command
+from this worktree's root in an approved GPU allocation. Use a fresh table and
+output directory: the build command reuses an existing table without checking
+its model or dimensions. Never search old CLIP vectors using v4 query vectors.
+
+For a controlled comparison, copy the baseline's `descriptions.json` into
+`assets/classification/descriptions_jina_v4/` before indexing when description
+references are enabled. Keep the same reference switches, image cap, descriptions,
+and `k`. If no descriptions exist, run the ordinary `describe` stage first and
+reuse those same descriptions for both models. All paths below resolve from the
+current worktree, which does not inherit ignored datasets or artifacts from
+another worktree; override `dataset.root` and `lancedb.uri` as needed with the
+intended accessible paths.
+
+```bash
+pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl experiment index \
+  --config_file cfg/classification.yml \
+  --set embedding.model_id=jinaai/jina-embeddings-v4 \
+  --set embedding.device=cuda --set embedding.batch_size=1 \
+  --set lancedb.table=foodx251_descriptions_jina_v4 \
+  --set output_dir=assets/classification/descriptions_jina_v4
+
+pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl experiment evaluate \
+  --config_file cfg/classification.yml \
+  --set embedding.model_id=jinaai/jina-embeddings-v4 \
+  --set embedding.device=cuda --set embedding.batch_size=1 \
+  --set lancedb.table=foodx251_descriptions_jina_v4 \
+  --set output_dir=assets/classification/descriptions_jina_v4
+```
+
+Batch size 1 is a conservative starting point, not a verified memory requirement.
+Increase it only after measuring memory use on the selected GPU. Compare the full
+labeled validation split; the migration does not establish improved accuracy.
+
+### Manual real-model acceptance
+
+This check may download v4 weights and uses a GPU. Run it only with explicit
+authorization and an allocated GPU, after preparing `cu126`. It generates no
+descriptions and opens no dataset or database. It checks the same wrapper used
+by indexing and evaluation with synthetic text and an image. A successful run
+establishes basic encoding on that GPU, not food-recognition accuracy.
+
+```bash
+pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 python - <<'PYTHON'
+import numpy as np
+import torch
+from PIL import Image
+from internvl.embeddings import EmbeddingModel
+
+print("GPU:", torch.cuda.get_device_name(0))
+model = EmbeddingModel("jinaai/jina-embeddings-v4", batch_size=1, device="cuda")
+with Image.new("RGB", (224, 224), (160, 80, 40)) as image:
+    for modality, vectors in (
+        ("text", model.encode_text(["a bowl of rice", "a plate of noodles"])),
+        ("image", model.encode_images([image])),
+    ):
+        expected_rows = 2 if modality == "text" else 1
+        assert vectors.shape == (expected_rows, 2048)
+        assert vectors.dtype == np.float32
+        assert np.isfinite(vectors).all()
+        assert (np.linalg.norm(vectors, axis=1) > 0).all()
+        print(modality, vectors.shape, vectors.dtype)
+torch.cuda.synchronize()
+PYTHON
+```
+
+Automated checks use mocked pretrained loading, real Sentence Transformers with
+synthetic vectors, and temporary LanceDB tables. They cover 1024/2048 dimensions,
+v4 passage prompting and task routing, batching and order, invalid outputs,
+image ownership, and 2048-dimensional cosine retrieval. They do not download
+weights or establish real-model, GPU, shared-filesystem, or HPC compatibility.
+
+
+### Verification on October 25, 2026
+
+Pixi 0.81.0 added PEFT 0.21.2, Accelerate 1.15.0, and psutil 7.2.2 to both
+locked profiles without changing existing package versions. The new worktree's
+`default` CPU environment installed with `--locked`; the CUDA profile was resolved
+but not installed or executed. Imports confirmed PEFT 0.21.2, PyTorch 2.7.1+cpu,
+Transformers 4.57.6, and Sentence Transformers 5.7.0.
+
+With `PYTHONPATH=src`, `CUDA_VISIBLE_DEVICES=""`, and `HF_HUB_OFFLINE=1`, the
+complete package suite passed 178 tests with one existing skip. Package coverage
+was 95%; the embedding wrapper had 100% statement coverage. The initial focused
+run stalled in LanceDB under the restricted sandbox and was terminated; the full
+suite passed outside that sandbox using temporary databases. Ruff, the manifest's
+scoped ty check, CLI experiment help, wheel/sdist builds, and `git diff --check`
+also passed. These checks used no model weights, real datasets, GPU kernels,
+Ollama services, or HPC allocations. Real v4 and V100/H100 acceptance remains
+pending the manual check above.
+
+## Four-model embedding extension (October 25, 2026)
+
+The whole-image runner now selects four Sentence Transformers models through the
+existing `embedding.model_id` setting. Jina CLIP v2 remains the default (1024
+values); Jina Embeddings v4 retains its 2048-value retrieval vectors and passage
+prompt for text. EmbeddingGemma2 produces 768 values, uses the `Document` text
+prompt, and receives each image as a separate image dictionary. OpenAI CLIP
+produces 512 projected features for both modalities; text has no prompt template
+and truncates to 77 tokens. Its image preprocessing comes from the checkpoint.
+
+EmbeddingGemma2 loads text and vision with `audio_config=None`. It uses BF16 only
+when the selected CUDA device supports BF16 natively, otherwise FP32. OpenAI CLIP
+loads FP32. Only Jina uses remote code and the missing-modality metadata fallback.
+The wrapper adds no normalization. See the upstream
+[EmbeddingGemma2 architecture documentation](https://huggingface.co/docs/transformers/en/model_doc/embedding_gemma2)
+for modality configuration and per-sample image dictionaries.
+
+Choose a new table and output directory for every model. Rebuild all enabled
+references and use the same model for evaluation. Existing tables are reused
+without checking model or vector compatibility. Keep the reference inputs,
+saved descriptions, image cap, and retrieval settings identical for comparisons.
+For example, apply the same overrides to both stages:
+
+```sh
+for stage in index evaluate; do
+  python -m internvl experiment "$stage" --config_file cfg/classification.yml \
+    --set embedding.model_id=google/embeddinggemma-2 \
+    --set lancedb.table=foodx_embeddinggemma2 \
+    --set output_dir=outputs/embeddinggemma2
+done
+
+for stage in index evaluate; do
+  python -m internvl experiment "$stage" --config_file cfg/classification.yml \
+    --set embedding.model_id=openai/clip-vit-base-patch32 \
+    --set lancedb.table=foodx_openai_clip \
+    --set output_dir=outputs/openai_clip
+done
+```
+
+These are normal experiment commands and may download weights. Default YAML,
+Slurm scripts, experiment orchestration, and the separate YOLO pipeline are
+unchanged. Neither README was edited.
+
+### Shared environment
+
+Both Pixi solve groups now pin Sentence Transformers 6.2.0 and Transformers
+5.20.2; project requirements are `sentence-transformers>=6.1,<7` and
+`transformers>=5.20.2,<6`. The solve updated huggingface-hub to 1.33.0 and tokenizers
+to 0.23.3, with required CLI dependencies. Python 3.13.13, PyTorch 2.7.1 CPU/cu126,
+torchvision 0.22.1, and native dependencies remain unchanged. No audio/video
+extras were added. The CPU environment was installed with `--locked`; CUDA was
+resolved without installing or running it.
+
+The earlier two-Jina verification above records the previous library versions.
+Upstream Jina CLIP v2 compatibility repairs for Transformers 5 are explicitly
+deferred. Mocked loading and synthetic Jina tests remain; they do not establish
+that either real Jina checkpoint runs with the upgraded libraries.
+
+### Extension verification
+
+Using the installed CPU environment with `PYTHONPATH=src`,
+`CUDA_VISIBLE_DEVICES=""`, and `HF_HUB_OFFLINE=1`, the full suite passed **198 tests,
+one existing skip, and 260 subtests**. Package statement coverage was 95%; the
+embedding wrapper had 100% coverage. The suite ran outside the restricted sandbox
+for temporary LanceDB databases and local offline W&B sockets.
+
+Coverage includes all four dimensions, prompts and task routing, Gemma image
+dictionaries, native selected-device BF16 checks and FP32 fallback, empty and
+invalid outputs, image ownership, real Sentence Transformers batching and input
+order, and synthetic indexing/evaluation through real temporary LanceDB tables.
+A small randomly initialized local CLIP model verifies 512-dimensional projected
+text/image outputs and 77-token truncation without pretrained downloads.
+EmbeddingGemma2's configuration and model architecture import successfully
+without loading weights.
+
+Package Ruff, scoped ty, CLI experiment help, and wheel/sdist builds passed.
+Builds are in `/tmp/embedding-extension-dist`. No pretrained weights, datasets,
+GPU kernels, live Ollama services, or HPC resources were used. These checks do
+not establish checkpoint, GPU, real-dataset, or shared-storage compatibility.
