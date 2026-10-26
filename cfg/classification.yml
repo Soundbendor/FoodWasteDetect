@@ -6,6 +6,8 @@ embed_images: false
 n_imgs_per_class: null  # set the number of images 
 embed_class_labels: false
 embed_descriptions: true
+# Read-only vocabulary; null generates/reuses output_dir/descriptions.json.
+descriptions_file: assets/classification/descriptions_v1/descriptions.json
 embedding:
   model_id: jinaai/jina-clip-v2
   device: cpu

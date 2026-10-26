@@ -181,6 +181,51 @@ class DatasetTests(unittest.TestCase):
 @unittest.skipUnless(available('lancedb', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, lancedb and CPU fixture dependencies')
 class ExperimentTests(unittest.TestCase):
 
+    def test_shared_descriptions_are_read_only_across_runs(self):
+        path = self.root / 'shared vocabulary.json'
+        descriptions = {'Apple': ['Apple stored'], 'Pear': ['Pear stored']}
+        content = json.dumps({'descriptions': descriptions})
+        path.write_text(content)
+        for name in ('first', 'second'):
+            cfg = self.experiment((False, False, True), name).config
+            cfg['descriptions_file'] = str(path)
+            exp = Experiment(cfg)
+            report = exp.run()
+            self.assertEqual(report['reference_source_counts'], {'generated_description': 2})
+            self.assertEqual(report['metrics']['evaluated'], 2)
+            self.assertFalse((exp.output / 'descriptions.json').exists())
+            table = self.client.open_table(cfg['lancedb']['table']).to_arrow().to_pylist()
+            self.assertEqual({row['value'] for row in table}, {'Apple stored', 'Pear stored'})
+        self.assertEqual(path.read_text(), content)
+        self.describer_constructor.assert_not_called()
+
+    def test_explicit_missing_descriptions_never_generate(self):
+        cfg = self.experiment((False, False, True)).config
+        cfg['descriptions_file'] = str(self.root / 'missing.json')
+        exp = Experiment(cfg)
+        exp.output.mkdir()
+        (exp.output / 'descriptions.json').write_text(json.dumps({
+            'descriptions': {'Apple': ['local'], 'Pear': ['local']}
+        }))
+        with self.assertRaises(FileNotFoundError):
+            exp.run()
+        with self.assertRaises(FileNotFoundError):
+            exp._get_text_inputs()
+        self.describer_constructor.assert_not_called()
+        self.embedder_constructor.assert_not_called()
+        self.client_constructor.assert_not_called()
+
+    def test_null_descriptions_file_keeps_generation_in_output(self):
+        cfg = self.experiment((False, False, True)).config
+        cfg['descriptions_file'] = None
+        exp = Experiment(cfg)
+        descriptions = exp.generate_descriptions()
+        self.assertEqual(
+            json.loads((exp.output / 'descriptions.json').read_text())['descriptions'],
+            descriptions,
+        )
+        self.describer_constructor.assert_called_once()
+
     def test_constructor_loads_metadata_but_defers_backends(self):
         with patch.object(self.dataset, 'get_class_list', wraps=self.dataset.get_class_list) as classes:
             exp = self.experiment()

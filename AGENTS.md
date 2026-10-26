@@ -376,8 +376,13 @@ MODEL_NAME` for downloads. It reads `cfg/experiment_config_internvl.yml` from th
 working directory without a config flag. `caption-images`, `generate-descriptions`,
 `merge-captions`, and `convert-captions` are removed and produce argparse errors.
 Generate descriptions with `python -m internvl experiment describe --config_file
-cfg/classification.yml`: `embed_descriptions` controls generation, cached
-`output_dir/descriptions.json` is reused, and new descriptions are written there.
+cfg/classification.yml`: `embed_descriptions` enables description references.
+An explicit `descriptions_file` selects a read-only JSON vocabulary, resolved from
+the working directory with `~` expansion, independently of `output_dir`. Both
+description loading and indexing use this file; missing files fail without Ollama
+startup. Omitted or null retains generation/cache reuse at `output_dir/descriptions.json`.
+The default YAML selects `assets/classification/descriptions_v1/descriptions.json`
+so sweep jobs share the existing vocabulary while retaining separate outputs.
 No existing artifacts are migrated. The description Slurm script accepts an
 optional config path and defaults to `cfg/classification.yml`.
 The old text console commands and imports under `vlm`, `llm`, and

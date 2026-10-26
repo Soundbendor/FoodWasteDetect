@@ -91,6 +91,11 @@ class Experiment:
         # Load dataset metadata and settings
         self.config = validate_config(config)
         self.output = Path(config["output_dir"]).expanduser().resolve()
+        descriptions_file = config.get("descriptions_file")
+        self.descriptions_path = (
+            Path(descriptions_file).expanduser().resolve()
+            if descriptions_file is not None else self.output / "descriptions.json"
+        )
         self.dataset = load_dataset(config["dataset"])
         self.classes = self.dataset.get_class_list()
         self.batch_size = config["embedding"].get("batch_size", 32)
@@ -110,7 +115,7 @@ class Experiment:
         return LanceDBIndex(**self.config["lancedb"])
 
     def generate_descriptions(self) -> dict[str, list[str]] | None:
-        """Load saved descriptions or generate them in an owned Ollama context.
+        """Read an explicit vocabulary, or reuse/generate descriptions in the output directory.
 
         Returns:
             A list of descriptions in {"class_name", ["desc1", "desc2",...]} format.
@@ -118,8 +123,8 @@ class Experiment:
         if not self.config["embed_descriptions"]:
             logging.info("Description generation is disabled")
             return None
-        path = self.output / "descriptions.json"
-        if path.exists():
+        path = self.descriptions_path
+        if self.config.get("descriptions_file") is not None or path.exists():
             logging.info(f"Loading existing descriptions at {path}")
             return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
         on_description = None
@@ -151,8 +156,8 @@ class Experiment:
             records += [PointRecord(c, "class_name", c, c) for c in self.classes]
         # Append generated class descriptor captions.
         if self.config["embed_descriptions"]:
-            path = self.output / "descriptions.json"
-            if not path.exists():
+            path = self.descriptions_path
+            if self.config.get("descriptions_file") is None and not path.exists():
                 raise ValueError("Run describe before index")
             data = json.loads(path.read_text(encoding="utf-8"))["descriptions"]
             records += [
