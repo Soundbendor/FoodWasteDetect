@@ -1,4 +1,4 @@
-"""Vertex Gemini Embedding 2 requests with bounded per-batch concurrency."""
+"""Interface for Vertex API to yield vectors from Gemini Embedding 2."""
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,6 +31,45 @@ class VertexEmbeddingModel:
         classification_prompt: bool = False,
         truncate_dim: int | None = None,
     ) -> None:
+        self._validate_config(
+            project=project,
+            location=location,
+            max_concurrency=max_concurrency,
+            max_attempts=max_attempts,
+            request_timeout=request_timeout,
+            classification_prompt=classification_prompt,
+            truncate_dim=truncate_dim,
+        )
+        self.dimension = 3072 if truncate_dim is None else truncate_dim
+        self.project = project
+        self.location = location
+        self.max_concurrency = max_concurrency
+        self.classification_prompt = classification_prompt
+        self.http_options = types.HttpOptions(
+            api_version="v1",
+            timeout=ceil(request_timeout * 1000),
+            retry_options=types.HttpRetryOptions(
+                attempts=max_attempts,
+                initial_delay=1,
+                exp_base=2,
+                jitter=1,
+                max_delay=60,
+                http_status_codes=[408, 429, 500, 502, 503, 504],
+            ),
+        )
+
+    @staticmethod
+    def _validate_config(
+        *,
+        project: str,
+        location: str,
+        max_concurrency: int,
+        max_attempts: int,
+        request_timeout: float,
+        classification_prompt: bool,
+        truncate_dim: int | None,
+    ) -> None:
+        """Validate settings before assigning state or constructing SDK options."""
         for name, value in (("project", project), ("location", location)):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"vertex.{name} must be a nonempty string")
@@ -50,23 +89,6 @@ class VertexEmbeddingModel:
             type(truncate_dim) is not int or not 128 <= truncate_dim <= 3072
         ):
             raise ValueError("truncate_dim must be None or an integer between 128 and 3072")
-        self.dimension = 3072 if truncate_dim is None else truncate_dim
-        self.project = project
-        self.location = location
-        self.max_concurrency = max_concurrency
-        self.classification_prompt = classification_prompt
-        self.http_options = types.HttpOptions(
-            api_version="v1",
-            timeout=ceil(request_timeout * 1000),
-            retry_options=types.HttpRetryOptions(
-                attempts=max_attempts,
-                initial_delay=1,
-                exp_base=2,
-                jitter=1,
-                max_delay=60,
-                http_status_codes=[408, 429, 500, 502, 503, 504],
-            ),
-        )
 
     def _request(self, client: genai.Client, content: types.Content) -> NDArray[np.float32]:
         response = client.models.embed_content(
