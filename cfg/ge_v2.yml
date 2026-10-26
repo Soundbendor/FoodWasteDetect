@@ -2,6 +2,7 @@
 dataset:
   name: foodx251
   root: data/FoodX-251
+cache_validation_embeddings: true
 embed_images: false
 n_imgs_per_class: null  # set the number of images
 embed_class_labels: false
@@ -29,6 +30,7 @@ ollama:
 lancedb:
   uri: assets/lancedb
   table: foodx251_ge_v2
+  validation_table: foodx251_ge_v2_validation
 k: 10
 description_count: 5
 output_dir: assets/classification/ge_v2

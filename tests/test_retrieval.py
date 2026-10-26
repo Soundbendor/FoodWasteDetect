@@ -2,17 +2,16 @@
 
 import importlib.util
 import itertools
-import unittest
 import multiprocessing
-from pathlib import Path
 import tempfile
+import unittest
+from pathlib import Path
 from unittest.mock import Mock
 
 if any(importlib.util.find_spec(name) is None for name in ("numpy", "lancedb")):
     raise unittest.SkipTest("requires NumPy and LanceDB")
 
 import numpy as np
-import lancedb
 import pyarrow as pa
 
 from internvl.retrieval import LanceDBIndex, classify, metrics
@@ -231,3 +230,23 @@ class LanceDBTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_identity_scan_and_vector_fetch_preserve_source_and_order(tmp_path):
+    from internvl.retrieval import LanceDBIndex
+    from internvl.schemas import PointRecord
+
+    index = LanceDBIndex(tmp_path / "db", "vectors")
+    index.create(3)
+    records = [PointRecord("Apple", kind, f"quoted'{i}", "value")
+               for kind in ("training_image", "validation_image") for i in range(13)]
+    vectors = np.asarray([[i + 1, i + 2, i + 3] for i in range(26)], dtype=np.float32)
+    order = np.random.default_rng(12).permutation(26)
+    index.append([records[i] for i in order], vectors[order])
+    identities = [(record.source_kind, record.source_identity) for record in records]
+    assert sorted(index.identities()) == sorted(identities)
+    requested = list(reversed(range(26))) + [3, 0]
+    np.testing.assert_array_equal(
+        index.fetch_vectors([identities[i] for i in requested]), vectors[requested],
+    )
+    assert index.fetch_vectors([]).shape == (0, 3)

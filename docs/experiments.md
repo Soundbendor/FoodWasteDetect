@@ -779,3 +779,109 @@ V4 hardware guards, including loader setup that patches the absent guard.
 The Jina stack skips the EmbeddingGemma2 architecture test, producing one fewer
 failure. Both suites also retain the existing synthetic Sentence Transformers
 import deprecation warning. Guard restoration remains outside this feature.
+
+
+## Vertex embedding resumption (October 26, 2026)
+
+Vertex reference builds now resume by `(source_kind, source_identity)` and save
+each successful response individually. Existing UUIDs and rows remain intact.
+The training-image cap is applied before saved identities are excluded; exclusion
+happens before decoding. Metadata scans use an explicit unlimited query and omit
+vectors. Completed builds regenerate `index.json` from stored source counts.
+
+The standalone Vertex YAML enables `cache_validation_embeddings` and selects
+`foodx251_ge_v2_validation` as its separate validation table. Omitted caching
+remains disabled. Cached evaluation first completes missing embeddings, then reads
+bounded vector batches in annotation order for reference-table retrieval. Complete
+caches work without image files, credentials, client construction, or API requests.
+Changing retrieval settings can reuse vectors. Local embedding behavior is unchanged.
+
+Callbacks run serially on the coordinating thread. After API failure or interruption,
+queued work is cancelled and successful in-flight responses are saved before the
+error propagates. Storage failures are not retried, and failed saves do not mark
+identities complete. Reports are still published only after full evaluation.
+Progress includes reused requested records and advances after completed batches;
+a failed batch can commit vectors without a matching final progress update.
+
+Use one writer per table and fresh tables for changes to inputs, descriptions,
+model, dimension, or prompt mode. There is no compatibility validation or migration.
+The guarantee covers committed vectors; a crash before saving or a timeout after
+remote processing can still cause a repeated request.
+
+Verification used synthetic PNGs, temporary real LanceDB tables, and the real
+Google SDK with mocked HTTP transports. Tests cover all reference source types,
+more than ten saved rows, capped training selection, out-of-order callbacks,
+in-flight success draining on failure and interruption, storage failures without
+write retries, exact missing-request counts on restart, complete caches without
+image files or credentials, validation ordering and table separation, report
+failure reuse, progress accounting, strict CLI overrides, configuration defaults,
+and unchanged local existing-table behavior.
+
+The locked environments' `pytest` launchers contain an obsolete `/tmp` shebang,
+so verification used `python -m pytest` without changing dependencies or launchers:
+
+- `pixi run --manifest-path src/internvl/pyproject.toml --locked -e default python -m pytest -c src/internvl/pyproject.toml --tb=short -q`:
+  **283 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- The same command with `-e jina-cpu`:
+  **283 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- All 75 Vertex tests pass in both suites; Vertex wrapper statement coverage is
+  **100%**, and overall package coverage is **94%**.
+- Ruff on `src/internvl` and `tests/test_vertex_embeddings.py`, scoped ty, and
+  `git diff --check` passed.
+
+All failures remain in unchanged local `test_embeddings.py` guard tests and loader
+setup: missing dependency-family and V4 hardware guards. The Jina stack skips the
+EmbeddingGemma2 architecture test. These failures remain outside this change.
+An initial sandboxed run stalled in LanceDB connection setup; the completed tests
+ran outside that sandbox. No real cloud requests, spending, model downloads, GPU
+work, or live services were used. These checks do not establish cloud acceptance
+or concurrent-writer safety.
+
+### Cache orchestration simplification (October 26, 2026)
+
+Reference construction now uses one workflow for both backend families. Existing
+local tables return before input preparation or embedder construction. Vertex
+builds scan stored identities once, using an immutable snapshot for filtering and
+an initial counter that includes every stored row. Capped training metadata supplies
+requested and reused counts and validates class coverage before a missing table is
+created. Only missing decoded images become records. Successful batches extend the
+initial source counts; summary publication does not rescan the table under the
+single-writer contract.
+
+Typed text and image saving helpers share the callback that pairs each response
+with its original record. Committed rows determine restart behavior; insertion no
+longer maintains a mutable saved-identity set. Training references and validation
+cache population share an image insertion loop with an explicit split. Evaluation
+completes `_prepare_validation_cache()` before classification, then passes the
+prepared table to an iterator that reads metadata and fetches vectors in annotation
+order. Uncached evaluation still encodes images directly.
+
+Regression tests compare exact submitted text and image inputs against unsaved
+identities. Storage tests use 26 distinct vectors, shuffled insertion, reversed
+requests, repeated requests, quoted identities, and matching identity strings
+across source kinds. A two-class partial-cache test verifies predicted labels and
+annotation ordering, then repeats evaluation with image files removed. Additional
+tests verify one identity scan, counts including duplicate and unrequested rows,
+input validation before table creation, and cache completion before classification.
+The local-backend test also checks batch insertion and ignored cache settings.
+
+Verification used offline CPU environments, synthetic data, temporary LanceDB
+tables, and mocked HTTP transports:
+
+- The focused Vertex, retrieval, and classification suite passed **132 tests and
+  111 subtests** before the final three contract tests were added.
+- `CUDA_VISIBLE_DEVICES='' HF_HUB_OFFLINE=1 pixi run --manifest-path src/internvl/pyproject.toml --locked -e default python -m pytest -c src/internvl/pyproject.toml --tb=short -q`:
+  **288 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- The same full command with `-e jina-cpu`:
+  **288 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- Full suites include all five added tests. Package statement coverage is **95%**;
+  the unchanged Vertex callback implementation retains **100%** coverage.
+- Ruff and the expanded scoped ty check pass. The type-check scope now includes
+  experiment, retrieval, and dataset modules; `NamedSplit`, concrete local LanceDB
+  connection casts, and narrow dimension/array annotations resolve their diagnostics.
+
+Full-suite failures remain confined to the existing local embedding dependency
+and hardware guard tests and their loader setup. No model weights, live cloud
+requests, cloud spending, or GPU resources were used. Dependencies, lockfiles,
+READMEs, scripts, sweeps, configuration, and storage schemas were unchanged by
+this refactor.

@@ -1,11 +1,13 @@
 """Vertex contracts using the real SDK and an in-memory HTTP transport."""
 
+import base64
 import json
 import threading
+from collections import Counter
 from io import BytesIO
 from pathlib import Path
 from time import sleep
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import httpx
 import numpy as np
@@ -86,7 +88,14 @@ def test_text_order_concurrency_and_request_contract(transport, prompt):
 
     requests, clients, options = transport(handle)
     encoder = model(max_concurrency=2, classification_prompt=prompt)
-    vectors = encoder.encode_text(str(i) for i in range(5))
+    saved = []
+    vectors = encoder.encode_text(
+        (str(i) for i in range(5)),
+        on_embedding=lambda i, v: saved.append((i, v.copy())),
+    )
+    assert saved[0][0] == 1
+    for i, vector in saved:
+        np.testing.assert_array_equal(vector, vectors[i])
     np.testing.assert_array_equal(vectors[:, 0], [1, 2, 3, 4, 5])
     assert vectors.dtype == np.float32
     assert peak == 2
@@ -337,6 +346,10 @@ def test_yaml_cli_overrides_and_defaults():
                 "embedding.truncate_dim=128",
                 "--set",
                 "embed_images=true",
+                "--set",
+                "cache_validation_embeddings=false",
+                "--set",
+                "lancedb.validation_table=custom_validation",
             ]
         )
         effective = experiment.call_args.args[0]
@@ -345,6 +358,8 @@ def test_yaml_cli_overrides_and_defaults():
         assert effective["embedding"]["vertex"]["classification_prompt"] is True
         assert effective["embedding"]["truncate_dim"] == 128
         assert effective["embed_images"] is True
+        assert effective["cache_validation_embeddings"] is False
+        assert effective["lancedb"]["validation_table"] == "custom_validation"
     assert path.read_text() == original
 
 
@@ -389,7 +404,7 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
     assert all(client.is_closed for client in clients)
     with patch("internvl.vertex_embeddings.genai.Client") as client:
         cached = Experiment(config)
-        assert cached.build_vector_database() is None
+        assert cached.build_vector_database()["source_counts"] == summary["source_counts"]
         assert cached._embedder is None
         client.assert_not_called()
     report = experiment.evaluate()
@@ -408,9 +423,386 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
             )
         return response()
 
+    config["cache_validation_embeddings"] = False
     transport(fail_second_batch)
     with pytest.raises(errors.APIError):
         experiment.evaluate()
     assert failures == 3
     assert set(experiment.output.glob("evaluation_*/report.json")) == previous
     assert all(client.is_closed for client in clients)
+
+
+@pytest.fixture
+def resume_config(tmp_path):
+    root = tmp_path / "dataset"
+    (root / "annot").mkdir(parents=True)
+    (root / "annot/class_list.txt").write_text("0 apple\n")
+    for split in ("train", "val"):
+        folder = root / split / f"{split}_set"
+        folder.mkdir(parents=True)
+        for i in range(13):
+            Image.new("RGB", (2, 2), (i + 1, 0, 0)).save(folder / f"{i}.png")
+        (root / f"annot/{split}_info.csv").write_text(
+            "".join(f"{i}.png,0\n" for i in range(13))
+        )
+    descriptions = tmp_path / "descriptions.json"
+    descriptions.write_text(json.dumps({"descriptions": {"Apple": ["red", "round"]}}))
+    config = yaml.safe_load(Path("cfg/ge_v2.yml").read_text())
+    config.update(dataset={"name": "foodx251", "root": str(root)},
+                  output_dir=str(tmp_path / "output"), embed_images=True,
+                  embed_class_labels=True, descriptions_file=str(descriptions))
+    config["embedding"].update(batch_size=20, truncate_dim=128)
+    config["embedding"]["vertex"].update(project="fixture", max_attempts=1)
+    config["lancedb"]["uri"] = str(tmp_path / "db")
+    return config
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("failed"), KeyboardInterrupt()])
+def test_callbacks_drain_successes_on_coordinator(transport, monkeypatch, failure):
+    transport(lambda request: response())
+    encoder = model(max_concurrency=2)
+    barrier = threading.Barrier(2)
+    successes, saved = [], []
+    coordinator = threading.get_ident()
+
+    def request(client, content):
+        number = int(content.parts[0].text)
+        if number < 2:
+            barrier.wait(timeout=5)
+        if number == 0:
+            raise failure
+        sleep(0.02)
+        successes.append(number)
+        return np.full(128, number, dtype=np.float32)
+
+    def save(index, vector):
+        assert threading.get_ident() == coordinator
+        assert vector[0] == index
+        saved.append(index)
+
+    monkeypatch.setattr(encoder, "_request", request)
+    with pytest.raises(type(failure)):
+        encoder.encode_text(map(str, range(50)), on_embedding=save)
+    assert sorted(saved) == sorted(successes)
+    assert 1 in saved and len(saved) < 49
+    assert len(saved) == len(set(saved))
+
+
+def test_storage_callback_is_not_retried(transport):
+    transport(lambda request: response())
+    calls = []
+
+    def fail(index, vector):
+        calls.append(index)
+        raise OSError("storage")
+
+    with pytest.raises(OSError, match="storage"):
+        model().encode_text(["a", "b", "c"], on_embedding=fail)
+    assert len(calls) == 1
+
+
+def test_resume_all_sources_and_complete_validation(transport, resume_config, monkeypatch):
+    from internvl.experiment import Experiment
+    from internvl.retrieval import LanceDBIndex
+    from internvl.schemas import PointRecord
+
+    config = resume_config
+    config["n_imgs_per_class"] = 12
+    index = LanceDBIndex(**{k: config["lancedb"][k] for k in ("uri", "table")})
+    index.create(128)
+    initial = [PointRecord("Apple", "class_name", "Apple", "Apple"),
+               PointRecord("Apple", "generated_description", "Apple:1", "round")]
+    initial += [PointRecord("Apple", "training_image", f"foodx251:train:{i}.png", "old")
+                for i in range(11)]
+    index.append(initial, np.ones((13, 128), dtype=np.float32))
+    old_ids = [r.id for r in initial]
+    requests, _, _ = transport(lambda request: response())
+    experiment = Experiment(config)
+    summary = experiment.build_vector_database()
+    assert len(requests) == 2  # one description and the twelfth capped image
+    assert summary["source_counts"] == {
+        "class_name": 1, "generated_description": 2, "training_image": 12}
+    index.open()
+    assert len(index.identities()) == 15
+    assert set(old_ids) <= {r["id"] for r in index.table.search().limit(None).to_list()}
+    report = experiment.evaluate()
+    assert len(requests) == 15
+    assert [r["source_id"] for r in report["predictions"]] == [
+        f"foodx251:val:{i}.png" for i in range(13)]
+    assert {kind for kind, _ in index.identities()} == {
+        "class_name", "generated_description", "training_image"}
+    (experiment.output / "index.json").unlink()
+    # Cached runs must work even when all image files are missing.
+    for path in Path(config["dataset"]["root"]).glob("*/*_set/*.png"):
+        path.unlink()
+    config["embedding"]["vertex"]["project"] = None
+    with patch("internvl.vertex_embeddings.genai.Client", side_effect=AssertionError("client")):
+        cached = Experiment(config)
+        assert cached.build_vector_database()["source_counts"] == summary["source_counts"]
+        config["k"] = 1
+        assert cached.evaluate()["metrics"]["evaluated"] == 13
+        assert cached._embedder is None
+
+
+@pytest.mark.parametrize("stage", ["reference", "validation"])
+def test_failed_batch_restart_only_unsaved(transport, resume_config, stage):
+    from internvl.experiment import Experiment
+    from internvl.retrieval import LanceDBIndex
+
+    config = resume_config
+    transport(lambda request: response())
+    experiment = Experiment(config)
+    if stage == "validation":
+        experiment.build_vector_database()
+    calls = 0
+
+    def fail(request):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return httpx.Response(400, json={"error": {"code": 400, "message": "failed"}})
+        return response()
+
+    transport(fail)
+    action = experiment.evaluate if stage == "validation" else experiment.build_vector_database
+    with pytest.raises(errors.APIError):
+        action()
+    assert not list(experiment.output.glob("evaluation_*/report.json"))
+    table = config["lancedb"]["validation_table" if stage == "validation" else "table"]
+    index = LanceDBIndex(config["lancedb"]["uri"], table)
+    index.open()
+    saved = set(index.identities())
+    assert saved
+    expected = {}
+    if stage == "reference":
+        expected.update({("class_name", "Apple"): "Apple",
+                         ("generated_description", "Apple:0"): "red",
+                         ("generated_description", "Apple:1"): "round"})
+    split = "val" if stage == "validation" else "train"
+    kind = "validation_image" if stage == "validation" else "training_image"
+    expected.update({(kind, f"foodx251:{split}:{i}.png"): i + 1 for i in range(13)})
+    requests, _, _ = transport(lambda request: response())
+    requests.clear()
+    restarted = Experiment(config)
+    if stage == "validation":
+        restarted.evaluate()
+        total = 13
+    else:
+        restarted.build_vector_database()
+        total = 16
+    submitted = []
+    for request in requests:
+        part = json.loads(request.content)["content"]["parts"][0]
+        if "text" in part:
+            submitted.append(part["text"])
+        else:
+            with Image.open(BytesIO(base64.urlsafe_b64decode(part["inlineData"]["data"]))) as image:
+                submitted.append(image.getpixel((0, 0))[0])
+    assert Counter(submitted) == Counter(value for key, value in expected.items() if key not in saved)
+    index.open()
+    assert len(index.identities()) == total
+
+
+@pytest.mark.parametrize("value", [None, 1, "true"])
+def test_invalid_cache_toggle(resume_config, value):
+    from internvl.experiment import validate_config
+
+    resume_config["cache_validation_embeddings"] = value
+    with pytest.raises(ValueError, match="boolean"):
+        validate_config(resume_config)
+
+
+@pytest.mark.parametrize("name", [None, "", " ", "foodx251_ge_v2"])
+def test_invalid_validation_table(resume_config, name):
+    from internvl.experiment import validate_config
+
+    resume_config["lancedb"]["validation_table"] = name
+    with pytest.raises(ValueError, match="distinct"):
+        validate_config(resume_config)
+
+
+def test_default_cache_disabled_and_local_settings_ignored(transport, resume_config):
+    from internvl.experiment import Experiment, validate_config
+    from internvl.retrieval import LanceDBIndex
+
+    resume_config.pop("cache_validation_embeddings")
+    transport(lambda request: response())
+    experiment = Experiment(resume_config)
+    experiment.build_vector_database()
+    experiment.evaluate()
+    assert not LanceDBIndex(resume_config["lancedb"]["uri"],
+                            resume_config["lancedb"]["validation_table"]).exists()
+    resume_config["embedding"]["model_id"] = "openai/clip-vit-base-patch32"
+    resume_config["cache_validation_embeddings"] = "ignored"
+    resume_config["lancedb"]["validation_table"] = None
+    validate_config(resume_config)
+    assert Experiment(resume_config).build_vector_database() is None
+    resume_config["lancedb"]["table"] = "local_fresh"
+    local = Experiment(resume_config)
+    local._embedder = Mock(dimension=128)
+    local._embedder.encode_text.side_effect = lambda inputs: np.ones((len(inputs), 128))
+    local._embedder.encode_images.side_effect = lambda images: np.ones((len(images), 128))
+    append = LanceDBIndex.append
+    batch_sizes = []
+
+    def save(index, records, vectors):
+        batch_sizes.append(len(records))
+        append(index, records, vectors)
+
+    with patch.object(LanceDBIndex, "append", save):
+        local.build_vector_database()
+        assert local.evaluate()["metrics"]["evaluated"] == 13
+    assert batch_sizes == [3, 13]
+
+
+def test_cached_report_failure_keeps_vectors(transport, resume_config):
+    from internvl.experiment import Experiment
+
+    requests, _, _ = transport(lambda request: response())
+    experiment = Experiment(resume_config)
+    experiment.build_vector_database()
+    with (
+        patch("internvl.experiment._write_json", side_effect=OSError("report")),
+        pytest.raises(OSError, match="report"),
+    ):
+        experiment.evaluate()
+    assert not list(experiment.output.glob("evaluation_*/report.json"))
+    before = len(requests)
+    experiment.evaluate()
+    assert len(requests) == before
+
+
+def test_progress_and_storage_failure_resume(transport, resume_config):
+    from internvl.experiment import Experiment
+    from internvl.retrieval import LanceDBIndex
+
+    transport(lambda request: response())
+    tracker = Mock()
+    experiment = Experiment(resume_config, tracker=tracker)
+    original = LanceDBIndex.append
+    calls = 0
+
+    def append(index, records, vectors):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("disk")
+        original(index, records, vectors)
+
+    with patch.object(LanceDBIndex, "append", append), pytest.raises(OSError, match="disk"):
+        experiment.build_vector_database()
+    assert calls == 2
+    assert not (experiment.output / "index.json").exists()
+    tracker.reset_mock()
+    experiment.build_vector_database()
+    progress = [call.args for call in tracker.progress.call_args_list]
+    assert progress[:2] == [("reference_embedding", 0, 16), ("reference_embedding", 1, 16)]
+    assert progress[-1] == ("reference_embedding", 16, 16)
+    experiment.evaluate()
+    tracker.reset_mock()
+    experiment.evaluate()
+    progress = [call.args for call in tracker.progress.call_args_list]
+    assert ("validation_embedding", 0, 13) in progress
+    assert ("validation_embedding", 13, 13) in progress
+    assert progress[-1] == ("evaluation", 13, 13)
+
+
+def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config):
+    from internvl.experiment import Experiment
+    from internvl.retrieval import LanceDBIndex
+    from internvl.schemas import PointRecord
+
+    config = resume_config
+    root = Path(config["dataset"]["root"])
+    (root / "annot/class_list.txt").write_text("0 apple\n1 banana\n")
+    (root / "annot/val_info.csv").write_text(
+        "".join(f"{i}.png,{i % 2}\n" for i in range(13))
+    )
+    config["k"] = 1
+    reference = LanceDBIndex(config["lancedb"]["uri"], config["lancedb"]["table"])
+    reference.create(128)
+    vectors = np.eye(2, 128, dtype=np.float32)
+    reference.append([PointRecord(label, "class_name", label, label)
+                      for label in ("Apple", "Banana")], vectors)
+    cache = LanceDBIndex(config["lancedb"]["uri"], config["lancedb"]["validation_table"])
+    cache.create(128)
+    # Seed a partial cache in reverse order; new responses also finish out of order.
+    for i in reversed(range(0, 13, 2)):
+        cache.append([PointRecord("Apple", "validation_image", f"foodx251:val:{i}.png", "old")],
+                     vectors[[0]])
+
+    def handle(request):
+        part = json.loads(request.content)["content"]["parts"][0]
+        with Image.open(BytesIO(base64.urlsafe_b64decode(part["inlineData"]["data"]))) as image:
+            i = image.getpixel((0, 0))[0] - 1
+        sleep((13 - i) * 0.001)
+        return httpx.Response(200, json={"embedding": {"values": vectors[i % 2].tolist()}})
+
+    requests, _, _ = transport(handle)
+    report = Experiment(config).evaluate()
+    assert len(requests) == 6
+    assert [row["prediction"] for row in report["predictions"]] == [
+        "Apple" if i % 2 == 0 else "Banana" for i in range(13)]
+    assert report["metrics"]["majority_vote_accuracy"] == 1
+    for path in root.glob("val/val_set/*.png"):
+        path.unlink()
+    with patch("internvl.vertex_embeddings.genai.Client", side_effect=AssertionError("client")):
+        assert Experiment(config).evaluate()["predictions"] == report["predictions"]
+
+
+def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config):
+    from internvl.experiment import Experiment
+    from internvl.retrieval import LanceDBIndex
+    from internvl.schemas import PointRecord
+
+    transport(lambda request: response())
+    experiment = Experiment(resume_config)
+    index = experiment._lancedb_adapter()
+    index.create(128)
+    # Counts include duplicate and unrequested stored rows; filtering is a set.
+    index.append([PointRecord("Apple", "class_name", identity, identity)
+                  for identity in ("Apple", "Apple", "old")], np.ones((3, 128)))
+    original = LanceDBIndex.identities
+    scans = []
+
+    def identities(index):
+        scans.append(index.name)
+        return original(index)
+
+    with patch.object(LanceDBIndex, "identities", identities):
+        summary = experiment.build_vector_database()
+    assert scans == [index.name]
+    assert summary["source_counts"] == {
+        "class_name": 3, "generated_description": 2, "training_image": 13,
+    }
+
+
+def test_reference_inputs_fail_before_table_creation(transport, resume_config):
+    from internvl.experiment import Experiment
+
+    transport(lambda request: response())
+    Path(resume_config["descriptions_file"]).unlink()
+    experiment = Experiment(resume_config)
+    with pytest.raises(FileNotFoundError):
+        experiment.build_vector_database()
+    assert not experiment._lancedb_adapter().exists()
+    assert experiment._embedder is None
+
+
+def test_validation_cache_completes_before_classification(transport, resume_config):
+    from internvl.experiment import Experiment
+    from internvl.retrieval import LanceDBIndex
+
+    transport(lambda request: response())
+    experiment = Experiment(resume_config)
+    experiment.build_vector_database()
+    original = LanceDBIndex.query
+
+    def query(index, vector, k):
+        cache = LanceDBIndex(index.uri, resume_config["lancedb"]["validation_table"])
+        cache.open()
+        assert len(cache.identities()) == 13
+        return original(index, vector, k)
+
+    with patch.object(LanceDBIndex, "query", query):
+        experiment.evaluate()

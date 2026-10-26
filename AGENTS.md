@@ -415,8 +415,50 @@ total attempts with one-second initial delay, base two, one-second jitter, and a
 60-second delay cap. Connection/timeouts and HTTP 408/429/500/502/503/504 retry;
 other errors propagate. Timeout defaults to 60 seconds per attempt. Failure or
 interruption cancels queued work, waits for running requests, and closes the client.
-Batches return no partial vectors. Existing partial-table and failed-evaluation
-behavior, configuration recording, and batch progress contracts still apply.
+Batches return no partial vectors. The resumption contract below supersedes the
+existing-table early return for Vertex; local backends retain it. Configuration
+recording and final-report-only evaluation still apply.
+
+### Vertex embedding resumption
+
+Vertex reference builds resume existing tables automatically. Local model builds
+still return when a table exists. Records match by `(source_kind, source_identity)`;
+UUIDs remain random and saved rows are retained. Identity scans explicitly have no
+result limit and omit vectors. Training caps apply before excluding saved image
+identities, and exclusion precedes decoding. Every validated Vertex response is
+saved individually through a serial coordinator-thread callback. Successful
+in-flight responses are drained after API failure or interruption before the error
+propagates. Storage errors propagate without write retries or marking failed saves
+complete; encode calls never return partial matrices. Completed builds regenerate
+index.json using initial stored source counts plus successfully inserted batches.
+One metadata scan supplies an immutable identity snapshot for filtering and counts
+every stored row, including duplicates and records outside the current selection.
+The single-writer contract permits summary publication without rescanning identities.
+Reference preparation validates capped training metadata before creating a missing
+table; image PointRecords are constructed only for missing decoded batches.
+Text and image saving use typed helpers with a shared persistence callback; there
+is no mutable saved-identity state during insertion.
+
+`cache_validation_embeddings` defaults to false when omitted and must be boolean
+for Vertex. `cfg/ge_v2.yml` enables it with the separate
+`lancedb.validation_table: foodx251_ge_v2_validation`; its name must be nonempty and
+different from the reference table. Local models ignore these settings. Validation
+records use `source_kind="validation_image"` and are never searched as references.
+Evaluation explicitly completes `_prepare_validation_cache()` before classification.
+The evaluation iterator receives that table and only reads metadata and bounded
+vector batches in
+annotation order. A complete cache needs no image decoding, embedder construction,
+credentials, or API calls. Disabled caching recomputes validation vectors as before.
+`validation_embedding` tracks population and `evaluation` tracks classification;
+reference and cache progress start at zero, account for saved requested records,
+and advance after completed batches. A failed batch may save vectors without a
+final progress update. Reports publish only after a complete successful evaluation.
+
+Use one writer per table. Changing inputs, descriptions, model, dimensions, or
+prompt mode requires fresh tables; there are no hashes, compatibility checks,
+migrations, or automatic isolation. Only successfully committed vectors are
+reusable: crashes between response and save, or timeouts after remote processing,
+can require resubmission. No live Vertex requests are authorized by synthetic tests.
 
 ## InternVL text architecture and experiment pipeline (historical)
 

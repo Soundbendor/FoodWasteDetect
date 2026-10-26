@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pandas as pd
-from datasets import Dataset, DatasetDict, Features, Image, Value
+from datasets import Dataset, DatasetDict, Features, Image, NamedSplit, Value
 
 SPLIT_NAMES = {"train": "train", "val": "validation"}
 
@@ -76,7 +76,7 @@ class FoodX251ImageDataset:
             table,
             features=features,
             preserve_index=False,
-            split=SPLIT_NAMES[split],
+            split=NamedSplit(SPLIT_NAMES[split]),
         )
 
     def get_class_list(self) -> list[str]:
@@ -95,8 +95,14 @@ class FoodX251ImageDataset:
         batch_size: int,
         *,
         n_imgs_per_class: int | None = None,
+        excluded_source_ids: set[str] | None = None,
+        decode: bool = True,
     ) -> Iterator[dict[str, list]]:
-        """Yield decoded image batches in annotation order; caller closes images."""
+        """Yield annotation-order batches, optionally metadata only without image reads.
+
+        Apply the per-class cap before identity exclusion and decoding. Decoded
+        images belong to the caller and are released through garbage collection.
+        """
         dataset = self.splits[SPLIT_NAMES.get(split, split)]
         if n_imgs_per_class is not None:
             counts: Counter[str] = Counter()
@@ -106,7 +112,16 @@ class FoodX251ImageDataset:
                     indices.append(index)
                     counts[label] += 1
             dataset = dataset.select(indices)
-        return dataset.cast_column("image", Image()).iter(
+        if excluded_source_ids:
+            dataset = dataset.select([
+                i for i, source_id in enumerate(dataset["source_id"])
+                if source_id not in excluded_source_ids
+            ])
+        if not decode:
+            dataset = dataset.remove_columns("image")
+        else:
+            dataset = dataset.cast_column("image", Image())
+        return dataset.iter(
             batch_size=batch_size, drop_last_batch=False
         )
 

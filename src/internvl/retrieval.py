@@ -3,13 +3,15 @@
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import lancedb
 import numpy as np
 import pyarrow as pa
+from lancedb.db import LanceDBConnection
+from numpy.typing import NDArray
 
-from .schemas import Neighbor, PointRecord, Prediction
+from .schemas import Neighbor, PointRecord, Prediction, SourceIdentity
 
 
 class ClassMetrics(TypedDict):
@@ -72,13 +74,13 @@ class LanceDBIndex:
 
     def exists(self) -> bool:
         """Check without creating a missing database directory."""
-        return self.uri.is_dir() and self.name in lancedb.connect(self.uri)
+        return self.uri.is_dir() and self.name in cast(LanceDBConnection, lancedb.connect(self.uri))
 
     def open(self) -> None:
         """Open a completed table for reads without creating storage."""
         if not self.uri.is_dir():
             raise FileNotFoundError(f"LanceDB database does not exist: {self.uri}")
-        self.table = lancedb.connect(self.uri).open_table(self.name)
+        self.table = cast(LanceDBConnection, lancedb.connect(self.uri)).open_table(self.name)
 
     def create(self, dimension: int) -> None:
         """Create a typed table; the backend refuses existing names."""
@@ -89,7 +91,7 @@ class LanceDBIndex:
             ]
             + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)]
         )
-        self.table = lancedb.connect(self.uri).create_table(
+        self.table = cast(LanceDBConnection, lancedb.connect(self.uri)).create_table(
             self.name, schema=schema, mode="create", exist_ok=False
         )
 
@@ -110,6 +112,35 @@ class LanceDBIndex:
             ],
             on_bad_vectors="error",
         )
+
+    def identities(self) -> list[SourceIdentity]:
+        """Scan all identity metadata without reading vectors."""
+        if self.table is None:
+            raise RuntimeError("Open or create the table before scanning")
+        rows = self.table.search().select(
+            ["source_kind", "source_identity"]
+        ).limit(None).to_list()
+        return [(row["source_kind"], row["source_identity"]) for row in rows]
+
+    def fetch_vectors(self, identities: Sequence[SourceIdentity]) -> NDArray[np.float32]:
+        """Fetch a bounded selection and restore the caller's order."""
+        if self.table is None:
+            raise RuntimeError("Open or create the table before fetching")
+        if not identities:
+            return np.empty((0, self.table.schema.field("vector").type.list_size), dtype=np.float32)
+
+        def literal(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        predicate = " OR ".join(
+            f"(source_kind = {literal(kind)} AND source_identity = {literal(identity)})"
+            for kind, identity in identities
+        )
+        rows = self.table.search().where(predicate).select(
+            ["source_kind", "source_identity", "vector"]
+        ).limit(None).to_list()
+        vectors = {(row["source_kind"], row["source_identity"]): row["vector"] for row in rows}
+        return np.asarray([vectors[key] for key in identities], dtype=np.float32)
 
     def query(
         self, vector: np.ndarray[tuple[int], np.dtype[np.float32 | np.float64]], k: int

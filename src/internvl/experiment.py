@@ -5,17 +5,21 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+import numpy as np
+from numpy.typing import NDArray
+from PIL import Image
 
 from .embeddings import EmbeddingModel
 from .generate_descriptors import DescriberLLM
 from .image_dataset import load_dataset
 from .retrieval import LanceDBIndex, classify, metrics
-from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
+from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction, SourceIdentity
 from .tracking import Tracker
 from .vertex_embeddings import VertexEmbeddingModel
 
@@ -46,6 +50,14 @@ def validate_config(config: dict) -> dict:
     limit = config.get("n_imgs_per_class")
     if limit is not None and (type(limit) is not int or limit <= 0):
         raise ValueError("n_imgs_per_class must be null or a positive integer")
+    if config.get("embedding", {}).get("model_id") == "google/ge-v2":
+        cache = config.get("cache_validation_embeddings", False)
+        if type(cache) is not bool:
+            raise ValueError("cache_validation_embeddings must be a boolean")
+        if cache:
+            name = config["lancedb"].get("validation_table")
+            if not isinstance(name, str) or not name.strip() or name == config["lancedb"]["table"]:
+                raise ValueError("validation_table must be nonempty and distinct from reference table")
     # Reject output paths equal to or nested inside the resolved raw dataset directory.
     raw = config.get("dataset", {}).get("root")
     if raw:
@@ -104,7 +116,7 @@ class Experiment:
         self._embedder = None
 
     @property
-    def embedder(self):
+    def embedder(self) -> EmbeddingModel | VertexEmbeddingModel:
         """Construct the embedder on first use and reuse it across stages."""
         if self._embedder is None:
             options = dict(self.config["embedding"], batch_size=self.batch_size)
@@ -117,8 +129,84 @@ class Experiment:
                 self._embedder = EmbeddingModel(**options)
         return self._embedder
 
-    def _lancedb_adapter(self):
-        return LanceDBIndex(**self.config["lancedb"])
+    def _lancedb_adapter(self) -> LanceDBIndex:
+        options = self.config["lancedb"]
+        return LanceDBIndex(uri=options["uri"], table=options["table"])
+
+    @property
+    def _is_vertex(self) -> bool:
+        return self.config["embedding"].get("model_id") == "google/ge-v2"
+
+    @staticmethod
+    def _embedding_callback(
+        index: LanceDBIndex, records: Sequence[PointRecord],
+    ) -> Callable[[int, NDArray[np.float32]], None]:
+        """Persist each completed response against its original input position."""
+        def save(position: int, vector: NDArray[np.float32]) -> None:
+            index.append([records[position]], vector[None, :])
+
+        return save
+
+    def _save_text_batch(self, index: LanceDBIndex, records: Sequence[PointRecord]) -> None:
+        inputs = [record.value for record in records]
+        encoder = self.embedder
+        if isinstance(encoder, VertexEmbeddingModel):
+            encoder.encode_text(inputs, on_embedding=self._embedding_callback(index, records))
+        else:
+            index.append(records, encoder.encode_text(inputs))
+
+    def _save_image_batch(
+        self, index: LanceDBIndex, records: Sequence[PointRecord], images: list[Image.Image],
+    ) -> None:
+        encoder = self.embedder
+        if isinstance(encoder, VertexEmbeddingModel):
+            encoder.encode_images(images, on_embedding=self._embedding_callback(index, records))
+        else:
+            index.append(records, encoder.encode_images(images))
+
+    def _progress_callback(
+        self, stage: str, total: int, reused: int,
+    ) -> Callable[[int], None]:
+        completed = reused
+        if self.tracker:
+            self.tracker.progress(stage, 0, total)
+            if reused:
+                self.tracker.progress(stage, reused, total)
+
+        def advance(count: int) -> None:
+            nonlocal completed
+            completed += count
+            if self.tracker:
+                self.tracker.progress(stage, completed, total)
+
+        return advance
+
+    def _prepare_validation_cache(self) -> LanceDBIndex:
+        """Complete missing validation vectors before classification begins."""
+        options = self.config["lancedb"]
+        cache = LanceDBIndex(uri=options["uri"], table=options["validation_table"])
+        if cache.exists():
+            cache.open()
+        else:
+            cache.create(cast(int, self.embedder.dimension))
+        saved = frozenset(cache.identities())
+        requested = self.dataset.test_set()["source_id"]
+        reused = sum(("validation_image", identity) in saved for identity in requested)
+        advance = self._progress_callback("validation_embedding", len(requested), reused)
+        self._insert_image_records(cache, split="val", saved=saved, callback=advance)
+        return cache
+
+    def _evaluation_batches(
+        self, cache: LanceDBIndex | None,
+    ) -> Iterator[tuple[list[ImageMetadata], np.ndarray[tuple[int, int], np.dtype[np.float32]]]]:
+        """Read cached vectors in metadata order, or encode decoded image batches."""
+        for batch in self.dataset.iter_batches("val", self.batch_size, decode=cache is None):
+            rows = _batch_rows(batch)
+            vectors = (
+                cache.fetch_vectors([("validation_image", row["source_id"]) for row in rows])
+                if cache is not None else self.embedder.encode_images(batch["image"])
+            )
+            yield rows, vectors
 
     def generate_descriptions(self) -> dict[str, list[str]] | None:
         """Read an explicit vocabulary, or reuse/generate descriptions in the output directory.
@@ -174,8 +262,9 @@ class Experiment:
         return records
 
     def _insert_text_records(
-        self, index, records: list[PointRecord], *, callback: Callable[[int], None] | None = None
-    ) -> Counter:
+        self, index: LanceDBIndex, records: list[PointRecord], *,
+        callback: Callable[[int], None] | None = None
+    ) -> Counter[str]:
         """Generate embedding vectors from text inputs and save vectors in LanceDB.
 
         Args:
@@ -187,94 +276,86 @@ class Experiment:
         Returns:
             A Counter documenting how many records of each modality were inserted.
         """
-        counts = Counter()
+        counts: Counter[str] = Counter()
         for start in range(0, len(records), self.batch_size):
             batch = records[start : start + self.batch_size]
-            index.append(batch, self.embedder.encode_text([r.value for r in batch]))
+            self._save_text_batch(index, batch)
             counts.update(r.source_kind for r in batch)
             if callback is not None:
                 callback(len(batch))
         return counts
 
     def _insert_image_records(
-        self, index, *, callback: Callable[[int], None] | None = None
-    ) -> Counter:
-        """Generate embedding vectors from images and save vectors in LanceDB.
-
-        Args:
-            index: A LanceDBIndex object, wrapping the vector database table.
-            callback: Optional callback for W&B progress logging, called with the
-                batch length after each successful insertion. None disables logging.
-
-        Returns:
-            A Counter documenting how many records of each modality were inserted.
-        """
-        counts = Counter()
-        image_classes = set()
+        self, index: LanceDBIndex, *, split: Literal["train", "val"],
+        saved: frozenset[SourceIdentity] = frozenset(),
+        callback: Callable[[int], None] | None = None,
+    ) -> Counter[str]:
+        """Decode and persist only missing images, applying training caps first."""
+        kind = "training_image" if split == "train" else "validation_image"
+        counts: Counter[str] = Counter()
         for batch in self.dataset.iter_batches(
-            "train", self.batch_size, n_imgs_per_class=self.config.get("n_imgs_per_class")
+            split, self.batch_size,
+            n_imgs_per_class=self.config.get("n_imgs_per_class") if split == "train" else None,
+            excluded_source_ids={identity for source, identity in saved if source == kind},
         ):
             records = [
-                PointRecord(row["class"], "training_image", row["source_id"], row["fname"])
+                PointRecord(row["class"], kind, row["source_id"], row["fname"])
                 for row in _batch_rows(batch)
             ]
-            index.append(records, self.embedder.encode_images(batch["image"]))
-            counts.update(r.source_kind for r in records)
-            image_classes.update(r.label for r in records)
+            self._save_image_batch(index, records, batch["image"])
+            counts.update(record.source_kind for record in records)
             if callback is not None:
                 callback(len(records))
-        if image_classes != set(self.classes):
-            raise ValueError(
-                f"Missing usable training references for {set(self.classes) - image_classes}"
-            )
         return counts
 
     def build_vector_database(self) -> dict | None:
-        """Build the configured table, or warn and return if it already exists."""
-        table = self.config["lancedb"]["table"]
+        """Build references, resuming committed Vertex rows from one identity snapshot."""
         index = self._lancedb_adapter()
-        if index.exists():
-            logging.warning(
-                "LanceDB table %r already exists; reusing its precomputed vectors "
-                "without inserting records or checking compatibility.",
-                table,
-            )
-            return None
-        self.output.mkdir(parents=True, exist_ok=True)
-        records = self._get_text_inputs()
-        callback = None
-        if self.tracker:
-            image_count = 0
-            if self.config["embed_images"]:
-                training = self.dataset.train_set()
-                limit = self.config.get("n_imgs_per_class")
-                image_count = (
-                    len(training)
-                    if limit is None
-                    else sum(min(limit, count) for count in Counter(training["class"]).values())
+        exists = index.exists()
+        counts: Counter[str] = Counter()
+        saved: frozenset[SourceIdentity] = frozenset()
+        if exists:
+            if not self._is_vertex:
+                logging.warning(
+                    "LanceDB table %r already exists; reusing its precomputed vectors "
+                    "without inserting records or checking compatibility.", index.name,
                 )
-            tracker = self.tracker
-            total = len(records) + image_count
-            completed = 0
-            tracker.progress("reference_embedding", completed, total)
+                return None
+            index.open()
+            identities = index.identities()
+            saved = frozenset(identities)
+            counts.update(kind for kind, _ in identities)
 
-            def callback(count: int) -> None:
-                nonlocal completed
-                completed += count
-                tracker.progress("reference_embedding", completed, total)
-
-        index.create(self.embedder.dimension)
-        counts = self._insert_text_records(index, records, callback=callback)
+        records = self._get_text_inputs()
+        total = len(records)
+        reused = sum((record.source_kind, record.source_identity) in saved for record in records)
         if self.config["embed_images"]:
-            counts.update(self._insert_image_records(index, callback=callback))
+            represented: set[str] = set()
+            for batch in self.dataset.iter_batches(
+                "train", self.batch_size, decode=False,
+                n_imgs_per_class=self.config.get("n_imgs_per_class"),
+            ):
+                total += len(batch["source_id"])
+                reused += sum(("training_image", identity) in saved for identity in batch["source_id"])
+                represented.update(batch["class"])
+            missing = set(self.classes) - represented
+            if missing:
+                raise ValueError(f"Missing usable training references for {missing}")
+        records = [r for r in records if (r.source_kind, r.source_identity) not in saved]
+        advance = self._progress_callback("reference_embedding", total, reused)
+        if not exists:
+            index.create(cast(int, self.embedder.dimension))
+        counts.update(self._insert_text_records(index, records, callback=advance))
+        if self.config["embed_images"]:
+            counts.update(self._insert_image_records(
+                index, split="train", saved=saved, callback=advance,
+            ))
         if not counts:
             raise ValueError("No records inserted into LanceDB - check dataset and config.")
         artifact = dict(
-            table=table,
-            uri=str(index.uri),
-            source_counts=counts,
-            config=self.config,
+            table=index.name, uri=str(index.uri), source_counts=counts, config=self.config,
         )
+        self.output.mkdir(parents=True, exist_ok=True)
         _write_json(self.output / "index.json", artifact)
         if self.tracker:
             self.tracker.reference_counts(dict(counts))
@@ -305,9 +386,11 @@ class Experiment:
             self.tracker.reference_counts(artifact.get("source_counts"))
         # Classify test-time samples based on majority-vote query to vdb
         predictions: list[Prediction] = []
-        for batch in self.dataset.iter_batches("val", self.batch_size):
-            rows = _batch_rows(batch)
-            vectors = self.embedder.encode_images(batch["image"])
+        cache = (
+            self._prepare_validation_cache()
+            if self._is_vertex and self.config.get("cache_validation_embeddings", False) else None
+        )
+        for rows, vectors in self._evaluation_batches(cache):
             for record, vector in zip(rows, vectors, strict=True):
                 predictions.append(_prediction(record, index.query(vector, self.config["k"])))
             if self.tracker:
