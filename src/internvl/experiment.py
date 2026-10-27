@@ -18,7 +18,7 @@ from .embedder import Embedder
 from .embeddings import EmbeddingModel
 from .generate_descriptors import DescriberLLM
 from .image_dataset import load_dataset
-from .retrieval import LanceDBIndex, classify, metrics
+from .retrieval import LanceDBIndex, classify, metrics, ranking_metrics
 from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 from .tracking import Tracker
 
@@ -40,6 +40,8 @@ def validate_config(config: dict) -> dict:
         is used in training dataset
     - Ensure that results output directory is not nested inside data directory.
     """
+    if type(config["k"]) is not int or config["k"] <= 0:
+        raise ValueError("k must be a positive integer")
     sources = ("embed_images", "embed_class_labels", "embed_descriptions")
     for key in sources:
         if type(config[key]) is not bool:
@@ -68,8 +70,11 @@ def _batch_rows(batch: dict[str, list]) -> list[ImageMetadata]:
     ]
 
 
-def _prediction(record: ImageMetadata, neighbors: Sequence[Neighbor]) -> Prediction:
+def _prediction(
+    record: ImageMetadata, ranked: Sequence[Neighbor], k: int, relevant_count: int,
+) -> Prediction:
     """Combine image metadata, the vote result, and retrieved neighbors."""
+    neighbors = ranked[:k]
     label, fraction = classify(neighbors)
     return {
         # append image metadata into the result.
@@ -78,6 +83,7 @@ def _prediction(record: ImageMetadata, neighbors: Sequence[Neighbor]) -> Predict
         "vote_fraction": fraction,
         "nearest": neighbors[0]["label"] if neighbors else None,
         "neighbors": list(neighbors),
+        "retrieval_metrics": ranking_metrics(ranked, record["class"], k, relevant_count),
     }
 
 
@@ -307,8 +313,17 @@ class Experiment:
 
     def evaluate(self) -> dict:
         """Classify the full validation split and save one report after success."""
+        return self.evaluate_from_batches(self._evaluation_batches())
+
+    def evaluate_from_batches(
+        self,
+        batches: Iterable[
+            tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
+        ],
+    ) -> dict:
+        """Evaluate supplied, ordered metadata/vector batches through standard reporting."""
         index, artifact = self._prepare_evaluation()
-        return self._execute_evaluation(index, artifact, self._evaluation_batches())
+        return self._execute_evaluation(index, artifact, batches)
 
     def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict]:
         table = self.config["lancedb"]["table"]
@@ -339,13 +354,19 @@ class Experiment:
             tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
         ],
     ) -> dict:
+        k = self.config["k"]
+        if type(k) is not int or k <= 0:
+            raise ValueError("k must be a positive integer")
+        counts = index.class_counts()
         total = len(self.dataset.test_set())
         predictions: list[Prediction] = []
         with tqdm(total=total, desc="Evaluation", unit="image", mininterval=5) as progress:
             for batch, vectors in batches:
                 rows = _batch_rows(batch)
                 for record, vector in zip(rows, vectors, strict=True):
-                    predictions.append(_prediction(record, index.query(vector, self.config["k"])))
+                    relevant_count = counts[record["class"]]
+                    ranked = index.query(vector, max(k, 5, relevant_count))
+                    predictions.append(_prediction(record, ranked, k, relevant_count))
                 progress.update(len(rows))
         selected = len(self.dataset.test_set())
         if not selected:

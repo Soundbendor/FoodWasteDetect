@@ -58,7 +58,7 @@ root = [".."]
 python-version = "3.13"
 
 [tool.ty.src]
-include = ["cli.py", "schemas.py", "tracking.py", "embedder.py", "vertex_embeddings.py", "vertex_utils.py", "experiment.py", "retrieval.py", "image_dataset.py"]
+include = ["cli.py", "schemas.py", "tracking.py", "embedder.py", "vertex_embeddings.py", "vertex_utils.py", "experiment.py", "retrieval.py", "image_dataset.py", "matroyshka_sweep.py"]
 
 [dependency-groups]
 dev = [

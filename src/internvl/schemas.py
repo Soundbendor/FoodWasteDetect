@@ -17,11 +17,21 @@ class Neighbor(TypedDict):
     score: float
 
 
+class QueryRetrievalMetrics(TypedDict):
+    top5_hit: bool
+    precision_at_k: float
+    reciprocal_rank_at_k: float
+    ndcg_at_k: float
+    average_precision_at_r: float
+    relevant_reference_count: int
+
+
 class Prediction(ImageMetadata):
     prediction: str | None
     vote_fraction: float
     nearest: str | None
     neighbors: list[Neighbor]
+    retrieval_metrics: QueryRetrievalMetrics
 
 
 @dataclass(frozen=True)

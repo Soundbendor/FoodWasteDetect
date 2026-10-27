@@ -29,15 +29,16 @@ class Tracker:
         self.run.summary.update(
             {
                 f"evaluation/{key}": metrics[key]
-                for key in ("evaluated", "majority_vote_accuracy", "nearest_neighbor_accuracy")
+                for key in metrics if key != "per_class"
             }
         )
         self.run.log(
             {
                 "evaluation/per_class": wandb.Table(
-                    columns=["class", "support", "correct", "recall"],
+                    columns=["class", "support", "correct", "recall", "precision", "f1"],
                     data=[
-                        [label, values["support"], values["correct"], values["recall"]]
+                        [label, values["support"], values["correct"], values["recall"],
+                         values["precision"], values["f1"]]
                         for label, values in metrics["per_class"].items()
                     ],
                 )

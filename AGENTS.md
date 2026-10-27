@@ -172,7 +172,7 @@ not calibrated confidence. Completed evaluations cover the full validation split
 with an evaluated count and per-class metrics. Empty retrieval abstains and counts
 as incorrect. Image-loading, embedding, and infrastructure errors fail the run
 without retries or exclusions; stage
-failures propagate without saved partial reports. There is no top-five metric.
+failures propagate without saved partial reports. Top-five vector hit rate and ranking metrics follow the evaluation contract below.
 
 Git revision, dependency-version, and timestamp provenance tracking has been
 removed from the whole-image runner by user request.
@@ -233,9 +233,9 @@ or modify old Qdrant collections. The separate CLIP/YOLO Qdrant backend, native
 package, Pixi task, and server scripts remain unchanged.
 Prediction `value`, evaluation
 manifest, fixed retrieval settings, status/error fields, and separate prediction
-and metric files have been removed. Metrics retain evaluated count, majority-vote
-and nearest-neighbor accuracy, and per-class metrics; no intermediate counts or
-coverage are saved. Historical collections and raw data
+and metric files have been removed. Metrics retain evaluated count, majority-vote and nearest-neighbor accuracy,
+plus classification, ranking, and cosine diagnostics defined below; no intermediate
+counts or coverage are saved. Historical collections and raw data
 are not overwritten. Every class requires a usable image reference when image
 references are enabled. Evaluation embeddings are recomputed for each run.
 `FoodX251ImageDataset` reads the local class list and split CSV annotations
@@ -822,3 +822,75 @@ backend libraries. The target cluster driver is 580.178.04, which supports CUDA
 See `docs/experiments.md` for verification. Do not claim GPU Ollama acceptance
 from package inspection or synthetic tests. No live services, model downloads,
 or GPU kernels were run.
+
+## Cached Gemini Matryoshka sweep
+
+`python -m internvl experiment matroyshka-sweep --config_file cfg/ge_v2.yml`
+uses the shared CLI and strict ordered `--set` overrides. The command spelling is
+`matroyshka-sweep`; implementation lives in `internvl.matroyshka_sweep`, with no
+separate parser or experiment subclass. It assumes the configured reference and
+validation tables contain complete Gemini 3072-dimensional embeddings. It does
+not verify compatibility or completeness and makes no embedding requests.
+
+The sweep evaluates dimensions 768, 1536, and 3072 with configured `k` and batch
+size. Source tables are retained; all rows, IDs, and metadata (including text
+references) are preserved. Reference switches and image caps remain recorded but
+do not filter existing tables. Smaller dimensions use exact float32 prefixes in
+`<source>_d768` and `<source>_d1536`, with fixed-size Arrow vectors and no additional
+normalization. All six table names must be distinct. Each missing destination is
+created with one streaming `create_table` call without a query-result limit.
+Existing destinations are reused if they open; errors propagate without scanning,
+repair, overwrite, or cleanup. This is not a crash-durability guarantee. The native
+dimension uses the original tables directly.
+
+`Experiment.evaluate_from_batches()` exposes standard evaluation and reporting;
+ordinary `evaluate()` delegates to it. The sweep pairs undecoded validation
+metadata with cached vectors by identity. Missing vectors fail without constructing
+an embedder or filling the cache. Evaluation remains the labeled validation split.
+Each dimension receives a copied effective configuration, enabled validation caching,
+its dimension and table names, and output directory beneath
+`<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`. The CLI owns one native W&B
+context per dimension with the existing artifacts and metadata restrictions; no
+outer run, explicit identity/group settings, or resume checks are added.
+Standard reports retain null reference counts without a matching index summary.
+Only complete success writes `summary.json`, recording dimensions, tables,
+all aggregate evaluation metrics, output directories, and returned W&B run IDs.
+Earlier dimension reports survive later failures. Production execution requires
+separate authorization; routine checks use synthetic CPU tables and mocked tracking.
+
+
+## Whole-image classification and ranking metrics
+
+All shared evaluation paths (local, cached Vertex, and the dimension sweep) scan
+only the stored class column once, streamed without a result limit, to count
+reference rows per label. Every reference type and duplicate row contributes.
+For each query, R is the count matching its true class. Retrieve max(k, 5, R)
+exact cosine neighbors in backend order; k must be a positive integer, excluding
+booleans. Voting and saved `neighbors` use only the first k returned rows. Score
+deeper rankings immediately, then discard them. No compatibility checks are added.
+
+Predictions include typed `retrieval_metrics`: `top5_hit`, `precision_at_k`,
+`reciprocal_rank_at_k`, `ndcg_at_k`, `average_precision_at_r`, and
+`relevant_reference_count`. Top-five hits count vector positions, including repeated
+labels. Precision@k divides matches by actual support length; reciprocal rank uses
+the first match within k. Binary nDCG discounts rank i by 1/log2(i+1), with ideal
+length min(k,R). AP@R sums Precision@i at matching ranks through R and divides by R.
+Empty retrieval and R=0 score zero. Aggregate effectiveness metrics include every
+validation query: `top5_hit_rate`, `retrieval_precision_at_k`, `mrr_at_k`,
+`ndcg_at_k`, and `map_at_r`.
+
+Classification precision/recall/F1 use majority-vote predictions only. Macro
+averages include the union of true and predicted labels, excluding abstentions,
+independent of the per-class display list. Macro F1 averages class F1 directly.
+Micro scores pool TP/FP/FN; abstentions add a true-class FN without a predicted
+class. Undefined ratios are zero; displayed recall remains null for zero support.
+Per-class rows add precision and F1. Empty inputs retain null accuracies and zero
+classification/ranking ratios. Cosine means exclude queries without neighbors and
+are null if none qualify. `mean_top1_cosine_similarity` averages nearest scores;
+`mean_support_cosine_similarity` averages each query's first-k mean equally.
+Negative similarities are retained.
+
+All aggregate scalars appear in report.json, W&B evaluation summaries, and sweep
+summary rows. W&B per-class tables include precision and F1. Publication still
+requires complete evaluation and successful local writing; historical reports are
+unchanged. See docs/experiments.md for definitions, interpretation, and CPU checks.

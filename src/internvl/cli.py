@@ -1,7 +1,7 @@
 """Parse commands and merge experiment configuration overrides."""
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 import wandb
@@ -10,6 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
 from .experiment import Experiment
+from .matroyshka_sweep import evaluate_cached, run_sweep
 from .tracking import Tracker
 from .vertex_utils import VertexExperiment
 
@@ -59,7 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     experiment.add_argument(
         "stage",
-        choices=("describe", "index", "evaluate", "run"),
+        choices=("describe", "index", "evaluate", "run", "matroyshka-sweep"),
         help="Run a specific stage of the food image classification experiment.",
     )
     experiment.add_argument("--config_file", required=True, help="Path to experiment config YAML")
@@ -82,10 +83,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _run_experiment(config: dict[str, Any], stage: str) -> None:
+    if stage == "matroyshka-sweep":
+        run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
+        return
     experiment_class = (
         VertexExperiment if config.get("embedding", {}).get("model_id") == "google/ge-v2" else Experiment
     )
     experiment_class.validate_config(config)
+
+    def execute(effective: dict, tracker: Tracker) -> Any:
+        experiment = experiment_class(effective, tracker=tracker)
+        stages = {
+            "describe": experiment.generate_descriptions,
+            "index": experiment.build_vector_database,
+            "evaluate": experiment.evaluate,
+            "run": experiment.run,
+        }
+        return stages[stage]()
+
+    _tracked_run(config, stage, execute)
+
+
+def _tracked_run(
+    config: dict, stage: str, execute: Callable[[dict, Tracker], Any],
+) -> tuple[Any, str]:
     with wandb.init(
         config=config,
         job_type=stage,
@@ -99,14 +120,7 @@ def _run_experiment(config: dict[str, Any], stage: str) -> None:
     ) as run:
         tracker = Tracker(run)
         tracker.configuration(config)
-        experiment = experiment_class(config, tracker=tracker)
-        stages = {
-            "describe": experiment.generate_descriptions,
-            "index": experiment.build_vector_database,
-            "evaluate": experiment.evaluate,
-            "run": experiment.run,
-        }
-        stages[stage]()
+        return execute(config, tracker), run.id
 
 
 def main(argv: Sequence[str] | None = None) -> None:

@@ -221,20 +221,21 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
     assert len(history) == 1
     assert "evaluation/per_class" in history[0]
     sdk.define_metric.assert_not_called()
-    assert set(sdk.summary) == {
-        "reference_source_counts", "evaluation/evaluated",
-        "evaluation/majority_vote_accuracy", "evaluation/nearest_neighbor_accuracy",
+    assert set(sdk.summary) == {"reference_source_counts"} | {
+        f"evaluation/{key}" for key in report["metrics"] if key != "per_class"
     }
     assert sdk.summary["reference_source_counts"] == report["reference_source_counts"]
-    for key in ("evaluated", "majority_vote_accuracy", "nearest_neighbor_accuracy"):
+    for key in report["metrics"]:
+        if key == "per_class":
+            continue
         assert sdk.summary[f"evaluation/{key}"] == report["metrics"][key]
     artifact = sdk.log_artifact.call_args.args[0]
     saved = next(exp.output.glob("evaluation_*/report.json"))
     assert artifact.files["report.json"] == saved.read_bytes()
     table = next(p["evaluation/per_class"] for p in history if "evaluation/per_class" in p)
-    assert table.columns == ["class", "support", "correct", "recall"]
+    assert table.columns == ["class", "support", "correct", "recall", "precision", "f1"]
     assert table.data == [
-        [label, v["support"], v["correct"], v["recall"]]
+        [label, v["support"], v["correct"], v["recall"], v["precision"], v["f1"]]
         for label, v in report["metrics"]["per_class"].items()
     ]
     # A fresh invocation reuses inputs without loading references or decoding images.
@@ -295,7 +296,7 @@ def test_unknown_counts_null_recall_and_saved_report_survives_logging_failure(ex
         for c in sdk.log.call_args_list
         if "evaluation/per_class" in c.args[0]
     )
-    assert table.data[-1] == ["Absent", 0, 0, None]
+    assert table.data[-1] == ["Absent", 0, 0, None, 0, 0]
 
 
 @pytest.mark.parametrize("mode", ["disabled", "offline"])
@@ -312,8 +313,8 @@ from internvl.cli import _run_experiment
 from internvl.tracking import Tracker
 report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
     "nearest_neighbor_accuracy": 1., "per_class": {
-        "A": {"support": 1, "correct": 1, "recall": 1.},
-        "B": {"support": 0, "correct": 0, "recall": None}}}}
+        "A": {"support": 1, "correct": 1, "recall": 1., "precision": 1., "f1": 1.},
+        "B": {"support": 0, "correct": 0, "recall": None, "precision": 0., "f1": 0.}}}}
 path = Path("report.json")
 path.write_text(json.dumps(report))
 config = {"k": 1, "embed_images": False, "embed_class_labels": True,

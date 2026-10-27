@@ -44,10 +44,12 @@ class Contracts(unittest.TestCase):
         ]
         for neighbors, result in cases:
             with self.subTest(neighbors=neighbors):
-                prediction = _prediction(record, neighbors)
+                prediction = _prediction(record, neighbors, max(1, len(neighbors)),
+                                         sum(n["label"] == record["class"] for n in neighbors))
                 self.assertEqual(prediction, {
                     'fname': 'fixture.png', 'class': 'A', 'source_id': 'image-1',
                     'source_split': 'val', 'extra': 'retained', **result,
+                    'retrieval_metrics': prediction['retrieval_metrics'],
                 })
                 self.assertEqual(record, original)
                 self.assertIsNot(prediction, record)
@@ -60,7 +62,7 @@ class Contracts(unittest.TestCase):
     def test_reference_switch_combinations(self):
         keys = ('embed_images', 'embed_class_labels', 'embed_descriptions')
         for flags in itertools.product([False, True], repeat=3):
-            cfg = dict(zip(keys, flags))
+            cfg = dict(zip(keys, flags), k=1)
             with self.subTest(flags=flags):
                 if any(flags):
                     self.assertIs(validate_config(cfg), cfg)
@@ -73,7 +75,7 @@ class Contracts(unittest.TestCase):
     def test_reference_switches_require_booleans(self):
         for key in ('embed_images', 'embed_class_labels', 'embed_descriptions'):
             for value in ('false', 0, 1, None):
-                cfg = dict(embed_images=False, embed_class_labels=True, embed_descriptions=False)
+                cfg = dict(k=1, embed_images=False, embed_class_labels=True, embed_descriptions=False)
                 cfg[key] = value
                 with self.subTest(key=key, value=value):
                     with self.assertRaisesRegex(ValueError, key):
@@ -83,7 +85,7 @@ class Contracts(unittest.TestCase):
 
     def test_image_limit_validation(self):
         for enabled in (False, True):
-            cfg = dict(embed_images=enabled, embed_class_labels=True, embed_descriptions=False)
+            cfg = dict(k=1, embed_images=enabled, embed_class_labels=True, embed_descriptions=False)
             self.assertIs(validate_config(cfg), cfg)
             for limit in (None, 1, 20):
                 cfg['n_imgs_per_class'] = limit
@@ -96,7 +98,7 @@ class Contracts(unittest.TestCase):
 
     def test_output_cannot_be_inside_raw_data(self):
         with tempfile.TemporaryDirectory() as directory:
-            cfg = dict(embed_images=True, embed_class_labels=False, embed_descriptions=False,
+            cfg = dict(k=1, embed_images=True, embed_class_labels=False, embed_descriptions=False,
                        dataset={'root': directory}, output_dir=str(Path(directory) / 'derived'))
             with self.assertRaisesRegex(ValueError, 'separate from raw data'):
                 Experiment(cfg)
@@ -419,12 +421,42 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual([p.name for p in folder.iterdir()], ['report.json'])
         self.assertEqual(json.loads((folder / 'report.json').read_text()), report)
         self.assertTrue(all('value' not in p for p in report['predictions']))
-        self.assertEqual(set(report['metrics']), {'evaluated', 'majority_vote_accuracy',
-                                                'nearest_neighbor_accuracy', 'per_class'})
+        from internvl.retrieval import RetrievalMetrics
+        self.assertEqual(set(report['metrics']), set(RetrievalMetrics.__annotations__))
         artifact['state'] = 'incomplete'
         (exp.output / 'index.json').write_text(json.dumps(artifact))
         self.assertEqual(exp.evaluate()['metrics']['evaluated'], 2)
 
+
+    def test_evaluation_depth_counts_and_empty_table_metrics(self):
+        import numpy as np
+        from internvl.retrieval import LanceDBIndex
+        from internvl.schemas import PointRecord
+
+        exp = self.experiment()
+        exp.config['k'] = 1
+        index = exp._lancedb_adapter()
+        index.create(2)
+        records = [PointRecord('Apple', 'description', str(i), '') for i in range(7)]
+        index.append(records, np.tile([1., 0.], (7, 1)))
+        with patch.object(exp, '_lancedb_adapter', return_value=index), \
+             patch.object(index, 'class_counts', wraps=index.class_counts) as counts, \
+             patch.object(index, 'query', wraps=index.query) as query:
+            report = exp.evaluate()
+        counts.assert_called_once_with()
+        self.assertEqual([call.args[1] for call in query.call_args_list], [7, 5])
+        self.assertEqual([len(row['neighbors']) for row in report['predictions']], [1, 1])
+        for key in ('top5_hit_rate', 'retrieval_precision_at_k', 'mrr_at_k', 'ndcg_at_k', 'map_at_r'):
+            self.assertEqual(report['metrics'][key], 0.5)
+        self.assertEqual(report['predictions'][0]['retrieval_metrics']['relevant_reference_count'], 7)
+        exp.config['lancedb']['table'] = 'empty'
+        empty = LanceDBIndex(index.uri, 'empty')
+        empty.create(2)
+        report = exp.evaluate()
+        self.assertEqual(report['metrics']['evaluated'], 2)
+        self.assertEqual(report['metrics']['map_at_r'], 0)
+        self.assertIsNone(report['metrics']['mean_support_cosine_similarity'])
+        self.assertTrue(all(row['prediction'] is None for row in report['predictions']))
 
     def setUp(self):
         import numpy as np
@@ -842,3 +874,26 @@ class ExperimentTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+def test_deep_rankings_do_not_expand_voting_support():
+    from internvl.experiment import _prediction
+    from internvl.schemas import Neighbor
+
+    row = dict(fname='x', source_id='x', source_split='val', **{'class': 'A'})
+    ranked = [Neighbor(id=str(i), label=label, score=1 - i / 10)
+              for i, label in enumerate(['B', 'B', 'B', 'B', 'A', 'A', 'A', 'A'])]
+    result = _prediction(row, ranked, 1, 4)
+    assert result['prediction'] == 'B'
+    assert result['neighbors'] == ranked[:1]
+    assert result['retrieval_metrics']['top5_hit']
+    assert result['retrieval_metrics']['precision_at_k'] == 0
+    assert result['retrieval_metrics']['average_precision_at_r'] == 0
+
+
+def test_k_requires_positive_nonboolean_integer():
+    import pytest
+    for k in (0, -1, True, False, None, '5', 1.5):
+        with pytest.raises(ValueError, match='k must be a positive integer'):
+            validate_config(dict(k=k, embed_images=True, embed_class_labels=False,
+                                 embed_descriptions=False))

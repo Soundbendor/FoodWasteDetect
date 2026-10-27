@@ -1071,3 +1071,108 @@ tests were replaced by real tqdm counter/closure checks, batch failure and
 interruption checks, pending-work counts for restarted and cached Vertex runs,
 and assertions that W&B receives only final reporting. READMEs, dependencies,
 configuration, model behavior, persistence, and report formats were unchanged.
+
+### Cached Gemini dimension sweep (October 27, 2026)
+
+The shared CLI now accepts `experiment matroyshka-sweep` with `cfg/ge_v2.yml`
+and the usual ordered strict overrides. It assumes complete 3072-dimensional
+Gemini reference and validation tables, derives float32 prefix tables for 768 and
+1536 dimensions, and evaluates the original tables at 3072. Each missing table
+uses one streaming creation call; successfully opened destinations are reused.
+No compatibility scans, cache filling, source filtering, normalization, repair,
+or cleanup are introduced. Native storage failure tests do not establish
+crash durability.
+
+Each dimension has its own native W&B context and effective configuration artifact.
+Standard reports live under `matroyshka_sweep_<UTC>/d<dimension>/evaluation_<UTC>/`;
+a combined `summary.json` is written only after all dimensions succeed. Cache
+lookup restores annotation order without decoding images or constructing encoders.
+Reference counts remain null when no matching local index summary exists.
+
+Verification used the existing modern CPU environment, synthetic 3072-dimensional
+vectors, temporary LanceDB databases, mocked W&B for sweep runs, and the existing
+native offline W&B tests. GPUs were disabled with `CUDA_VISIBLE_DEVICES=''` and
+Hugging Face loading was offline with `HF_HUB_OFFLINE=1`. The sandboxed test run
+stalled without output and was interrupted; completed tests ran outside the sandbox.
+
+- Focused sweep, shared CLI, retrieval, classification, Vertex, and tracking suite:
+  **244 passed; 182 subtests passed**.
+- Final sweep-only suite, including additional unlimited-scan and native streaming
+  failure cases: **15 passed**.
+- Package and new-test Ruff checks, scoped ty (including the new module), and
+  `git diff --check` passed.
+
+Checks cover exact prefixes and fixed-size schemas, metadata/ID preservation,
+multiple batches beyond default query limits, unchanged sources, reuse without a
+new table version, interrupted readers, storage/open failures, collision rejection,
+missing vectors, and preservation of earlier reports after a later failure.
+Independent NumPy cosine calculations predict different winning neighbors across
+dimensions. CLI checks cover ordered overrides, help without YAML loading, three
+tracking contexts, effective configuration artifacts, and uploaded report contents.
+No production tables, real dataset, models, GPU, Gemini requests, hosted W&B runs,
+or HPC jobs were used. README files, dependency versions, and the lockfile are unchanged.
+
+
+## Classification and ranked retrieval metrics (2026-10-27)
+
+The shared evaluator now reports majority-vote macro/micro precision, recall, and
+F1, top-five vector hit rate, Precision@k, MRR@k, nDCG@k, MAP@R, and two cosine
+means. Existing majority-vote and nearest-neighbor accuracies remain unchanged.
+Local evaluation, cached Vertex evaluation, W&B, and cached dimension sweeps share
+the same calculations. Every aggregate scalar is published to each sweep row and
+W&B's `evaluation/` summary; per-class tables add precision and F1.
+
+For each query, R counts all stored reference rows with exactly the true label,
+regardless of reference type. One unlimited streamed class-column scan supplies
+these counts. Search depth is max(k,5,R), but voting and saved support remain the
+first k rows. Repeated labels occupy separate ranks. Top-five hit rate is the
+fraction of queries with a match at ranks 1–5. Precision@k divides matches in the
+first k by the actual returned support length. MRR@k averages the reciprocal of
+the first matching rank within k. Binary DCG sums relevance/log2(rank+1); nDCG@k
+divides by ideal DCG with min(k,R) matches. AP@R sums Precision@i at matching ranks
+i through R and divides by R; MAP@R averages these values. Empty retrieval or R=0
+contributes zero, retaining every validation query in the denominator.
+
+Classification uses majority votes. Macro averages cover labels in truth or
+predictions, independently of the display list; macro F1 averages class F1s.
+Micro scores pool TP, FP, and FN. Abstentions contribute FN without a synthetic
+class. Undefined ratios are zero, except displayed recall stays null for absent
+support. Without abstentions, micro scores equal single-label accuracy, following
+[scikit-learn's definitions](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_fscore_support.html).
+The nearest cosine mean and mean of per-query support cosine means exclude empty
+retrievals, retain negative scores, and return null if no query qualifies.
+
+Use macro F1 to compare class performance and nDCG@k/MAP@R to inspect neighborhood
+quality. [BEIR](https://arxiv.org/html/2104.08663v4#S3.SS3) uses nDCG for ranked
+retrieval evaluation. [Musgrave et al.](https://arxiv.org/html/2003.08505v3#S3.SS2)
+motivate MAP@R as more informative about surrounding retrievals than nearest-only
+accuracy. Keep reference inputs and retrieval settings fixed across comparisons.
+Cosine averages are diagnostics: larger values alone do not demonstrate improved
+semantic separation; see [Steck et al.](https://arxiv.org/abs/2403.05440).
+Hubness analysis and class-pair confusion matrices remain follow-up work.
+
+No metric flags, dependencies, compatibility validation, or historical report
+rewrites are introduced. Deeper retrieval can increase evaluation cost when R is
+large. Checks use synthetic CPU fixtures, temporary LanceDB tables, and mocked
+model/cloud/tracking backends; no real checkpoint, cloud, GPU, or HPC acceptance
+is implied.
+
+Verification results:
+
+- Focused retrieval/classification/tracking/Vertex/sweep suites: modern CPU **226
+  passed, 111 subtests passed**; Jina CPU **227 passed, 111 subtests passed**.
+  The Jina run also included the subsequently added invalid-k test.
+- Final classification/Vertex/CLI regression suites, including the new scan-depth,
+  empty-table, and cached-metric parity assertions: **167 passed, 145 subtests
+  passed** in each CPU environment.
+- Package Ruff, scoped ty in both environments, and `git diff --check` passed.
+- Tests cover hand-calculated multiclass scores, abstentions, predicted-only and
+  unused labels, empty inputs, ranks five/six, repeated labels, R greater than
+  max(k,5), short/empty support, negative and query-weighted cosine means, a
+  3,300-row mixed-reference count scan, and report/W&B/sweep publication.
+- Commands used each installed `src/internvl/.pixi/envs/{default,jina-cpu}/bin/python
+  -m pytest -c src/internvl/pyproject.toml ... --no-cov -q`, with
+  `CUDA_VISIBLE_DEVICES='' HF_HUB_OFFLINE=1`. Sandbox runs stalled at LanceDB and
+  were interrupted; completed suites ran outside the sandbox. No new dependencies,
+  model downloads, live services, or GPU work were used. Unrelated embedding-guard
+  suites were outside this focused verification.

@@ -779,7 +779,14 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
     for path in root.glob("val/val_set/*.png"):
         path.unlink()
     with patch("internvl.vertex_embeddings.genai.Client", side_effect=AssertionError("client")):
-        assert VertexExperiment(config).evaluate()["predictions"] == report["predictions"]
+        cached = VertexExperiment(config).evaluate()
+        assert cached["predictions"] == report["predictions"]
+        assert cached["metrics"] == report["metrics"]
+    for key in ("f1_macro", "f1_micro", "top5_hit_rate", "retrieval_precision_at_k",
+                "mrr_at_k", "ndcg_at_k", "map_at_r"):
+        assert report["metrics"][key] == 1
+    tracker.evaluation.assert_called_once()
+    assert tracker.evaluation.call_args.args[0]["metrics"] == report["metrics"]
 
 
 def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config):
