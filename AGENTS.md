@@ -121,19 +121,24 @@ The configuration artifact contains only `resolved_config.yaml`, written through
 `artifact.new_file(..., encoding="utf-8")` with SDK-managed storage. Its contents
 match the resolved execution dictionary and W&B config after ordered overrides
 and interpolation. Source YAML, invocation metadata, and application-managed
-temporary files are not included. Stateless `Tracker.progress(stage, completed, total)`
-logs counts and fractions with a completed-count axis; W&B owns the global step.
-Reference counters remain local to the experiment; `DescriberLLM` owns its description
-counter and calls `on_description(completed, total)`. The experiment binds the stage
-name with `functools.partial` and logs initial zero progress. Descriptions advance per returned
-request, reference embeddings after each successful insertion, and evaluation after
-each fully processed batch. Tracking-only totals use undecoded metadata and respect
-image caps. Cached or disabled stages return without progress logging. There are
-no application-managed stage timers, throughput metrics, statuses, or cleanup updates.
-A fraction of 1.0 means counted work finished; later validation or artifact writes
-may still fail. Logging errors and interrupts propagate normally. Evaluation
-summaries and per-class reporting remain. Online SDK synchronization publishes
-progress to W&B; offline runs record it locally. Evaluation
+temporary files are not included. Loop-owned tqdm bars replace intermediate W&B
+progress metrics. Separate bars cover descriptions, text references, image
+references, validation-cache insertion, and evaluation. Descriptions advance after
+returned requests; reference/cache and evaluation bars advance only after successful
+batches. Text, description, and evaluation totals are known locally. Image insertion
+uses a running image count without an extra metadata scan or a percentage/ETA total.
+Resumed bars count only newly processed work; no reused offsets or progress callback
+arguments are passed between helpers. Every bar is context-managed, remains enabled
+without a TTY, and uses a five-second minimum refresh interval. Bars close on errors
+and interrupts without reporting unfinished work as complete. Empty insertion loops
+may display zero work; disabled/cached description stages and cached local reference
+builds return before creating bars. Vertex persistence callbacks remain unchanged.
+`Tracker.progress`, `_progress_callback`, and `on_description` have been removed.
+W&B retains configuration, source-count summaries, final evaluation metrics/tables,
+and artifacts. Its native console capture records tqdm's stderr output; disabling
+console capture disables that visibility, and offline runs retain output locally.
+Online Logs-tab rendering has not been tested. Direct Python calls also show bars
+without constructing W&B runs. Evaluation
 reports are uploaded only after a successful local write. Direct Python usage
 via `Experiment(config)` remains untracked by default.
 
@@ -145,8 +150,8 @@ Use all official FoodX251 training references by default. Optional
 order when image references are enabled. Omitted or null uses all images; other
 values must be positive integers (booleans are rejected). Selection occurs before
 decoding, does not mutate stored splits, and is independent of batch size.
-W&B reference progress totals count the capped training references from undecoded
-class metadata, plus enabled text records; existing tables still return before counting.
+Reference source counts reflect the capped training references plus enabled text
+records; existing local tables still return before reading reference inputs.
 Text references are unchanged. Use the full labeled validation split for
 evaluation, recording `source_split="val"`; never claim official test accuracy.
 The dataset adapter resolves image paths, preserves legacy names, and rejects
@@ -351,6 +356,13 @@ version checks, scope, and the stale local CUDA installation.
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
 FoodX251 fixtures, Hugging Face datasets, and real LanceDB databases in temporary
 directories.
+`internvl.embedder.Embedder` is the shared abstract base for `EmbeddingModel` and
+`VertexEmbeddingModel`. It declares an ordinary `dimension: int` attribute and
+abstract text/image encoding methods, with no shared constructor. Its `ImageInput`
+alias accepts strings, paths, and PIL images and is explicitly re-exported by
+`embeddings.py`. The interface imports neither concrete encoders nor experiments.
+Vertex's optional persistence callbacks remain on the concrete encoder; persistence
+helpers retain their concrete casts. The scoped ty check includes the interface.
 Embedding contracts are isolated in `tests/test_embeddings.py` and require
 Sentence Transformers, CPU PyTorch, NumPy, and Pillow. `EmbeddingModel` wraps a
 `SentenceTransformer` directly; `encode()` owns inference batching and NumPy
@@ -379,7 +391,7 @@ legacy source, and must not be attributed to the new experiment runner.
 
 `google/ge-v2` is an application alias for Vertex AI `gemini-embedding-2`,
 implemented separately in `internvl.vertex_embeddings.VertexEmbeddingModel`.
-`Experiment.embedder` routes it lazily and reuses the wrapper. Local model IDs
+`VertexExperiment.embedder` constructs it lazily and reuses the wrapper. Local model IDs
 ignore the `embedding.vertex` section. The Vertex route does not construct a
 Sentence Transformer or use its preprocessing. The local Hugging Face dataset
 adapter remains unchanged.
@@ -421,6 +433,24 @@ recording and final-report-only evaluation still apply.
 
 ### Vertex embedding resumption
 
+`internvl.vertex_utils` owns cache configuration, per-response persistence,
+reference resumption, validation-cache preparation, and bounded cached-vector
+reading. Its typed module functions take explicit inputs and narrow callbacks, never an
+experiment object. The module also defines `VertexExperiment(Experiment)`, which
+overrides reference building, evaluation, validation, encoder construction, and
+batch persistence. Imports flow from `vertex_utils` to `experiment`, never back.
+Direct Python callers choose `Experiment(config)` for local models and
+`VertexExperiment(config)` for Vertex. The CLI selects the class once using
+`embedding.model_id`, validates before W&B initialization, and constructs inside
+the W&B context. `Experiment` has no Vertex dispatch or imports; it retains one
+lazy encoder cache typed as `Embedder`, shared reference
+preparation and insertion loops, progress reporting, classification, reports,
+and `run()`. Local construction reads only supported local embedding options.
+Cache preparation receives lazy dimension lookup so complete caches never construct the embedder. Reference
+preparation filters pending text and saved image identities. The experiment validates
+capped, undecoded training metadata before insertion. Evaluation iterators yield metadata batches and vectors; conversion
+to prediction rows remains in the experiment.
+
 Vertex reference builds resume existing tables automatically. Local model builds
 still return when a table exists. Records match by `(source_kind, source_identity)`;
 UUIDs remain random and saved rows are retained. Identity scans explicitly have no
@@ -439,19 +469,21 @@ table; image PointRecords are constructed only for missing decoded batches.
 Text and image saving use typed helpers with a shared persistence callback; there
 is no mutable saved-identity state during insertion.
 
-`cache_validation_embeddings` defaults to false when omitted and must be boolean
-for Vertex. `cfg/ge_v2.yml` enables it with the separate
+`cache_validation_embeddings` defaults to false when omitted. Vertex uses its
+truthiness: falsey values disable caching, and truthy values require a valid
+separate validation-table name; nonboolean values are accepted. `cfg/ge_v2.yml`
+enables it with the separate
 `lancedb.validation_table: foodx251_ge_v2_validation`; its name must be nonempty and
 different from the reference table. Local models ignore these settings. Validation
 records use `source_kind="validation_image"` and are never searched as references.
-Evaluation explicitly completes `_prepare_validation_cache()` before classification.
+Evaluation explicitly completes `vertex_utils.prepare_validation_cache()` before
+classification.
 The evaluation iterator receives that table and only reads metadata and bounded
 vector batches in
 annotation order. A complete cache needs no image decoding, embedder construction,
 credentials, or API calls. Disabled caching recomputes validation vectors as before.
-`validation_embedding` tracks population and `evaluation` tracks classification;
-reference and cache progress start at zero, account for saved requested records,
-and advance after completed batches. A failed batch may save vectors without a
+Separate tqdm bars display validation-cache insertion and evaluation. Reference
+and cache bars start at zero for pending work and advance after completed batches. A failed batch may save vectors without a
 final progress update. Reports publish only after a complete successful evaluation.
 
 Use one writer per table. Changing inputs, descriptions, model, dimensions, or

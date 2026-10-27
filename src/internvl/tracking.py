@@ -14,19 +14,6 @@ class Tracker:
     def __init__(self, run: wandb.Run):
         self.run = run
 
-    def progress(self, stage: str, completed: int, total: int) -> None:
-        """Publish work counts using a custom axis and W&B's global logging step."""
-        if completed == 0:
-            self.run.define_metric(f"{stage}/completed")
-            self.run.define_metric(f"{stage}/*", step_metric=f"{stage}/completed")
-        self.run.log(
-            {
-                f"{stage}/completed": completed,
-                f"{stage}/total": total,
-                f"{stage}/fraction": completed / total if total else 0.0,
-            }
-        )
-
     def configuration(self, config: dict) -> None:
         """Publish the resolved configuration, including overrides."""
         artifact = wandb.Artifact(f"configuration-{self.run.id}", type="configuration")

@@ -13,11 +13,13 @@ from google.genai import types
 from numpy.typing import NDArray
 from PIL import Image
 
+from .embedder import Embedder, ImageInput
+
 _Input = TypeVar("_Input")
 _PREFIX = "task: classification | query: "
 
 
-class VertexEmbeddingModel:
+class VertexEmbeddingModel(Embedder):
     """Encode individual records through Vertex using Application Default Credentials."""
 
     def __init__(
@@ -177,12 +179,12 @@ class VertexEmbeddingModel:
         return self._encode(texts, prepare, on_embedding)
 
     def encode_images(
-        self, images: Iterable[str | Path | Image.Image], *,
+        self, images: Iterable[ImageInput], *,
         on_embedding: Callable[[int, NDArray[np.float32]], None] | None = None,
     ) -> NDArray[np.float32]:
         """Send RGB PNG pixels without labels, filenames, or resizing."""
 
-        def prepare(image: str | Path | Image.Image) -> types.Content:
+        def prepare(image: ImageInput) -> types.Content:
             if isinstance(image, (str, Path)):
                 with Image.open(image) as original:
                     rgb = original.convert("RGB")

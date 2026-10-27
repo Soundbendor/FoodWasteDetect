@@ -9,8 +9,9 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
-from .experiment import Experiment, validate_config
+from .experiment import Experiment
 from .tracking import Tracker
+from .vertex_utils import VertexExperiment
 
 
 def download_model(model_name: str) -> None:
@@ -81,7 +82,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _run_experiment(config: dict[str, Any], stage: str) -> None:
-    validate_config(config)
+    experiment_class = (
+        VertexExperiment if config.get("embedding", {}).get("model_id") == "google/ge-v2" else Experiment
+    )
+    experiment_class.validate_config(config)
     with wandb.init(
         config=config,
         job_type=stage,
@@ -95,7 +99,7 @@ def _run_experiment(config: dict[str, Any], stage: str) -> None:
     ) as run:
         tracker = Tracker(run)
         tracker.configuration(config)
-        experiment = Experiment(config, tracker=tracker)
+        experiment = experiment_class(config, tracker=tracker)
         stages = {
             "describe": experiment.generate_descriptions,
             "index": experiment.build_vector_database,

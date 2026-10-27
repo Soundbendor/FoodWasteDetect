@@ -2,12 +2,13 @@ import os
 import shutil
 import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 import httpx
 from ollama import ChatResponse, Client
 from pydantic import BaseModel
+from tqdm import tqdm
 
 
 def descriptor_prompt(cleaned_item: str) -> dict[str, str]:
@@ -159,24 +160,20 @@ class DescriberLLM:
         self,
         classes: Sequence[str],
         count: int,
-        *,
-        on_description: Callable[[int, int], None] | None = None,
     ) -> dict[str, list[str]]:
-        """Generate descriptions, reporting (completed, total) after each returned request."""
+        """Generate descriptions with progress after each returned request."""
         descriptions = {}
-        if on_description is not None:
-            completed = 0
-            total = len(classes) * count
-        for label in classes:
-            descriptions[label] = []
-            for _ in range(count):
-                description = self.describe_class(label).description
-                if on_description is not None:
-                    completed += 1
-                    on_description(completed, total)
-                descriptions[label].append(description)
-            if not descriptions[label] or any(not text.strip() for text in descriptions[label]):
-                raise ValueError(f"Empty generated description for {label}")
+        with tqdm(
+            total=len(classes) * count, desc="Descriptions", unit="description", mininterval=5,
+        ) as progress:
+            for label in classes:
+                descriptions[label] = []
+                for _ in range(count):
+                    description = self.describe_class(label).description
+                    progress.update(1)
+                    descriptions[label].append(description)
+                if not descriptions[label] or any(not text.strip() for text in descriptions[label]):
+                    raise ValueError(f"Empty generated description for {label}")
         return descriptions
 
     def _describe_class(self, label: str, prompt: dict[str, str]) -> FoodDescriptor:

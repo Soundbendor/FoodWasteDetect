@@ -21,7 +21,7 @@ from internvl.cli import main
 class CommandTests(unittest.TestCase):
     def setUp(self):
         # Dispatch-only tests use minimal settings; tracking/validation have dedicated tests.
-        self.enterContext(patch("internvl.cli.validate_config"))
+        self.enterContext(patch("internvl.cli.Experiment.validate_config"))
         self.enterContext(patch("internvl.cli.wandb.init"))
         self.enterContext(patch("internvl.cli.Tracker"))
 
@@ -268,7 +268,7 @@ class CommandTests(unittest.TestCase):
 
 class ConfigOverrideTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch("internvl.cli.validate_config"))
+        self.enterContext(patch("internvl.cli.Experiment.validate_config"))
         self.enterContext(patch("internvl.cli.wandb.init"))
         self.enterContext(patch("internvl.cli.Tracker"))
         directory = self.enterContext(tempfile.TemporaryDirectory())

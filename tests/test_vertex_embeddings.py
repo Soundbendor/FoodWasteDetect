@@ -289,9 +289,9 @@ def test_failure_cancels_queue_and_waits_for_workers(transport, monkeypatch, fai
 
 
 def test_routing_and_local_settings():
-    from internvl.experiment import Experiment
+    from internvl.vertex_utils import VertexExperiment
 
-    experiment = object.__new__(Experiment)
+    experiment = object.__new__(VertexExperiment)
     experiment._embedder = None
     experiment.batch_size = 2
     experiment.config = {
@@ -305,6 +305,12 @@ def test_routing_and_local_settings():
         assert isinstance(experiment.embedder, VertexEmbeddingModel)
         assert experiment.embedder is experiment.embedder
         local.assert_not_called()
+    from internvl.experiment import Experiment
+
+    local_config = experiment.config
+    experiment = object.__new__(Experiment)
+    experiment.config = local_config
+    experiment.batch_size = 2
     experiment._embedder = None
     experiment.config["embedding"]["model_id"] = "openai/clip-vit-base-patch32"
     with patch("internvl.experiment.EmbeddingModel") as local:
@@ -328,7 +334,7 @@ def test_yaml_cli_overrides_and_defaults():
     with (
         patch("internvl.cli.wandb.init"),
         patch("internvl.cli.Tracker"),
-        patch("internvl.cli.Experiment") as experiment,
+        patch("internvl.cli.VertexExperiment") as experiment,
     ):
         main(
             [
@@ -364,7 +370,7 @@ def test_yaml_cli_overrides_and_defaults():
 
 
 def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
-    from internvl.experiment import Experiment
+    from internvl.vertex_utils import VertexExperiment
 
     root = tmp_path / "dataset"
     (root / "annot").mkdir(parents=True)
@@ -393,7 +399,7 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
     config["embedding"]["vertex"]["project"] = "fixture-project"
     config["lancedb"]["uri"] = str(tmp_path / "lancedb")
     requests, clients, _ = transport(lambda request: response())
-    experiment = Experiment(config)
+    experiment = VertexExperiment(config)
     summary = experiment.build_vector_database()
     assert summary["source_counts"] == {
         "class_name": 1,
@@ -403,7 +409,7 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
     assert len(requests) == 7
     assert all(client.is_closed for client in clients)
     with patch("internvl.vertex_embeddings.genai.Client") as client:
-        cached = Experiment(config)
+        cached = VertexExperiment(config)
         assert cached.build_vector_database()["source_counts"] == summary["source_counts"]
         assert cached._embedder is None
         client.assert_not_called()
@@ -502,9 +508,9 @@ def test_storage_callback_is_not_retried(transport):
 
 
 def test_resume_all_sources_and_complete_validation(transport, resume_config, monkeypatch):
-    from internvl.experiment import Experiment
     from internvl.retrieval import LanceDBIndex
     from internvl.schemas import PointRecord
+    from internvl.vertex_utils import VertexExperiment
 
     config = resume_config
     config["n_imgs_per_class"] = 12
@@ -517,8 +523,10 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     index.append(initial, np.ones((13, 128), dtype=np.float32))
     old_ids = [r.id for r in initial]
     requests, _, _ = transport(lambda request: response())
-    experiment = Experiment(config)
+    tracker = Mock()
+    experiment = VertexExperiment(config, tracker=tracker)
     summary = experiment.build_vector_database()
+    tracker.progress.assert_not_called()
     assert len(requests) == 2  # one description and the twelfth capped image
     assert summary["source_counts"] == {
         "class_name": 1, "generated_description": 2, "training_image": 12}
@@ -537,7 +545,7 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
         path.unlink()
     config["embedding"]["vertex"]["project"] = None
     with patch("internvl.vertex_embeddings.genai.Client", side_effect=AssertionError("client")):
-        cached = Experiment(config)
+        cached = VertexExperiment(config)
         assert cached.build_vector_database()["source_counts"] == summary["source_counts"]
         config["k"] = 1
         assert cached.evaluate()["metrics"]["evaluated"] == 13
@@ -546,12 +554,12 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
 
 @pytest.mark.parametrize("stage", ["reference", "validation"])
 def test_failed_batch_restart_only_unsaved(transport, resume_config, stage):
-    from internvl.experiment import Experiment
     from internvl.retrieval import LanceDBIndex
+    from internvl.vertex_utils import VertexExperiment
 
     config = resume_config
     transport(lambda request: response())
-    experiment = Experiment(config)
+    experiment = VertexExperiment(config)
     if stage == "validation":
         experiment.build_vector_database()
     calls = 0
@@ -583,7 +591,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage):
     expected.update({(kind, f"foodx251:{split}:{i}.png"): i + 1 for i in range(13)})
     requests, _, _ = transport(lambda request: response())
     requests.clear()
-    restarted = Experiment(config)
+    restarted = VertexExperiment(config)
     if stage == "validation":
         restarted.evaluate()
         total = 13
@@ -603,35 +611,52 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage):
     assert len(index.identities()) == total
 
 
-@pytest.mark.parametrize("value", [None, 1, "true"])
-def test_invalid_cache_toggle(resume_config, value):
-    from internvl.experiment import validate_config
+@pytest.mark.parametrize("value", [None, False, 0, "", [], 1, "true", [1]])
+def test_cache_toggle_truthiness(transport, resume_config, value):
+    from internvl.retrieval import LanceDBIndex
+    from internvl.vertex_utils import VertexExperiment
 
     resume_config["cache_validation_embeddings"] = value
-    with pytest.raises(ValueError, match="boolean"):
-        validate_config(resume_config)
+    if not value:
+        resume_config["lancedb"]["validation_table"] = None
+    VertexExperiment.validate_config(resume_config)
+    transport(lambda request: response())
+    experiment = VertexExperiment(resume_config)
+    experiment.build_vector_database()
+    experiment.evaluate()
+    if value:
+        cache = LanceDBIndex(resume_config["lancedb"]["uri"],
+                             resume_config["lancedb"]["validation_table"])
+        cache.open()
+        assert len(cache.identities()) == 13
+        resume_config["lancedb"]["validation_table"] = resume_config["lancedb"]["table"]
+        with pytest.raises(ValueError, match="distinct"):
+            VertexExperiment.validate_config(resume_config)
 
 
 @pytest.mark.parametrize("name", [None, "", " ", "foodx251_ge_v2"])
 def test_invalid_validation_table(resume_config, name):
-    from internvl.experiment import validate_config
+    from internvl.vertex_utils import VertexExperiment
+
 
     resume_config["lancedb"]["validation_table"] = name
     with pytest.raises(ValueError, match="distinct"):
-        validate_config(resume_config)
+        VertexExperiment.validate_config(resume_config)
 
 
 def test_default_cache_disabled_and_local_settings_ignored(transport, resume_config):
-    from internvl.experiment import Experiment, validate_config
     from internvl.retrieval import LanceDBIndex
+    from internvl.vertex_utils import VertexExperiment
 
     resume_config.pop("cache_validation_embeddings")
     transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = VertexExperiment(resume_config)
     experiment.build_vector_database()
     experiment.evaluate()
     assert not LanceDBIndex(resume_config["lancedb"]["uri"],
                             resume_config["lancedb"]["validation_table"]).exists()
+    from internvl.experiment import Experiment, validate_config
+
     resume_config["embedding"]["model_id"] = "openai/clip-vit-base-patch32"
     resume_config["cache_validation_embeddings"] = "ignored"
     resume_config["lancedb"]["validation_table"] = None
@@ -656,10 +681,10 @@ def test_default_cache_disabled_and_local_settings_ignored(transport, resume_con
 
 
 def test_cached_report_failure_keeps_vectors(transport, resume_config):
-    from internvl.experiment import Experiment
+    from internvl.vertex_utils import VertexExperiment
 
     requests, _, _ = transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = VertexExperiment(resume_config)
     experiment.build_vector_database()
     with (
         patch("internvl.experiment._write_json", side_effect=OSError("report")),
@@ -672,13 +697,13 @@ def test_cached_report_failure_keeps_vectors(transport, resume_config):
     assert len(requests) == before
 
 
-def test_progress_and_storage_failure_resume(transport, resume_config):
-    from internvl.experiment import Experiment
+def test_progress_and_storage_failure_resume(transport, resume_config, progress_bars):
     from internvl.retrieval import LanceDBIndex
+    from internvl.vertex_utils import VertexExperiment
 
     transport(lambda request: response())
     tracker = Mock()
-    experiment = Experiment(resume_config, tracker=tracker)
+    experiment = VertexExperiment(resume_config, tracker=tracker)
     original = LanceDBIndex.append
     calls = 0
 
@@ -695,22 +720,23 @@ def test_progress_and_storage_failure_resume(transport, resume_config):
     assert not (experiment.output / "index.json").exists()
     tracker.reset_mock()
     experiment.build_vector_database()
-    progress = [call.args for call in tracker.progress.call_args_list]
-    assert progress[:2] == [("reference_embedding", 0, 16), ("reference_embedding", 1, 16)]
-    assert progress[-1] == ("reference_embedding", 16, 16)
+    tracker.progress.assert_not_called()
+    assert [(bar.desc, bar.n) for bar in progress_bars[-2:]] == [
+        ("Text references", 2), ("Image references", 13),
+    ]
     experiment.evaluate()
-    tracker.reset_mock()
+    progress_bars.clear()
     experiment.evaluate()
-    progress = [call.args for call in tracker.progress.call_args_list]
-    assert ("validation_embedding", 0, 13) in progress
-    assert ("validation_embedding", 13, 13) in progress
-    assert progress[-1] == ("evaluation", 13, 13)
+    assert [(bar.desc, bar.n) for bar in progress_bars] == [
+        ("Validation embeddings", 0), ("Evaluation", 13),
+    ]
+    tracker.progress.assert_not_called()
 
 
-def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config):
-    from internvl.experiment import Experiment
+def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config, progress_bars):
     from internvl.retrieval import LanceDBIndex
     from internvl.schemas import PointRecord
+    from internvl.vertex_utils import VertexExperiment
 
     config = resume_config
     root = Path(config["dataset"]["root"])
@@ -739,7 +765,13 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config)
         return httpx.Response(200, json={"embedding": {"values": vectors[i % 2].tolist()}})
 
     requests, _, _ = transport(handle)
-    report = Experiment(config).evaluate()
+    config["embedding"]["batch_size"] = 4
+    tracker = Mock()
+    report = VertexExperiment(config, tracker=tracker).evaluate()
+    tracker.progress.assert_not_called()
+    assert [(bar.desc, bar.n) for bar in progress_bars] == [
+        ("Validation embeddings", 6), ("Evaluation", 13),
+    ]
     assert len(requests) == 6
     assert [row["prediction"] for row in report["predictions"]] == [
         "Apple" if i % 2 == 0 else "Banana" for i in range(13)]
@@ -747,16 +779,17 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config)
     for path in root.glob("val/val_set/*.png"):
         path.unlink()
     with patch("internvl.vertex_embeddings.genai.Client", side_effect=AssertionError("client")):
-        assert Experiment(config).evaluate()["predictions"] == report["predictions"]
+        assert VertexExperiment(config).evaluate()["predictions"] == report["predictions"]
 
 
 def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config):
-    from internvl.experiment import Experiment
     from internvl.retrieval import LanceDBIndex
     from internvl.schemas import PointRecord
+    from internvl.vertex_utils import VertexExperiment
 
     transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    tracker = Mock()
+    experiment = VertexExperiment(resume_config, tracker=tracker)
     index = experiment._lancedb_adapter()
     index.create(128)
     # Counts include duplicate and unrequested stored rows; filtering is a set.
@@ -775,14 +808,15 @@ def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config
     assert summary["source_counts"] == {
         "class_name": 3, "generated_description": 2, "training_image": 13,
     }
+    tracker.progress.assert_not_called()
 
 
 def test_reference_inputs_fail_before_table_creation(transport, resume_config):
-    from internvl.experiment import Experiment
+    from internvl.vertex_utils import VertexExperiment
 
     transport(lambda request: response())
     Path(resume_config["descriptions_file"]).unlink()
-    experiment = Experiment(resume_config)
+    experiment = VertexExperiment(resume_config)
     with pytest.raises(FileNotFoundError):
         experiment.build_vector_database()
     assert not experiment._lancedb_adapter().exists()
@@ -790,11 +824,11 @@ def test_reference_inputs_fail_before_table_creation(transport, resume_config):
 
 
 def test_validation_cache_completes_before_classification(transport, resume_config):
-    from internvl.experiment import Experiment
     from internvl.retrieval import LanceDBIndex
+    from internvl.vertex_utils import VertexExperiment
 
     transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = VertexExperiment(resume_config)
     experiment.build_vector_database()
     original = LanceDBIndex.query
 
@@ -806,3 +840,78 @@ def test_validation_cache_completes_before_classification(transport, resume_conf
 
     with patch.object(LanceDBIndex, "query", query):
         experiment.evaluate()
+
+
+@pytest.mark.parametrize("stage,method", [
+    ("describe", "generate_descriptions"), ("index", "build_vector_database"),
+    ("evaluate", "evaluate"), ("run", "run"),
+])
+@pytest.mark.parametrize("model,selected", [
+    ("google/ge-v2", "VertexExperiment"), ("openai/clip-vit-base-patch32", "Experiment"),
+])
+def test_cli_selects_class_before_tracking(resume_config, stage, method, model, selected):
+    from internvl.cli import _run_experiment
+
+    resume_config["embedding"]["model_id"] = model
+    events = []
+    with (
+        patch("internvl.cli.Experiment") as local,
+        patch("internvl.cli.VertexExperiment") as vertex,
+        patch("internvl.cli.wandb.init") as init,
+        patch("internvl.cli.Tracker"),
+    ):
+        chosen, other = (vertex, local) if selected == "VertexExperiment" else (local, vertex)
+        chosen.validate_config.side_effect = lambda config: events.append("validate")
+        init.side_effect = lambda **kwargs: events.append("init") or MockContext()
+        chosen.side_effect = lambda *args, **kwargs: events.append("construct") or chosen.return_value
+        _run_experiment(resume_config, stage)
+        assert events == ["validate", "init", "construct"]
+        getattr(chosen.return_value, method).assert_called_once_with()
+        other.assert_not_called()
+        other.validate_config.assert_not_called()
+
+
+class MockContext:
+    def __enter__(self):
+        return Mock()
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_cli_rejects_invalid_vertex_cache_before_tracking(resume_config):
+    from internvl.cli import _run_experiment
+
+    resume_config["lancedb"]["validation_table"] = None
+    with patch("internvl.cli.wandb.init") as init:
+        with pytest.raises(ValueError, match="distinct"):
+            _run_experiment(resume_config, "evaluate")
+        init.assert_not_called()
+
+
+def test_inherited_run_dispatches_vertex_stages():
+    from internvl.experiment import Experiment
+    from internvl.vertex_utils import VertexExperiment
+
+    experiment = object.__new__(VertexExperiment)
+    calls = Mock()
+    assert VertexExperiment.run is Experiment.run
+    with (
+        patch.object(VertexExperiment, "generate_descriptions", calls.describe),
+        patch.object(VertexExperiment, "build_vector_database", calls.build),
+        patch.object(VertexExperiment, "evaluate", calls.evaluate),
+    ):
+        assert experiment.run() is calls.evaluate.return_value
+    assert [entry[0] for entry in calls.mock_calls] == ["describe", "build", "evaluate"]
+
+
+def test_base_import_does_not_load_vertex():
+    import subprocess
+    import sys
+
+    subprocess.run([sys.executable, "-c", """
+import sys
+import internvl.experiment
+assert 'internvl.vertex_utils' not in sys.modules
+assert 'internvl.vertex_embeddings' not in sys.modules
+"""], check=True, timeout=60)

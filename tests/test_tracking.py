@@ -8,7 +8,7 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 import test_classification
@@ -218,24 +218,9 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
     exp.tracker = Tracker(sdk)
     report = exp.run()
     history = [c.args[0] for c in sdk.log.call_args_list]
-    totals = {
-        "reference_embedding": sum(n for flag, n in zip(flags, [2, 2, 10], strict=True) if flag),
-        "evaluation": 2,
-    }
-    if flags[2]:
-        totals["descriptions"] = 10
-    for stage, total in totals.items():
-        points = [p for p in history if f"{stage}/completed" in p]
-        assert points[0][f"{stage}/completed"] == 0
-        assert points[-1][f"{stage}/completed"] == total
-        assert all(p[f"{stage}/total"] == total for p in points)
-        assert points[-1][f"{stage}/fraction"] == 1
-    if flags[2]:
-        assert [
-            p["descriptions/completed"] for p in history if "descriptions/completed" in p
-        ] == list(range(11))
-    else:
-        assert not any("descriptions/completed" in p for p in history)
+    assert len(history) == 1
+    assert "evaluation/per_class" in history[0]
+    sdk.define_metric.assert_not_called()
     assert set(sdk.summary) == {
         "reference_source_counts", "evaluation/evaluated",
         "evaluation/majority_vote_accuracy", "evaluation/nearest_neighbor_accuracy",
@@ -313,40 +298,6 @@ def test_unknown_counts_null_recall_and_saved_report_survives_logging_failure(ex
     assert table.data[-1] == ["Absent", 0, 0, None]
 
 
-def test_progress_failure_aborts_after_completed_append(experiment_case, sdk):
-    exp = experiment_case.experiment((True, True, False))
-    exp.tracker = Tracker(sdk)
-    failure = RuntimeError("progress")
-    sdk.log.side_effect = [None, failure]
-    with pytest.raises(RuntimeError) as caught:
-        exp.build_vector_database()
-    assert caught.value is failure
-    assert sdk.summary == {}
-    assert experiment_case.client.open_table(exp.config["lancedb"]["table"]).count_rows() == 2
-    assert not (exp.output / "index.json").exists()
-
-
-@pytest.mark.parametrize("total,completed", [(3, [0, 2, 3]), (0, [0])])
-def test_progress_payloads_axes_and_no_lifecycle_reporting(sdk, total, completed):
-    tracker = Tracker(sdk)
-    for count in completed:
-        tracker.progress("evaluation", count, total)
-    assert sdk.log.call_args_list == [
-        call({
-            "evaluation/completed": count,
-            "evaluation/total": total,
-            "evaluation/fraction": count / total if total else 0.0,
-        })
-        for count in completed
-    ]
-    assert sdk.define_metric.call_args_list == [
-        call("evaluation/completed"),
-        call("evaluation/*", step_metric="evaluation/completed"),
-    ]
-    assert sdk.summary == {}
-    assert vars(tracker) == {"run": sdk}
-
-
 @pytest.mark.parametrize("mode", ["disabled", "offline"])
 def test_native_sdk_smoke(tmp_path, mode):
     # Fresh process keeps native global SDK state and environment changes isolated.
@@ -356,6 +307,7 @@ from pathlib import Path
 from unittest.mock import patch
 import wandb
 import yaml
+from tqdm import tqdm
 from internvl.cli import _run_experiment
 from internvl.tracking import Tracker
 report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
@@ -365,7 +317,7 @@ report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
 path = Path("report.json")
 path.write_text(json.dumps(report))
 config = {"k": 1, "embed_images": False, "embed_class_labels": True,
-          "embed_descriptions": False}
+          "embed_descriptions": False, "embedding": {"model_id": "openai/clip-vit-base-patch32"}}
 original_configuration = Tracker.configuration
 
 def publish(tracker, config):
@@ -380,6 +332,9 @@ def publish(tracker, config):
         original_configuration(tracker, config)
 
 class Experiment:
+    from internvl.experiment import validate_config
+    validate_config = staticmethod(validate_config)
+
     def __init__(self, config, *, tracker):
         assert wandb.run is tracker.run
         assert dict(tracker.run.config) == config
@@ -393,8 +348,8 @@ class Experiment:
 
     def evaluate(self):
         tracker = self.tracker
-        tracker.progress("evaluation", 0, 1)
-        tracker.progress("evaluation", 1, 1)
+        with tqdm(total=1, desc="synthetic-evaluation") as bar:
+            bar.update(1)
         tracker.reference_counts(None)
         tracker.evaluation(report, path)
 
@@ -422,14 +377,32 @@ with patch("internvl.cli.Experiment", Experiment), patch.object(Tracker, "config
     )
     assert result.returncode == 0, result.stdout + result.stderr
     if mode == "offline":
-        assert list(tmp_path.glob("wandb/offline-run-*/*.wandb"))
+        from wandb.proto import wandb_internal_pb2
+        from wandb.sdk.internal.datastore import DataStore
+
+        files = list(tmp_path.glob("wandb/offline-run-*/*.wandb"))
+        assert files
+        output = []
+        for path in files:
+            store = DataStore()
+            store.open_for_scan(str(path))
+            try:
+                while (data := store.scan_data()) is not None:
+                    record = wandb_internal_pb2.Record()
+                    record.ParseFromString(data)
+                    if record.HasField("output_raw"):
+                        output.append(record.output_raw.line)
+            finally:
+                store.close()
+        assert "synthetic-evaluation" in "".join(output)
+        assert "1/1" in "".join(output)
         assert not list(tmp_path.rglob("requirements.txt"))
         assert not list(tmp_path.rglob("diff.patch"))
         assert not list(tmp_path.rglob("wandb-metadata.json"))
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("query failed"), KeyboardInterrupt()])
-def test_evaluation_partial_batch_only_advances_when_complete(experiment_case, sdk, failure):
+def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress_bars, failure):
     from datasets import concatenate_datasets
 
     exp = experiment_case.experiment()
@@ -438,13 +411,9 @@ def test_evaluation_partial_batch_only_advances_when_complete(experiment_case, s
     exp.dataset.splits["validation"] = concatenate_datasets([split, split.select([0])])
     exp.tracker = Tracker(sdk)
     exp.evaluate()
-    points = [
-        c.args[0]["evaluation/completed"]
-        for c in sdk.log.call_args_list
-        if "evaluation/completed" in c.args[0]
-    ]
-    assert points == [0, 2, 3]
-    sdk.log.reset_mock()
+    bar = progress_bars[-1]
+    assert (bar.desc, bar.total, bar.n, bar.updates) == ("Evaluation", 3, 3, [2, 1])
+    assert bar.disable  # Context exit closes the bar.
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
         patch("internvl.experiment.LanceDBIndex.query", side_effect=[[], failure]),
@@ -452,67 +421,41 @@ def test_evaluation_partial_batch_only_advances_when_complete(experiment_case, s
     ):
         exp.evaluate()
     assert caught.value is failure
-    points = [
-        c.args[0]["evaluation/completed"]
-        for c in sdk.log.call_args_list
-        if "evaluation/completed" in c.args[0]
-    ]
-    assert points == [0]
+    assert progress_bars[-1].n == 0
+    assert progress_bars[-1].disable
     assert list(exp.output.glob("evaluation_*/report.json")) == reports
-    assert not any(key.endswith("/state") for key in sdk.summary)
 
 
-def test_description_callback_counts_returned_requests_and_propagates_errors():
+def test_description_bar_counts_requests_and_closes_on_failure(progress_bars):
     from internvl.generate_descriptors import DescriberLLM
 
     llm = DescriberLLM.__new__(DescriberLLM)
-    callback = Mock()
     failure = RuntimeError("request failed")
     with (
-        patch.object(
-            llm, "describe_class", side_effect=[Mock(description="one"), failure]
-        ) as request,
-        pytest.raises(RuntimeError) as caught,
+        patch.object(llm, "describe_class", side_effect=[Mock(description="one"), failure]),
+        pytest.raises(RuntimeError, match="request failed"),
     ):
-        llm.generate_descriptions(["A"], 3, on_description=callback)
-    assert caught.value is failure
-    assert request.call_count == 2
-    callback.assert_called_once_with(1, 3)
-    callback.reset_mock()
-    callback.side_effect = failure
-    with (
-        patch.object(llm, "describe_class", return_value=Mock(description="one")) as request,
-        pytest.raises(RuntimeError) as caught,
-    ):
-        llm.generate_descriptions(["A"], 3, on_description=callback)
-    assert caught.value is failure
-    request.assert_called_once_with("A")
-    callback.assert_called_once_with(1, 3)
-
-
-def test_description_callback_counts_across_classes_before_validation():
-    from internvl.generate_descriptors import DescriberLLM
-
-    llm = DescriberLLM.__new__(DescriberLLM)
-    callback = Mock()
+        llm.generate_descriptions(["A"], 3)
+    assert (progress_bars[-1].total, progress_bars[-1].n) == (3, 1)
+    assert progress_bars[-1].disable
     with patch.object(llm, "describe_class", return_value=Mock(description="one")):
-        assert llm.generate_descriptions(["A", "B"], 2, on_description=callback) == {
+        assert llm.generate_descriptions(["A", "B"], 2) == {
             "A": ["one", "one"], "B": ["one", "one"],
         }
-    assert callback.call_args_list == [call(1, 4), call(2, 4), call(3, 4), call(4, 4)]
-    callback.reset_mock()
+    assert (progress_bars[-1].total, progress_bars[-1].n) == (4, 4)
     with (
         patch.object(llm, "describe_class", return_value=Mock(description=" ")),
         pytest.raises(ValueError, match="Empty generated description for A"),
     ):
-        llm.generate_descriptions(["A", "B"], 2, on_description=callback)
-    assert callback.call_args_list == [call(1, 4), call(2, 4)]
+        llm.generate_descriptions(["A", "B"], 2)
+    assert progress_bars[-1].n == 2
+    assert progress_bars[-1].disable
 
 
 @pytest.mark.parametrize("limit", [None, 1, 2, 20])
 @pytest.mark.parametrize("images_enabled", [False, True])
-def test_capped_reference_progress_matches_inserted_records(
-    experiment_case, sdk, limit, images_enabled
+def test_capped_reference_bars_match_inserted_records(
+    experiment_case, sdk, progress_bars, limit, images_enabled,
 ):
     experiment_case.interleaved_training()
     exp = experiment_case.experiment((images_enabled, True, True))
@@ -521,27 +464,21 @@ def test_capped_reference_progress_matches_inserted_records(
     exp.tracker = Tracker(sdk)
     exp.generate_descriptions()
     artifact = exp.build_vector_database()
-    points = [
-        call.args[0]
-        for call in sdk.log.call_args_list
-        if "reference_embedding/completed" in call.args[0]
-    ]
+    bars = {bar.desc: bar for bar in progress_bars}
     expected_images = {None: 5, 1: 2, 2: 4, 20: 5}[limit] if images_enabled else 0
-    expected_total = 12 + expected_images
-    assert sum(artifact["source_counts"].values()) == expected_total
-    assert all(point["reference_embedding/total"] == expected_total for point in points)
-    assert points[-1]["reference_embedding/completed"] == expected_total
-    assert points[-1]["reference_embedding/fraction"] == 1.0
-    expected_completed = [0, 3, 6, 9, 12]
-    expected_completed += [12 + n for n in range(3, expected_images, 3)]
-    if expected_images:
-        expected_completed.append(expected_total)
-    assert [p["reference_embedding/completed"] for p in points] == expected_completed
+    assert sum(artifact["source_counts"].values()) == 12 + expected_images
+    assert bars["Text references"].n == 12
+    if images_enabled:
+        assert bars["Image references"].n == expected_images
+    else:
+        assert "Image references" not in bars
+    sdk.log.assert_not_called()
+    sdk.define_metric.assert_not_called()
 
 
 @pytest.mark.parametrize("images", [False, True])
 @pytest.mark.parametrize("failure", [RuntimeError("insert failed"), KeyboardInterrupt()])
-def test_failed_reference_batch_does_not_advance(experiment_case, sdk, images, failure):
+def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_bars, images, failure):
     exp = experiment_case.experiment((images, not images, False))
     exp.batch_size = 1
     exp.tracker = Tracker(sdk)
@@ -551,32 +488,33 @@ def test_failed_reference_batch_does_not_advance(experiment_case, sdk, images, f
     ):
         exp.build_vector_database()
     assert caught.value is failure
-    assert [c.args[0]["reference_embedding/completed"] for c in sdk.log.call_args_list] == [0, 1]
+    assert progress_bars[-1].n == 1
+    assert progress_bars[-1].disable
+    sdk.log.assert_not_called()
     assert sdk.summary == {}
     assert not (exp.output / "index.json").exists()
 
 
-@pytest.mark.parametrize("source", ["backend", "logging"])
 @pytest.mark.parametrize("failure", [RuntimeError("description failed"), KeyboardInterrupt()])
-def test_description_failure_has_no_cleanup_progress(experiment_case, sdk, source, failure):
+def test_description_failure_keeps_partial_progress(experiment_case, sdk, progress_bars, failure):
     exp = experiment_case.experiment((False, False, True))
     exp.tracker = Tracker(sdk)
-    if source == "logging":
-        sdk.log.side_effect = [None, failure]
     with patch.object(experiment_case.Describer, "describe_class") as request:
         request.side_effect = [Mock(description="one"), failure]
         with pytest.raises(type(failure)) as caught:
             exp.generate_descriptions()
     assert caught.value is failure
-    assert [c.args[0]["descriptions/completed"] for c in sdk.log.call_args_list] == [0, 1]
-    assert request.call_count == (1 if source == "logging" else 2)
-    assert sdk.summary == {}
+    assert progress_bars[-1].n == 1
+    assert progress_bars[-1].disable
+    assert request.call_count == 2
+    sdk.log.assert_not_called()
     assert not (exp.output / "descriptions.json").exists()
 
 
 def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     from sentence_transformers import SentenceTransformer
     from test_embeddings import SyntheticEncoder
+
     from internvl.embeddings import EmbeddingModel
 
     exp = experiment_case.experiment((True, True, True), 'truncated-v4')

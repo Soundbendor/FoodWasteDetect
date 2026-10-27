@@ -885,3 +885,189 @@ and hardware guard tests and their loader setup. No model weights, live cloud
 requests, cloud spending, or GPU resources were used. Dependencies, lockfiles,
 READMEs, scripts, sweeps, configuration, and storage schemas were unchanged by
 this refactor.
+
+### Vertex utility extraction (October 26, 2026)
+
+`internvl.vertex_utils` now owns cache configuration, response persistence,
+reference resumption, validation-cache preparation, and cached batch reading.
+Module-level functions accept explicit inputs and callbacks without receiving an
+experiment object. `VertexExperiment(Experiment)` in this module now owns Vertex
+validation, construction, persistence, and the build/evaluation overrides. The
+base module imports neither Vertex module and retains shared text preparation,
+capped training validation, insertion loops, progress, classification, reports,
+and one lazy encoder cache. Direct callers explicitly select the class; the CLI
+selects once and validates through that class before starting W&B. Cached and uncached evaluation yield metadata batches
+and vectors; prediction-row construction remains in the experiment.
+
+Reference preparation scans identities once, retains an immutable membership
+snapshot, and counts all stored rows, including duplicates and unrequested records.
+Training caps precede exclusion and decoding. Validation-cache preparation receives
+lazy dimension lookup and shared insertion/progress callbacks. A complete cache
+needs neither images nor an embedder. Transport retries, cancellation, and draining
+remain unchanged in `VertexEmbeddingModel`.
+
+Cache toggles follow Python truthiness. Omitted and falsey values disable caching;
+truthy values require a nonempty validation-table name distinct from the reference
+table. Tests exercise nonboolean values through configuration and full evaluation.
+READMEs, public stage methods, YAML keys, schemas, and report formats are unchanged.
+
+Verification used Pixi 0.83.0 with the unchanged lockfile and both CPU dependency
+environments. GPU visibility and Hugging Face downloads were disabled. Vertex
+requests used mocked transports and storage used temporary real LanceDB tables.
+The sandboxed focused run stalled at LanceDB and was interrupted; completed suites
+ran outside the sandbox. No live Vertex requests, model weights, or services were
+used.
+
+Commands used `pixi run --manifest-path src/internvl/pyproject.toml --locked -e ENV
+python -m pytest -c src/internvl/pyproject.toml --tb=short -q`, with
+`CUDA_VISIBLE_DEVICES='' HF_HUB_OFFLINE=1`. The focused run additionally selected
+`tests/test_vertex_embeddings.py tests/test_classification.py
+tests/test_retrieval.py tests/test_tracking.py`.
+
+- Focused modern suite: **201 passed; 111 subtests passed**.
+- Full modern suite: **293 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- Full Jina CPU suite: **293 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- `vertex_utils.py` and the unchanged Vertex transport each have **100% statement
+  coverage**; package coverage is **95%**.
+- Ruff on the package and Vertex tests, scoped ty in both environments, and
+  `git diff --check` passed.
+
+All full-suite failures remain in unchanged `tests/test_embeddings.py`: missing
+`_check_dependency_family`/`version` and loader setup for the previously removed
+dependency and V4 hardware guards. No refactor regressions were observed.
+
+### Explicit VertexExperiment subclass (October 26, 2026)
+
+`VertexExperiment` now overrides build and evaluation orchestration in
+`vertex_utils.py`. It also supplies cache validation, encoder construction, and
+per-response batch persistence. `Experiment` exposes shared preparation,
+insertion, summary publication, and evaluation execution methods. Its lazy cache
+uses a private structural encoder protocol. The inherited `run()` dispatches to
+the subclass overrides. Local encoder options are selected explicitly and local
+batch persistence remains unchanged.
+
+CLI selection happens once from `embedding.model_id`; class validation precedes
+W&B initialization and construction remains inside the native context. Direct
+Python callers must select `VertexExperiment(config)` for Vertex. Importing the
+base module loads neither Vertex module. Tests now exercise this import boundary,
+both CLI classes across all four stages, validation before tracking, inherited
+stage dispatch, and the existing persistence, restart, cache, and progress cases.
+
+The focused modern CPU suite passed **212 tests and 111 subtests**; the separate
+CLI suite passed **25 tests and 71 subtests**. Checks use synthetic inputs, mocked
+Vertex transports, temporary LanceDB tables, disabled GPUs, and offline Hugging
+Face loading. Sandboxed LanceDB runs stalled and were interrupted; completed
+LanceDB suites ran outside the sandbox. No live requests or model downloads were
+used. READMEs, dependencies, lockfile, transport behavior, YAML keys, table schemas,
+and report formats were not changed by this subclass refactor.
+
+Final full-suite verification uses the same locked Pixi commands documented above:
+
+- Modern CPU: **304 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- Jina CPU: **304 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- Ruff on the package and changed tests, scoped ty in both environments, and
+  `git diff --check` passed.
+
+The remaining failures are confined to unchanged `tests/test_embeddings.py`:
+missing `_check_dependency_family`/`version` and loader setup for the previously
+removed dependency and V4 hardware guards. The refactor does not restore those
+guards. Vertex utilities and transport retain **100% statement coverage**; overall
+package coverage is **95%**.
+
+### Shared Embedder abstract base (October 26, 2026)
+
+`internvl.embedder.Embedder` replaces the private experiment protocol. Both concrete
+encoders inherit its abstract text/image methods and ordinary typed `dimension`
+attribute. The interface has no constructor or backend imports. `ImageInput` is
+defined there and explicitly re-exported from `embeddings.py`. The lazy experiment
+cache and Vertex persistence callbacks and concrete casts remain unchanged.
+READMEs, dependencies, configuration, and transport behavior are unchanged.
+
+Verification used synthetic encoders, mocked Vertex transports, temporary LanceDB
+databases, `CUDA_VISIBLE_DEVICES=''`, and `HF_HUB_OFFLINE=1`. Pixi's editable-package
+cache required execution outside the sandbox; completed CPU suites also ran outside
+the sandbox. No live cloud calls, model downloads, or GPU checks were performed.
+
+- Focused interface, classification, and Vertex tests: **147 passed, 74 subtests passed**.
+- Locked modern CPU suite: **312 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- Locked Jina CPU suite: **312 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- Ruff on the package and new interface tests, scoped ty in both CPU environments
+  (now including `embedder.py`), and `git diff --check` passed.
+
+The full suites used `pixi run --manifest-path src/internvl/pyproject.toml --locked
+-e ENV python -m pytest -c src/internvl/pyproject.toml --tb=short -q`. All failures
+remain in the existing embedding-guard tests listed above, concerning removed
+dependency/hardware guards and their loader setup. The new tests cover abstract
+instantiation rejection, incomplete subclasses, concrete implementations, the
+image-input re-export, and interface import isolation. Existing lazy reuse,
+dimension, image-input, callback persistence, restart, and complete-cache tests
+remain in place and passed.
+
+### Caller-owned progress counts (October 26, 2026)
+
+`_progress_callback` now returns a stateless `functools.partial` that forwards
+cumulative completed counts to the tracker, or None when tracking is disabled.
+Insertion loops use their existing source counters plus `initial_completed`.
+Reference orchestration carries that offset from text into images; Vertex uses
+selected reused identities rather than all stored source rows. Validation-cache
+preparation passes its reused count into image insertion. Initial zero/reused
+reports, successful-batch reporting, failure propagation, and per-response Vertex
+persistence remain unchanged. No README, configuration, or dependency changes were
+made for this refactor.
+
+Synthetic verification used offline model loading, mocked Vertex transports, and
+temporary LanceDB databases. CPU suites ran outside the sandbox; no live cloud
+requests, model downloads, or GPU checks were performed.
+
+- Focused tracking, classification, and Vertex tests: **203 passed, 74 subtests passed**.
+- Locked modern CPU suite: **315 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- Locked Jina CPU suite: **315 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- Ruff on the package and changed tests, scoped ty in both CPU environments, and
+  `git diff --check` passed.
+
+Full suites used the locked Pixi commands above with `CUDA_VISIBLE_DEVICES=''`
+and `HF_HUB_OFFLINE=1`, plus separate temporary coverage files. All failures remain
+in the existing embedding dependency/hardware guard tests. New checks verify
+stateless forwarding and disabled tracking; expanded integration assertions cover
+resumed text-to-image counts, partial validation caches, final partial batches,
+and duplicate/unrequested stored rows. Existing cache, interruption, insertion
+failure, and logging failure tests passed.
+
+### Loop-owned tqdm progress (October 26, 2026)
+
+Progress reporting now uses context-managed tqdm bars in description generation,
+text insertion, image insertion, and evaluation. W&B retains configuration,
+source-count summaries, final metrics/tables, and report artifacts; intermediate
+progress metrics and their callbacks, counters, offsets, and custom axes are removed.
+Vertex's per-response persistence callbacks are unchanged. Reference/cache
+preparation no longer computes totals or reused counts just for reporting.
+
+Bars count returned description requests or records/images in successful batches,
+including final partial batches. Resumed insertion shows newly processed work only.
+Image insertion uses a running count without a total, keeping decoding streaming
+and avoiding an extra metadata scan. Other bars have locally known totals. Bars
+refresh at a five-second minimum interval, remain enabled without a TTY, and close
+on exceptions and interrupts. Previously saved records are excluded before decoding
+as before. Complete caches still avoid constructing an encoder or making requests.
+
+Verification used synthetic encoders, mocked Vertex transports, temporary LanceDB
+databases, disabled GPUs, and offline Hugging Face loading. Tests ran outside the
+sandbox for LanceDB and the local W&B service. No model downloads or live cloud
+requests were used. The existing offline SDK test now checks saved `output_raw`
+records for a completed tqdm bar. This verifies native console capture locally;
+hosted W&B Logs-tab rendering remains untested.
+
+- Focused tracking, classification, Vertex, and descriptor lifecycle suite:
+  **215 passed, 1 skipped; 95 subtests passed**.
+- Full locked modern CPU suite: **306 passed, 2 skipped, 10 failed; 339 subtests passed**.
+- Full locked Jina CPU suite: **306 passed, 3 skipped, 9 failed; 339 subtests passed**.
+- Ruff on the package and changed tests, scoped ty in both CPU environments, and
+  `git diff --check` passed.
+
+Full suites used the locked Pixi commands above with `CUDA_VISIBLE_DEVICES=''`,
+`HF_HUB_OFFLINE=1`, and separate temporary coverage files. All failures remain in
+the existing embedding dependency/hardware guard tests. Retired progress-metric
+tests were replaced by real tqdm counter/closure checks, batch failure and
+interruption checks, pending-work counts for restarted and cached Vertex runs,
+and assertions that W&B receives only final reporting. READMEs, dependencies,
+configuration, model behavior, persistence, and report formats were unchanged.

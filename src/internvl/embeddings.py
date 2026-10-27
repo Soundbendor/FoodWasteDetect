@@ -2,13 +2,16 @@
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
 from PIL import Image
 from sentence_transformers import SentenceTransformer
+
+from .embedder import Embedder
+from .embedder import ImageInput as ImageInput
 
 # Keep model-specific behavior here; batching remains owned by Sentence Transformers.
 _MODEL_SPECS = {
@@ -49,7 +52,6 @@ _MODEL_SPECS = {
         },
     },
 }
-ImageInput = str | Path | Image.Image
 
 
 def _load_backend(model_id: str, device: str) -> SentenceTransformer:
@@ -87,7 +89,7 @@ def _prepare_rgb_image(image: ImageInput) -> Image.Image:
     return image.convert("RGB")
 
 
-class EmbeddingModel:
+class EmbeddingModel(Embedder):
     """Batch text and images into optionally truncated model vectors."""
 
     def __init__(
@@ -103,7 +105,7 @@ class EmbeddingModel:
             raise ValueError(
                 f"Unsupported model {model_id!r}. Supported models: {list(_MODEL_SPECS)}"
             )
-        native_dimension = _MODEL_SPECS[model_id]["dimension"]
+        native_dimension = cast(int, _MODEL_SPECS[model_id]["dimension"])
         if truncate_dim is not None and (
             isinstance(truncate_dim, bool)
             or not isinstance(truncate_dim, int)
