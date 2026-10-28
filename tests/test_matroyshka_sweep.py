@@ -48,6 +48,7 @@ def sources(tmp_path, monkeypatch, request):
         n_imgs_per_class=1, cache_validation_embeddings=False,
         embedding=dict(model_id=model_id, batch_size=1, truncate_dim=None),
         lancedb=dict(uri=str(uri), table='reference', validation_table='validation'),
+        dimension_sweep=dict(source_dim=source_dim, dimensions=[768, 1536, source_dim]),
     )
     if model_id != 'google/ge-v2':
         config['dimension_sweep'] = dict(source_dim=source_dim, dimensions=[256, 512, 1024, 2048, source_dim])
@@ -96,7 +97,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
     assert config == original and path.read_bytes() == before
     summary_path, = Path(config['output_dir']).glob('matroyshka_sweep_*/summary.json')
     summary = json.loads(summary_path.read_text())['results']
-    source_dim, dimensions = sweep.sweep_settings(config)
+    source_dim, dimensions = sweep.get_sweep_settings(config)
     assert len(summary) == len(runs) == len(dimensions)
     for dimension, result, (run, kwargs) in zip(dimensions, summary, runs, strict=True):
         effective = kwargs['config']
@@ -132,7 +133,10 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         for prediction in report['predictions']:
             assert prediction['prediction'] == winner
             assert prediction['neighbors'][0]['score'] == pytest.approx(float(max(scores)), abs=1e-6)
-        for source, destination in zip(('reference', 'validation'), sweep.table_names(config, dimension), strict=True):
+        for source, destination in zip(
+            ('reference', 'validation'),
+            sweep.table_names(config, dimension, source_dim=source_dim), strict=True,
+        ):
             table = connection.open_table(destination)
             assert table.schema.field('vector').type == pa.list_(pa.float32(), dimension)
             rows = table.to_arrow().to_pylist()
@@ -298,7 +302,7 @@ def test_uncached_sweep_encodes_each_dimension(
     # The table name is the sweep toggle, regardless of the ordinary Vertex flag.
     config['cache_validation_embeddings'] = True
     config['embedding']['batch_size'] = 2
-    source_dim, _ = sweep.sweep_settings(config)
+    source_dim, _ = sweep.get_sweep_settings(config)
     config['dimension_sweep'] = dict(source_dim=source_dim, dimensions=[source_dim, 256, 1024])
     original = deepcopy(config)
     dataset = Mock()
@@ -389,14 +393,14 @@ def test_missing_source_fails_before_inference_or_tracking(sources, runs, table)
 
 
 @pytest.mark.parametrize('options', [
-    None, [], {}, {'source_dim': 4096}, {'dimensions': [256]},
+    None, [],
     *[{'source_dim': d, 'dimensions': [256]} for d in (None, True, False, 0, -1, 4096.0, '4096')],
     *[{'source_dim': 4096, 'dimensions': ds} for ds in (
         None, [], [True], [False], [0], [-1], [4097], [256, 256], [256.0], ['256'],
         [[256]], {'dimension': 256}, '256', (256,),
     )],
 ])
-def test_invalid_sweep_settings_fail_before_tracking(sources, runs, options):
+def test_invalid_get_sweep_settings_fail_before_tracking(sources, runs, options):
     config, _, _, _ = sources
     config['embedding']['model_id'] = 'Qwen/Qwen3-VL-Embedding-8B'
     config['dimension_sweep'] = options
@@ -405,10 +409,16 @@ def test_invalid_sweep_settings_fail_before_tracking(sources, runs, options):
     assert runs == []
 
 
-def test_non_gemini_requires_explicit_sweep_settings(sources, runs):
+@pytest.mark.parametrize('model_id', ['google/ge-v2', 'Qwen/Qwen3-VL-Embedding-8B'])
+@pytest.mark.parametrize('missing', ['dimension_sweep', 'source_dim', 'dimensions'])
+def test_sweep_requires_explicit_settings(sources, runs, model_id, missing):
     config, _, _, _ = sources
-    config['embedding']['model_id'] = 'Qwen/Qwen3-VL-Embedding-8B'
-    with pytest.raises(ValueError, match='source_dim'):
+    config['embedding']['model_id'] = model_id
+    if missing == 'dimension_sweep':
+        del config[missing]
+    else:
+        del config['dimension_sweep'][missing]
+    with pytest.raises(KeyError, match=missing):
         cli._run_experiment(config, 'matroyshka-sweep')
     assert runs == []
 
@@ -434,6 +444,5 @@ def test_shipped_configs_accept_sweep_overrides(filename):
         'dimension_sweep.dimensions=[256,512]', 'dimension_sweep.dimensions=[4096,1024,256]',
         'lancedb.validation_table=null',
     ])
-    sweep.validate_config(config)
-    assert sweep.sweep_settings(config) == (4096, [4096, 1024, 256])
+    assert sweep.validate_config(config) == (4096, [4096, 1024, 256])
     assert config['lancedb']['validation_table'] is None

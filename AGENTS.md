@@ -832,10 +832,13 @@ separate parser or experiment subclass. It supports the configured local or Vert
 embedding model. `dimension_sweep.source_dim` declares the dimension of the prebuilt reference
 table and any supplied validation table. `dimension_sweep.dimensions` is an ordered nonempty
 list of unique positive integers no larger than `source_dim`; booleans are rejected.
-The source dimension must also be a positive integer, excluding booleans. Gemini
-defaults to source dimension 3072 and targets `[768, 1536, 3072]` when these settings
-are omitted. Other models require explicit settings. Shipped local YAML files have
-null placeholders for strict overrides; Gemini YAML retains its defaults.
+The source dimension must also be a positive integer, excluding booleans. All
+models require explicit source and target dimensions; missing keys raise `KeyError`.
+Shipped local YAML files have null placeholders for strict overrides; Gemini YAML
+explicitly sets source dimension 3072 and targets `[768, 1536, 3072]`.
+Sweep validation returns the resolved source and target dimensions for execution
+to reuse. Table naming receives the resolved source dimension explicitly and does
+not parse or validate sweep settings again.
 
 `lancedb.validation_table` alone selects the sweep evaluation path. A nonempty
 name requires an existing cache: missing tables or vectors fail without inference,
