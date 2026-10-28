@@ -1176,3 +1176,133 @@ Verification results:
   were interrupted; completed suites ran outside the sandbox. No new dependencies,
   model downloads, live services, or GPU work were used. Unrelated embedding-guard
   suites were outside this focused verification.
+
+## Configurable food datasets (October 27, 2026)
+
+Implemented in the `FoodWasteDetect-food-datasets` worktree on
+`feature/food-classification-datasets`, based on
+`a143af56f9f5857dc00ebd712e4a16ae10375b48`. All editable environments, checks,
+and build artifacts belong to this worktree or temporary directories.
+
+The whole-image runner now selects a local `FoodImageDataset` adapter using
+`dataset.name` and `dataset.root`. This does not change the separate YOLO/CLIP
+pipeline. Each experiment must use its own dataset taxonomy, descriptions,
+reference table, optional Vertex validation cache, and output directory.
+No compatibility checks or automatic artifact naming were added.
+
+| Name | Paths beneath root | References / evaluation |
+| --- | --- | --- |
+| `foodx251` | `annot/class_list.txt`, `annot/{train,val}_info.csv`, `{train,val}/{train,val}_set/` | Official training / labeled validation, `source_split=val` |
+| `food101` | `meta/{train,test}.json`, `images/<raw-class>/<id>.jpg` | Official training / official test, `source_split=test` |
+| `mm_food100k` | `MM-Food-100K.csv`, `images/<URL-basename>` | Derived dish-name training / holdout, `source_split=holdout` |
+| `isia_food500` | `metadata_ISIAFood_500/{ISIAFood500_classLabel.txt,train_finetune.txt,test_finetune.txt}`, `ISIA_Food500/images/<class>/<file>` | Official finetune training / official test, `source_split=test`; validation unused |
+| `food2k` | Same relative layout as FoodX251, supplied locally | Supplied training / labeled validation, `source_split=val` |
+
+Food2K's layout is an agreed assumption, not a publisher-format claim.
+Food-101's JSON lists contain extensionless paths; sorted raw class names define
+IDs while annotation order controls rows. Its layout and official test protocol
+follow the [publisher](https://data.vision.ee.ethz.ch/cvl/datasets_extra/food-101/)
+and [torchvision loader](https://raw.githubusercontent.com/pytorch/vision/main/torchvision/datasets/food101.py).
+The [MM-Food release](https://huggingface.co/datasets/Humanbased-AI/MM-Food-100K)
+provides URLs and dish names in one published split. ISIA archive names were
+rechecked against the [publisher directory](http://123.57.42.89/Dataset_ict/ISIA_Food500_Dir/dataset/).
+No real images, archive volumes, or CSV datasets were downloaded for verification.
+
+MM labels use Unicode NFKC, collapsed whitespace, and case folding; semantically
+similar names remain separate. URLs are sorted within each normalized label, then
+shuffled using `random.Random(f"{split_seed}:{label}")`. With defaults
+`holdout_fraction: 0.2` and `split_seed: 42`, each nonsingleton class contributes
+min(n-1, max(1, floor(n * fraction))) holdout images. Singletons remain training-only.
+Both partitions retain CSV order, and split membership is independent of batch
+size and reference caps. There are no saved split manifests or image hashes.
+Changing metadata or split settings requires fresh reference/cache tables and
+outputs. This is a derived holdout protocol, not official MM-Food test accuracy.
+
+Constructors read only local metadata, retaining the existing logical
+`splits['train']` / `splits['validation']` API. `val` remains an evaluation alias;
+saved predictions carry the actual `source_split`. `decode=False` batches omit
+the image column. Caps apply before saved-identity exclusions and decoding.
+New shared-directory adapters reject resolved-path overlap between partitions;
+FoodX251's prior behavior and namespaces remain intact. Missing or invalid image
+data fails when decoded, without downloads or repair.
+
+Preparation is explicit, for example (run only when the real download is wanted):
+
+```bash
+pixi install --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu internvl dataset download --config_file cfg/classification_food101.yml
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu internvl dataset download --config_file cfg/classification_mm_food100k.yml --set dataset.split_seed=42
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu internvl dataset download --config_file cfg/classification_isia_food500.yml
+```
+
+The equivalent installed command is
+`python -m internvl dataset download --config_file CONFIG.yml`. It merges the
+same strict ordered `--set` overrides as experiment commands, validates dataset
+options, and dispatches without experiment/model construction, W&B, or services.
+FoodX251 and Food2K explain local provisioning instead of fetching anything.
+
+Food-101 strips its enclosing `food-101/` archive directory. ISIA retains both
+publisher directory trees and extracts all ten `.z01`–`.z10` volumes plus the
+final `.zip` with packaged `7zz`. Native `7zip` 26.05 is the only added locked
+package; Python/model dependency pins are unchanged. MM downloads images with
+four workers, retaining URL filenames and formats. Worker failures cancel queued
+work and drain running requests before propagating.
+
+Preparation assumes one writer per dataset root. Complete data skips network
+access after checking annotated-file presence. Transfers stream to `.part` and
+rename only on success; reruns restart incomplete files and retain completed
+downloads. Archive downloads stay in `.downloads/`; MM's CSV and images stay at
+their final paths. Finite HTTP timeouts and extraction errors propagate. Archives
+are checked for escaping paths and links, extracted in temporary staging beneath
+the root, and checked for annotated images before publishing missing files.
+Publication is not an atomic transaction across the whole tree; reruns reuse
+already-published files. No image decoding, hashes, or content-validity checks
+are performed during preparation.
+
+Each new `cfg/classification_<dataset>.yml` is complete, keeps current CLIP v2
+and description-reference defaults, and sets `descriptions_file: null` plus a
+separate table/output directory. Both MM options are declared for strict overrides.
+After local provisioning, use the existing `experiment describe/index/evaluate/run`
+stages with the selected YAML. Food-101 and ISIA evaluations use their official
+test partitions; avoid using those results for validation-time tuning.
+
+Verification uses tiny generated images and representative annotations, mocked
+HTTP/model/Vertex backends, temporary real LanceDB tables, and one 150 KB synthetic
+multipart ZIP built with Info-ZIP and extracted by the packaged `7zz`. It covers
+FoodX compatibility, all adapters' batching/caps/exclusions, class/path/identity
+validation, Unicode, MM normalization/singletons/split determinism, missing and
+corrupt images, preparation reruns and failures, containment, local indexing,
+Vertex exclusions/cache reuse, and CLI dispatch/overrides without W&B.
+
+Commands run from the new worktree:
+
+```bash
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e default test --no-cov -q --tb=no
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu test --no-cov -q --tb=no
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e default ruff check src/internvl tests/test_food_datasets.py tests/test_dataset_download.py
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e default typecheck
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu typecheck
+pixi run --manifest-path src/internvl/pyproject.toml --locked -e default build
+```
+
+Final verification results:
+
+- Modern CPU: **418 passed, 10 failed, 2 skipped**, plus 339 passing subtests.
+- Jina CPU: **418 passed, 9 failed, 3 skipped**, plus 339 passing subtests.
+- All failures are the existing `tests/test_embeddings.py` guard/loading tests
+  referencing absent `_check_dependency_family` or `version`; the guide already
+  defers restoring those guards. Both that test file and `embeddings.py` are
+  unchanged from the base commit. The modern-only EmbeddingGemma architecture
+  check accounts for the failure/skip difference. No dataset tests failed.
+- Targeted preparation/adapter/classification/sweep verification passed 141 tests
+  and 74 subtests before the final additional edge cases, which passed in the
+  complete suites above. The real synthetic multipart ZIP test passed.
+- Package/new-test Ruff, scoped ty in both CPU environments, CLI help, sdist and
+  wheel build, and `git diff --check` passed. Build outputs remain under
+  `src/internvl/dist/` in this worktree.
+- The original checkout remained clean on `vlm-refactor` at the base commit.
+  The new branch/worktree are retained for review.
+
+The `test` task hides GPUs and sets `HF_HUB_OFFLINE=1`. No real model/dataset
+downloads, live cloud calls, Ollama startup, GPU, HPC, or shared research storage
+acceptance is implied. READMEs remain unchanged.

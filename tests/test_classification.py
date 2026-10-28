@@ -99,7 +99,7 @@ class Contracts(unittest.TestCase):
     def test_output_cannot_be_inside_raw_data(self):
         with tempfile.TemporaryDirectory() as directory:
             cfg = dict(k=1, embed_images=True, embed_class_labels=False, embed_descriptions=False,
-                       dataset={'root': directory}, output_dir=str(Path(directory) / 'derived'))
+                       dataset={'name': 'foodx251', 'root': directory}, output_dir=str(Path(directory) / 'derived'))
             with self.assertRaisesRegex(ValueError, 'separate from raw data'):
                 Experiment(cfg)
             self.assertFalse((Path(directory) / 'derived').exists())
@@ -231,7 +231,7 @@ class ExperimentTests(unittest.TestCase):
     def test_constructor_loads_metadata_but_defers_backends(self):
         with patch.object(self.dataset, 'get_class_list', wraps=self.dataset.get_class_list) as classes:
             exp = self.experiment()
-            self.dataset_constructor.assert_called_once_with({})
+            self.dataset_constructor.assert_called_once_with(exp.config['dataset'])
             classes.assert_called_once()
             self.assertFalse(exp.output.exists())
             self.assertIsNone(exp.generate_descriptions())
@@ -500,7 +500,7 @@ class ExperimentTests(unittest.TestCase):
     def experiment(self, flags=(False, True, False), name='run'):
         cfg = dict(zip(('embed_images','embed_class_labels','embed_descriptions'), flags))
         cfg.update(output_dir=str(self.root / name), embedding={'batch_size': 2},
-                   dataset={}, ollama={'llm':'fake'}, lancedb={'table': 'fixture_' + ''.join(c if c.isalnum() else '_' for c in name), 'uri': str(self.db_path)}, k=10,
+                   dataset={'name': 'foodx251', 'root': str(self.root / 'raw')}, ollama={'llm':'fake'}, lancedb={'table': 'fixture_' + ''.join(c if c.isalnum() else '_' for c in name), 'uri': str(self.db_path)}, k=10,
                    description_count=5)
         return Experiment(cfg)
 

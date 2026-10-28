@@ -17,7 +17,7 @@ from tqdm import tqdm
 from .embedder import Embedder
 from .embeddings import EmbeddingModel
 from .generate_descriptors import DescriberLLM
-from .image_dataset import load_dataset
+from .image_dataset import load_dataset, validate_dataset_config
 from .retrieval import LanceDBIndex, classify, metrics, ranking_metrics
 from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 from .tracking import Tracker
@@ -51,6 +51,8 @@ def validate_config(config: dict) -> dict:
     limit = config.get("n_imgs_per_class")
     if limit is not None and (type(limit) is not int or limit <= 0):
         raise ValueError("n_imgs_per_class must be null or a positive integer")
+    if "dataset" in config:
+        validate_dataset_config(config["dataset"])
     # Reject output paths equal to or nested inside the resolved raw dataset directory.
     raw = config.get("dataset", {}).get("root")
     if raw:

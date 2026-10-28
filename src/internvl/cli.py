@@ -9,6 +9,7 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
+from .dataset_download import prepare_dataset
 from .experiment import Experiment
 from .matroyshka_sweep import evaluate_cached, run_sweep
 from .tracking import Tracker
@@ -63,8 +64,24 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("describe", "index", "evaluate", "run", "matroyshka-sweep"),
         help="Run a specific stage of the food image classification experiment.",
     )
-    experiment.add_argument("--config_file", required=True, help="Path to experiment config YAML")
-    experiment.add_argument(
+    _config_arguments(experiment)
+    dataset = commands.add_parser(
+        "dataset", help="Explicitly prepare local dataset files.", allow_abbrev=False,
+    )
+    dataset.add_argument("stage", choices=("download",))
+    _config_arguments(dataset)
+    download = commands.add_parser(
+        "download_model",
+        help="Download weights for an Ollama model.",
+        allow_abbrev=False,
+    )
+    download.add_argument("model_name", help="Ollama model name to download")
+    return parser
+
+
+def _config_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--config_file", required=True, help="Path to experiment config YAML")
+    parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -73,13 +90,6 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH=VALUE",
         help="Override an existing config path; repeat as needed (e.g. --set embedding.batch_size=16). Values use YAML syntax.",
     )
-    download = commands.add_parser(
-        "download_model",
-        help="Download weights for an Ollama model.",
-        allow_abbrev=False,
-    )
-    download.add_argument("model_name", help="Ollama model name to download")
-    return parser
 
 
 def _run_experiment(config: dict[str, Any], stage: str) -> None:
@@ -124,14 +134,17 @@ def _tracked_run(
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Parse Ollama download or whole-image experiment commands and dispatch them."""
+    """Dispatch dataset preparation, Ollama downloads, or whole-image experiments."""
     parser = _build_parser()
     args = parser.parse_args(argv)
-    if args.command == "experiment":
+    if args.command in {"experiment", "dataset"}:
         try:
             config = _load_config(args.config_file, args.overrides)
         except argparse.ArgumentTypeError as error:
             parser.error(str(error))
-        _run_experiment(config, args.stage)
+        if args.command == "dataset":
+            prepare_dataset(config["dataset"])
+        else:
+            _run_experiment(config, args.stage)
     elif args.command == "download_model":
         download_model(args.model_name)

@@ -1,0 +1,29 @@
+# Dish-name holdout; singleton classes remain training-only.
+dataset:
+  name: mm_food100k
+  root: data/MM-Food-100K
+  holdout_fraction: 0.2
+  split_seed: 42
+embed_images: false
+n_imgs_per_class: null
+embed_class_labels: false
+embed_descriptions: true
+# Generate/reuse descriptions for this dataset's own taxonomy.
+descriptions_file: null
+embedding:
+  model_id: jinaai/jina-clip-v2
+  device: cpu
+  batch_size: 32
+  truncate_dim: null
+ollama:
+  llm: gemma3:27b
+  binary_path: ollama
+  host: http://127.0.0.1:11434
+  startup_timeout: 120
+  request_timeout: 600
+lancedb:
+  uri: assets/lancedb
+  table: mm_food100k_whole_image
+k: 10
+description_count: 5
+output_dir: assets/classification/mm_food100k

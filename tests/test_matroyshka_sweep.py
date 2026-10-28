@@ -40,7 +40,7 @@ def sources(tmp_path, monkeypatch):
             for i, (identity, vector, label) in enumerate(zip(identities, values, ['A', 'B'], strict=True))
         ])
     config = dict(
-        dataset={}, output_dir=str(tmp_path / 'output'), k=1,
+        dataset={'name': 'foodx251', 'root': str(tmp_path / 'raw')}, output_dir=str(tmp_path / 'output'), k=1,
         embed_images=True, embed_class_labels=False, embed_descriptions=False,
         n_imgs_per_class=1, cache_validation_embeddings=False,
         embedding=dict(model_id='google/ge-v2', batch_size=1, truncate_dim=None),

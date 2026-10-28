@@ -74,6 +74,68 @@ instance segmentation when they contain only boxes and class predictions.
 
 ## Configurable whole-image classification (current)
 
+### Dataset selection and explicit preparation
+
+The whole-image runner supports `foodx251`, `food101`, `mm_food100k`,
+`isia_food500`, and `food2k` through `dataset.name` and `dataset.root`.
+`FoodImageDataset` is the abstract base in `internvl.image_dataset`; adapters
+implement `_load_metadata()`. Shared batching preserves annotation order, the
+final partial batch, cap-before-exclusion-before-decoding, and caller ownership
+of decoded images. The logical slots remain `train` and `validation`; `val`
+still selects evaluation. Row `source_split` identifies the native partition:
+FoodX251/Food2K `val`, Food-101/ISIA `test`, or MM-Food `holdout`.
+All rows retain `fname`, `class`, dataset-prefixed `source_id`, `source_split`,
+and undecoded HF `image`. FoodX251 labels, paths, IDs, and local-only construction
+remain compatible. Missing images fail on decoding; constructors do not repair them.
+
+Food-101 reads `meta/train.json` and `meta/test.json` under its root, with images
+at `images/<class>/<id>.jpg`. Class IDs follow sorted raw names; labels use the
+FoodX capitalization/underscore convention. ISIA reads
+`metadata_ISIAFood_500/ISIAFood500_classLabel.txt` (`name<TAB>id`) and labeled
+`train_finetune.txt`/`test_finetune.txt` (rightmost whitespace separates ID).
+Images live under `ISIA_Food500/images`; official validation is unused.
+Unicode paths are preserved. Food2K uses user-provided `annot/class_list.txt`,
+`annot/train_info.csv`, `annot/val_info.csv`, `train/train_set/`, and `val/val_set/`.
+This Food2K layout is an agreed input contract, not a verified publisher format.
+
+MM-Food reads `MM-Food-100K.csv` and `images/<URL-basename>`. Dish labels undergo
+Unicode NFKC, whitespace collapse, and case folding without semantic merging.
+`holdout_fraction` defaults to 0.2 and `split_seed` to 42. Within each label,
+sort URLs then shuffle with `random.Random(f"{split_seed}:{label}")`. Classes of
+size n >= 2 contribute min(n-1, max(1, floor(n * fraction))) holdout images;
+singletons stay in training. Both partitions retain CSV order. Splits depend
+only on metadata/options, never batching or caps, and no manifests are written.
+Reject empty labels, duplicate identities, ambiguous URL basenames, unknown
+class IDs, escaped paths, and metadata overlap for shared-image-directory
+adapters. No image-content comparisons or hashes are added.
+
+Dataset option validation performs no filesystem/network access and runs before
+W&B initialization. `python -m internvl dataset download --config_file CONFIG.yml`
+uses the same ordered strict `--set PATH=VALUE` overrides, then calls
+`internvl.dataset_download.prepare_dataset` directly. It never constructs an
+experiment, initializes W&B, loads models, or starts services. Food-101 uses the
+publisher tarball; MM uses the publisher CSV and four image-download workers;
+ISIA uses all ten `.z01`–`.z10` volumes, the final ZIP, metadata ZIP, and Pixi's
+native `7zz`. FoodX251/Food2K return actionable local-provisioning errors.
+Preparation supports one writer per root, retains completed downloads under
+`.downloads` (MM images/CSV remain in place), restarts `.part` files, checks
+annotated-file presence without decoding, and skips complete local data.
+Archive paths and links are checked before extraction; extraction is staged,
+validated, then missing destination files are published. A publication failure
+may leave some completed files; rerunning reuses them. Constructors/evaluation
+never download or repair. Real dataset downloads remain separately authorized.
+
+Each new `cfg/classification_<dataset>.yml` preserves the CLIP v2/reference
+defaults and has its own table/output path with `descriptions_file: null`.
+Keep taxonomies, descriptions, reference tables, and outputs separate across
+datasets. MM's example declares both split options for strict CLI overrides.
+Changing its split requires new references/caches/outputs; no artifact validation
+or automatic naming is added. The FoodX-specific descriptions below retain
+their scope; other datasets use the native evaluation protocols above.
+See `docs/experiments.md` for preparation commands and verification limits.
+
+### Runner behavior
+
 The separately authorized `internvl.experiment` runner supersedes the old BGE
 text-retrieval/training commands. `workflows.py` and its legacy workflows have
 been deleted without a compatibility module. The
@@ -111,7 +173,7 @@ backends, automatic artifact isolation, or service management.
 
 The CLI owns each experiment run through W&B's native `wandb.init(...)` context
 manager. Configuration parsing and validation precede initialization; help,
-invalid input, and model-download commands create no run. Configuration publishing,
+invalid input, and model/dataset-download commands create no run. Configuration publishing,
 `Experiment` construction, and stage dispatch occur inside the context. Native
 W&B context exit handles success, failure, and interruption, including cleanup
 failures; there is no application wrapper preserving run-level exceptions.
@@ -152,9 +214,9 @@ values must be positive integers (booleans are rejected). Selection occurs befor
 decoding, does not mutate stored splits, and is independent of batch size.
 Reference source counts reflect the capped training references plus enabled text
 records; existing local tables still return before reading reference inputs.
-Text references are unchanged. Use the full labeled validation split for
-evaluation, recording `source_split="val"`; never claim official test accuracy.
-The dataset adapter resolves image paths, preserves legacy names, and rejects
+Text references are unchanged. For FoodX251, use the full labeled validation split for
+evaluation, recording `source_split="val"`; never claim official FoodX251 test accuracy.
+The FoodX251 adapter resolves image paths, preserves legacy names, and rejects
 duplicate source identities within each split. It does not compare training and
 validation paths or image contents for overlap.
 
