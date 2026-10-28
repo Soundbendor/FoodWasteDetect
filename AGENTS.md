@@ -823,31 +823,49 @@ See `docs/experiments.md` for verification. Do not claim GPU Ollama acceptance
 from package inspection or synthetic tests. No live services, model downloads,
 or GPU kernels were run.
 
-## Cached Gemini Matryoshka sweep
+## Matryoshka sweep with optional validation-cache reuse
 
 `python -m internvl experiment matroyshka-sweep --config_file cfg/ge_v2.yml`
 uses the shared CLI and strict ordered `--set` overrides. The command spelling is
 `matroyshka-sweep`; implementation lives in `internvl.matroyshka_sweep`, with no
-separate parser or experiment subclass. It assumes the configured reference and
-validation tables contain complete Gemini 3072-dimensional embeddings. It does
-not verify compatibility or completeness and makes no embedding requests.
+separate parser or experiment subclass. It supports the configured local or Vertex
+embedding model. `sweep.source_dim` declares the dimension of the prebuilt reference
+table and any supplied validation table. `sweep.dimensions` is an ordered nonempty
+list of unique positive integers no larger than `source_dim`; booleans are rejected.
+The source dimension must also be a positive integer, excluding booleans. Gemini
+defaults to source dimension 3072 and targets `[768, 1536, 3072]` when these settings
+are omitted. Other models require explicit settings. Shipped local YAML files have
+null placeholders for strict overrides; Gemini YAML retains its defaults.
 
-The sweep evaluates dimensions 768, 1536, and 3072 with configured `k` and batch
-size. Source tables are retained; all rows, IDs, and metadata (including text
-references) are preserved. Reference switches and image caps remain recorded but
+`lancedb.validation_table` alone selects the sweep evaluation path. A nonempty
+name requires an existing cache: missing tables or vectors fail without inference,
+image decoding, or cache repair. Omitted or null selects fresh validation encoding
+at every requested dimension through the normal local or Vertex experiment class,
+with `embedding.truncate_dim` set to that dimension and validation caching disabled.
+Generated vectors stay in bounded batches and are not saved. Empty table names are
+invalid. This toggle is specific to the sweep; ordinary evaluation and Vertex
+cache/resumption behavior are unchanged. Source tables are assumed to match the
+configured model and source dimension; compatibility and completeness checks remain
+deferred.
+
+The sweep retains configured `k` and batch size. Source tables are retained;
+all rows, IDs, and metadata (including text references) are preserved.
+Reference switches and image caps remain recorded but
 do not filter existing tables. Smaller dimensions use exact float32 prefixes in
-`<source>_d768` and `<source>_d1536`, with fixed-size Arrow vectors and no additional
-normalization. All six table names must be distinct. Each missing destination is
+`<source>_d<dimension>`, with fixed-size Arrow vectors and no additional
+normalization. Without a validation table, only reference prefixes are prepared.
+All source and destination names must be distinct, including source tables when
+`source_dim` is absent from the target list. Each missing destination is
 created with one streaming `create_table` call without a query-result limit.
 Existing destinations are reused if they open; errors propagate without scanning,
-repair, overwrite, or cleanup. This is not a crash-durability guarantee. The native
-dimension uses the original tables directly.
+repair, overwrite, or cleanup. This is not a crash-durability guarantee. The
+source dimension uses the original tables directly.
 
 `Experiment.evaluate_from_batches()` exposes standard evaluation and reporting;
-ordinary `evaluate()` delegates to it. The sweep pairs undecoded validation
+ordinary `evaluate()` delegates to it. The cached path pairs undecoded validation
 metadata with cached vectors by identity. Missing vectors fail without constructing
 an embedder or filling the cache. Evaluation remains the labeled validation split.
-Each dimension receives a copied effective configuration, enabled validation caching,
+Each dimension receives a copied effective configuration with resolved sweep settings,
 its dimension and table names, and output directory beneath
 `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`. The CLI owns one native W&B
 context per dimension with the existing artifacts and metadata restrictions; no
@@ -855,6 +873,7 @@ outer run, explicit identity/group settings, or resume checks are added.
 Standard reports retain null reference counts without a matching index summary.
 Only complete success writes `summary.json`, recording dimensions, tables,
 all aggregate evaluation metrics, output directories, and returned W&B run IDs.
+Uncached effective configurations and summary entries record `validation_table: null`.
 Earlier dimension reports survive later failures. Production execution requires
 separate authorization; routine checks use synthetic CPU tables and mocked tracking.
 

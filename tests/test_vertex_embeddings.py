@@ -327,8 +327,10 @@ def test_yaml_cli_overrides_and_defaults():
     original = path.read_text()
     config = yaml.safe_load(original)
     baseline = yaml.safe_load(Path("cfg/classification.yml").read_text())
-    for key in baseline.keys() - {"embedding", "lancedb", "output_dir"}:
+    for key in baseline.keys() - {"embedding", "lancedb", "output_dir", "sweep"}:
         assert config[key] == baseline[key]
+    assert config["sweep"] == {"source_dim": 3072, "dimensions": [768, 1536, 3072]}
+    assert baseline["sweep"] == {"source_dim": None, "dimensions": None}
     assert config["lancedb"]["table"] == "foodx251_ge_v2"
     assert config["output_dir"] == "assets/classification/ge_v2"
     with (

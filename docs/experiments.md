@@ -1072,6 +1072,75 @@ interruption checks, pending-work counts for restarted and cached Vertex runs,
 and assertions that W&B receives only final reporting. READMEs, dependencies,
 configuration, model behavior, persistence, and report formats were unchanged.
 
+### Optional validation-cache reuse in dimension sweeps (October 28, 2026)
+
+`experiment matroyshka-sweep` now accepts the configured local or Vertex model.
+`sweep.source_dim` describes the existing reference table and any validation
+cache; `sweep.dimensions` sets evaluation order. Targets must be a nonempty list
+of unique positive integers no greater than the source dimension, with booleans
+rejected. Gemini retains 3072 and `[768, 1536, 3072]` as omitted-setting defaults.
+Other models require explicit settings. The shipped local YAML files contain
+null placeholders so strict CLI overrides can set both fields.
+
+For example, given an existing 4096-dimensional Qwen reference table, the local
+configuration can select `embedding.model_id=Qwen/Qwen3-VL-Embedding-8B`,
+`sweep.source_dim=4096`, and `sweep.dimensions=[256,512,1024,2048,4096]` through
+`--set` assignments. Select the table and output directory explicitly. These
+settings do not build references or verify their model/dimension compatibility.
+
+The sweep uses `lancedb.validation_table` as its only cache toggle:
+
+- A supplied nonempty name requires the existing cache. Prefix tables are
+  prepared for both reference and validation sources. Evaluation reads vectors
+  by identity in annotation order, without model construction or image decoding.
+  Missing tables or identities fail without inference or repair.
+- Omitted or null prepares only reference prefixes. Each dimension constructs
+  the normal local or Vertex experiment, encodes validation images in bounded
+  batches at that dimension, and discards vectors after evaluation. Effective
+  configurations disable validation caching and record `validation_table: null`,
+  as do combined summary entries. This overrides the ordinary Vertex cache flag
+  within the sweep only.
+
+The source dimension reuses the original table names. Smaller dimensions retain
+the `<source>_d<dimension>` naming and existing destination reuse/failure behavior.
+All source and destination names must be distinct, even when the target list
+omits the source dimension. The prebuilt reference table remains mandatory.
+Every dimension keeps its own W&B context, effective configuration, and report;
+only complete success writes the combined summary. Earlier reports survive a
+later encoding or evaluation failure. Ordinary evaluation and Vertex cache
+resumption are unchanged.
+
+Implementation and verification took place in a separate worktree based on
+`a143af5`, using the existing modern CPU environment with `PYTHONPATH=src` pointing
+at the worktree. Checks used synthetic 3072/4096-dimensional vectors, PIL images,
+temporary LanceDB databases, mocked encoders/W&B, and the existing offline W&B
+tests. `CUDA_VISIBLE_DEVICES='' HF_HUB_OFFLINE=1` remained set. The sandboxed test
+process stalled without output and was interrupted; completed tests ran outside
+the sandbox. No weights, datasets, cloud requests, GPU jobs, or services were used.
+
+Verification results:
+
+- Sweep-only suite: **65 passed**.
+- Focused sweep, classification, Vertex, CLI, tracking, and retrieval suites:
+  **303 passed, 182 subtests passed**. The existing YAML-default comparison now
+  explicitly checks Gemini's sweep defaults and the local null placeholders.
+- Package and changed-test Ruff checks, scoped ty, and `git diff --check` passed.
+
+The focused pytest command used the existing environment's Python with
+`-m pytest -c src/internvl/pyproject.toml tests/test_matroyshka_sweep.py
+tests/test_classification.py tests/test_vertex_embeddings.py tests/test_internvl.py
+tests/test_tracking.py tests/test_retrieval.py --no-cov -q` from the worktree.
+Ruff used `--config src/internvl/pyproject.toml`; ty used `--project src/internvl`
+and the existing CPU environment as its explicit `--python` path.
+
+Coverage includes cached Gemini regression behavior, Qwen prefixes and original
+4096-dimensional table reuse, annotation order, omitted/null caches, separate
+encoding passes with partial batches at every dimension, no validation-table
+writes, missing source tables/vectors, invalid dimensions and names, ordered CLI
+overrides, unchanged source tables, and retained reports without a combined
+summary after later failures. Source compatibility remains an assumption; these
+checks do not establish real-model or GPU acceptance. README files are unchanged.
+
 ### Cached Gemini dimension sweep (October 27, 2026)
 
 The shared CLI now accepts `experiment matroyshka-sweep` with `cfg/ge_v2.yml`

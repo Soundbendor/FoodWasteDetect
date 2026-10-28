@@ -10,7 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
 from .experiment import Experiment
-from .matroyshka_sweep import evaluate_cached, run_sweep
+from .matroyshka_sweep import evaluate_dimension, run_sweep
 from .tracking import Tracker
 from .vertex_utils import VertexExperiment
 
@@ -84,7 +84,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run_experiment(config: dict[str, Any], stage: str) -> None:
     if stage == "matroyshka-sweep":
-        run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
+        run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_dimension))
         return
     experiment_class = (
         VertexExperiment if config.get("embedding", {}).get("model_id") == "google/ge-v2" else Experiment

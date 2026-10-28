@@ -31,6 +31,9 @@ lancedb:
   uri: assets/lancedb
   table: foodx251_ge_v2
   validation_table: foodx251_ge_v2_validation
+sweep:
+  source_dim: 3072
+  dimensions: [768, 1536, 3072]
 k: 10
 description_count: 5
 output_dir: assets/classification/ge_v2

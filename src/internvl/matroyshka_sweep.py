@@ -1,4 +1,4 @@
-"""Evaluate float32 prefixes of complete Gemini reference and validation tables."""
+"""Evaluate reference prefixes with optional reuse of cached validation vectors."""
 
 from collections.abc import Callable, Iterator
 from copy import deepcopy
@@ -15,25 +15,49 @@ from lancedb.table import Table
 from .experiment import Experiment, _write_json
 from .retrieval import LanceDBIndex
 from .tracking import Tracker
-from .vertex_utils import cached_batches
-
-DIMENSIONS = (768, 1536, 3072)
+from .vertex_utils import VertexExperiment, cached_batches
 
 
-def table_names(config: dict, dimension: int) -> tuple[str, str]:
-    suffix = f"_d{dimension}" if dimension != 3072 else ""
+def sweep_settings(config: dict) -> tuple[int, list[int]]:
+    """Resolve Gemini defaults and validate explicitly configured sweep dimensions."""
+    gemini = config["embedding"].get("model_id") == "google/ge-v2"
+    options = config.get("sweep", {})
+    if not isinstance(options, dict):
+        raise ValueError("sweep must be a mapping with source_dim and dimensions")
+    source_dim = options.get("source_dim", 3072 if gemini else None)
+    dimensions = options.get("dimensions", [768, 1536, 3072] if gemini else None)
+    if type(source_dim) is not int or source_dim <= 0:
+        raise ValueError("sweep.source_dim must be a positive integer")
+    if (
+        not isinstance(dimensions, list) or not dimensions
+        or any(type(d) is not int or d <= 0 or d > source_dim for d in dimensions)
+        or len(set(dimensions)) != len(dimensions)
+    ):
+        raise ValueError("sweep.dimensions must be a nonempty list of unique positive integers <= source_dim")
+    return source_dim, dimensions
+
+
+def table_names(config: dict, dimension: int) -> tuple[str, str | None]:
+    source_dim, _ = sweep_settings(config)
+    suffix = f"_d{dimension}" if dimension != source_dim else ""
     options = config["lancedb"]
-    return options["table"] + suffix, options["validation_table"] + suffix
+    validation = options.get("validation_table")
+    return options["table"] + suffix, validation + suffix if validation is not None else None
 
 
 def validate_config(config: dict) -> None:
     Experiment.validate_config(config)
-    if config["embedding"].get("model_id") != "google/ge-v2":
-        raise ValueError("matroyshka-sweep requires google/ge-v2 source tables")
-    names = [config["lancedb"].get(key) for key in ("table", "validation_table")]
+    source_dim, dimensions = sweep_settings(config)
+    options = config["lancedb"]
+    names = [options.get("table")]
+    if options.get("validation_table") is not None:
+        names.append(options["validation_table"])
     if any(not isinstance(name, str) or not name.strip() for name in names):
         raise ValueError("Reference and validation table names must be nonempty")
-    all_names = [name for dimension in DIMENSIONS for name in table_names(config, dimension)]
+    all_names = [
+        name for dimension in dict.fromkeys([source_dim, *dimensions])
+        for name in table_names(config, dimension) if name is not None
+    ]
     if len(set(all_names)) != len(all_names):
         raise ValueError("Sweep source and destination table names must be distinct")
 
@@ -78,29 +102,42 @@ def evaluate_cached(config: dict, tracker: Tracker) -> dict:
     ))
 
 
+def evaluate_dimension(config: dict, tracker: Tracker) -> dict:
+    """Read a supplied cache strictly, or encode validation images for this dimension."""
+    if config["lancedb"].get("validation_table") is not None:
+        return evaluate_cached(config, tracker)
+    experiment_class = (
+        VertexExperiment if config["embedding"].get("model_id") == "google/ge-v2" else Experiment
+    )
+    return experiment_class(config, tracker=tracker).evaluate()
+
+
 def run_sweep(config: dict, evaluate: Callable[[dict], tuple[dict, str]]) -> dict:
     """Prepare each dimension and publish a combined summary only after all succeed."""
     validate_config(config)
+    source_dim, dimensions = sweep_settings(config)
     uri = Path(config["lancedb"]["uri"]).expanduser().resolve()
     if not uri.is_dir():
         raise FileNotFoundError(f"LanceDB database does not exist: {uri}")
     connection = cast(LanceDBConnection, lancedb.connect(uri))
-    sources = table_names(config, 3072)
+    sources = [name for name in table_names(config, source_dim) if name is not None]
     for name in sources:
         connection.open_table(name)
     output = Path(config["output_dir"]).expanduser().resolve() / datetime.now(UTC).strftime(
         "matroyshka_sweep_%Y%m%dT%H%M%S_%fZ"
     )
     results = []
-    for dimension in DIMENSIONS:
+    for dimension in dimensions:
         effective = deepcopy(config)
+        effective["sweep"] = dict(source_dim=source_dim, dimensions=dimensions.copy())
         reference, validation = table_names(config, dimension)
         effective["embedding"]["truncate_dim"] = dimension
         effective["lancedb"].update(table=reference, validation_table=validation)
-        effective["cache_validation_embeddings"] = True
+        effective["cache_validation_embeddings"] = validation is not None
         effective["output_dir"] = str(output / f"d{dimension}")
-        if dimension != 3072:
-            for source, destination in zip(sources, (reference, validation), strict=True):
+        if dimension != source_dim:
+            destinations = [name for name in (reference, validation) if name is not None]
+            for source, destination in zip(sources, destinations, strict=True):
                 prepare_table(connection, source, destination, dimension,
                               effective["embedding"].get("batch_size", 32))
         report, run_id = evaluate(effective)

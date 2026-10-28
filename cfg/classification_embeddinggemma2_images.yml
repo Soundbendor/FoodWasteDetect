@@ -23,6 +23,10 @@ ollama:
 lancedb:
   uri: assets/lancedb
   table: foodx251_embeddinggemma2_images
+  validation_table: null  # Sweep: null encodes validation images at each dimension.
+sweep:
+  source_dim: null  # Required for non-Gemini sweeps; dimension of the existing tables.
+  dimensions: null  # Ordered target dimensions, each at most source_dim.
 k: 10
 description_count: 5
 output_dir: assets/classification/embeddinggemma2_images
