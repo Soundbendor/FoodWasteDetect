@@ -1075,8 +1075,8 @@ configuration, model behavior, persistence, and report formats were unchanged.
 ### Optional validation-cache reuse in dimension sweeps (October 28, 2026)
 
 `experiment matroyshka-sweep` now accepts the configured local or Vertex model.
-`sweep.source_dim` describes the existing reference table and any validation
-cache; `sweep.dimensions` sets evaluation order. Targets must be a nonempty list
+`dimension_sweep.source_dim` describes the existing reference table and any validation
+cache; `dimension_sweep.dimensions` sets evaluation order. Targets must be a nonempty list
 of unique positive integers no greater than the source dimension, with booleans
 rejected. Gemini retains 3072 and `[768, 1536, 3072]` as omitted-setting defaults.
 Other models require explicit settings. The shipped local YAML files contain
@@ -1084,7 +1084,7 @@ null placeholders so strict CLI overrides can set both fields.
 
 For example, given an existing 4096-dimensional Qwen reference table, the local
 configuration can select `embedding.model_id=Qwen/Qwen3-VL-Embedding-8B`,
-`sweep.source_dim=4096`, and `sweep.dimensions=[256,512,1024,2048,4096]` through
+`dimension_sweep.source_dim=4096`, and `dimension_sweep.dimensions=[256,512,1024,2048,4096]` through
 `--set` assignments. Select the table and output directory explicitly. These
 settings do not build references or verify their model/dimension compatibility.
 

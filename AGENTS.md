@@ -829,8 +829,8 @@ or GPU kernels were run.
 uses the shared CLI and strict ordered `--set` overrides. The command spelling is
 `matroyshka-sweep`; implementation lives in `internvl.matroyshka_sweep`, with no
 separate parser or experiment subclass. It supports the configured local or Vertex
-embedding model. `sweep.source_dim` declares the dimension of the prebuilt reference
-table and any supplied validation table. `sweep.dimensions` is an ordered nonempty
+embedding model. `dimension_sweep.source_dim` declares the dimension of the prebuilt reference
+table and any supplied validation table. `dimension_sweep.dimensions` is an ordered nonempty
 list of unique positive integers no larger than `source_dim`; booleans are rejected.
 The source dimension must also be a positive integer, excluding booleans. Gemini
 defaults to source dimension 3072 and targets `[768, 1536, 3072]` when these settings

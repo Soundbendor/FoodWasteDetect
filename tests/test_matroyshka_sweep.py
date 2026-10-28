@@ -50,7 +50,7 @@ def sources(tmp_path, monkeypatch, request):
         lancedb=dict(uri=str(uri), table='reference', validation_table='validation'),
     )
     if model_id != 'google/ge-v2':
-        config['sweep'] = dict(source_dim=source_dim, dimensions=[256, 512, 1024, 2048, source_dim])
+        config['dimension_sweep'] = dict(source_dim=source_dim, dimensions=[256, 512, 1024, 2048, source_dim])
     dataset = Mock()
     dataset.get_class_list.return_value = ['A', 'B']
     dataset.test_set.return_value = [0, 1]
@@ -299,7 +299,7 @@ def test_uncached_sweep_encodes_each_dimension(
     config['cache_validation_embeddings'] = True
     config['embedding']['batch_size'] = 2
     source_dim, _ = sweep.sweep_settings(config)
-    config['sweep'] = dict(source_dim=source_dim, dimensions=[source_dim, 256, 1024])
+    config['dimension_sweep'] = dict(source_dim=source_dim, dimensions=[source_dim, 256, 1024])
     original = deepcopy(config)
     dataset = Mock()
     dataset.get_class_list.return_value = ['A', 'B']
@@ -399,8 +399,8 @@ def test_missing_source_fails_before_inference_or_tracking(sources, runs, table)
 def test_invalid_sweep_settings_fail_before_tracking(sources, runs, options):
     config, _, _, _ = sources
     config['embedding']['model_id'] = 'Qwen/Qwen3-VL-Embedding-8B'
-    config['sweep'] = options
-    with pytest.raises(ValueError, match='sweep'):
+    config['dimension_sweep'] = options
+    with pytest.raises(ValueError, match='dimension_sweep'):
         cli._run_experiment(config, 'matroyshka-sweep')
     assert runs == []
 
@@ -420,7 +420,7 @@ def test_non_gemini_requires_explicit_sweep_settings(sources, runs):
 ])
 def test_source_and_destination_collisions_without_native_target(sources, runs, reference, validation):
     config, _, _, _ = sources
-    config['sweep'] = dict(source_dim=3072, dimensions=[256])
+    config['dimension_sweep'] = dict(source_dim=3072, dimensions=[256])
     config['lancedb'].update(table=reference, validation_table=validation)
     with pytest.raises(ValueError):
         cli._run_experiment(config, 'matroyshka-sweep')
@@ -430,8 +430,8 @@ def test_source_and_destination_collisions_without_native_target(sources, runs, 
 @pytest.mark.parametrize('filename', ['classification.yml', 'classification_embeddinggemma2_images.yml', 'ge_v2.yml'])
 def test_shipped_configs_accept_sweep_overrides(filename):
     config = cli._load_config(str(Path(__file__).parents[1] / 'cfg' / filename), [
-        'embedding.model_id=Qwen/Qwen3-VL-Embedding-8B', 'sweep.source_dim=4096',
-        'sweep.dimensions=[256,512]', 'sweep.dimensions=[4096,1024,256]',
+        'embedding.model_id=Qwen/Qwen3-VL-Embedding-8B', 'dimension_sweep.source_dim=4096',
+        'dimension_sweep.dimensions=[256,512]', 'dimension_sweep.dimensions=[4096,1024,256]',
         'lancedb.validation_table=null',
     ])
     sweep.validate_config(config)

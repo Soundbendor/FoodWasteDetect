@@ -21,19 +21,19 @@ from .vertex_utils import VertexExperiment, cached_batches
 def sweep_settings(config: dict) -> tuple[int, list[int]]:
     """Resolve Gemini defaults and validate explicitly configured sweep dimensions."""
     gemini = config["embedding"].get("model_id") == "google/ge-v2"
-    options = config.get("sweep", {})
+    options = config.get("dimension_sweep", {})
     if not isinstance(options, dict):
-        raise ValueError("sweep must be a mapping with source_dim and dimensions")
+        raise ValueError("dimension_sweep must be a mapping with source_dim and dimensions")
     source_dim = options.get("source_dim", 3072 if gemini else None)
     dimensions = options.get("dimensions", [768, 1536, 3072] if gemini else None)
     if type(source_dim) is not int or source_dim <= 0:
-        raise ValueError("sweep.source_dim must be a positive integer")
+        raise ValueError("dimension_sweep.source_dim must be a positive integer")
     if (
         not isinstance(dimensions, list) or not dimensions
         or any(type(d) is not int or d <= 0 or d > source_dim for d in dimensions)
         or len(set(dimensions)) != len(dimensions)
     ):
-        raise ValueError("sweep.dimensions must be a nonempty list of unique positive integers <= source_dim")
+        raise ValueError("dimension_sweep.dimensions must be a nonempty list of unique positive integers <= source_dim")
     return source_dim, dimensions
 
 
@@ -129,7 +129,7 @@ def run_sweep(config: dict, evaluate: Callable[[dict], tuple[dict, str]]) -> dic
     results = []
     for dimension in dimensions:
         effective = deepcopy(config)
-        effective["sweep"] = dict(source_dim=source_dim, dimensions=dimensions.copy())
+        effective["dimension_sweep"] = dict(source_dim=source_dim, dimensions=dimensions.copy())
         reference, validation = table_names(config, dimension)
         effective["embedding"]["truncate_dim"] = dimension
         effective["lancedb"].update(table=reference, validation_table=validation)
