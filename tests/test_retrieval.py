@@ -13,6 +13,7 @@ if any(importlib.util.find_spec(name) is None for name in ("numpy", "lancedb")):
 
 import numpy as np
 import pyarrow as pa
+import pytest
 
 from internvl.retrieval import LanceDBIndex, classify, metrics, ranking_metrics
 from internvl.schemas import Neighbor, PointRecord, Prediction
@@ -325,3 +326,24 @@ def test_class_counts_stream_all_rows_and_reference_types(tmp_path):
                for kind in ('class_name', 'description', 'training_image') for i in range(1100)]
     index.append(records, np.ones((len(records), 2), dtype=np.float32))
     assert index.class_counts() == {'A': 1650, 'B': 1650}
+
+
+def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
+    from internvl.retrieval import LanceDBIndex
+    from internvl.schemas import PointRecord
+
+    index = LanceDBIndex(tmp_path / 'db', 'references')
+    with pytest.raises(RuntimeError, match='Open or create'):
+        index.optimize()
+    index.create(2)
+    for i in range(32):
+        index.append([PointRecord(str(i), 'class_name', str(i), str(i))],
+                     np.asarray([[1.0, i + 1.0]], dtype=np.float32))
+    before = index.table.to_arrow().to_pylist()
+    fragments = index.table.stats()['fragment_stats']['num_fragments']
+    neighbors = index.query(np.asarray([1.0, 1.0]), 5)
+    index.optimize()
+    assert index.table.stats()['fragment_stats']['num_fragments'] < fragments
+    assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r['id']) == sorted(
+        before, key=lambda r: r['id'])
+    assert index.query(np.asarray([1.0, 1.0]), 5) == neighbors

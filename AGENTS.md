@@ -132,7 +132,7 @@ arguments are passed between helpers. Every bar is context-managed, remains enab
 without a TTY, and uses a five-second minimum refresh interval. Bars close on errors
 and interrupts without reporting unfinished work as complete. Empty insertion loops
 may display zero work; disabled/cached description stages and cached local reference
-builds return before creating bars. Vertex persistence callbacks remain unchanged.
+builds may display zero-work reference bars. Persistence uses completed batches.
 `Tracker.progress`, `_progress_callback`, and `on_description` have been removed.
 W&B retains configuration, source-count summaries, final evaluation metrics/tables,
 and artifacts. Its native console capture records tqdm's stderr output; disabling
@@ -151,7 +151,7 @@ order when image references are enabled. Omitted or null uses all images; other
 values must be positive integers (booleans are rejected). Selection occurs before
 decoding, does not mutate stored splits, and is independent of batch size.
 Reference source counts reflect the capped training references plus enabled text
-records; existing local tables still return before reading reference inputs.
+records; resumed builds read reference metadata to select missing inputs.
 Text references are unchanged. Use the full labeled validation split for
 evaluation, recording `source_split="val"`; never claim official test accuracy.
 The dataset adapter resolves image paths, preserves legacy names, and rejects
@@ -208,14 +208,13 @@ CLI stages remain unchanged. Storage uses `lancedb.uri` and `lancedb.table`;
 the old Qdrant configuration is removed. The URI is a filesystem path resolved
 from the working directory with `~` expansion, independent of `output_dir`.
 Temporary-file JSON replacement and saved description loading remain.
-`build_vector_database()` checks table existence before loading the embedder or
-reading reference inputs. Existing tables warn and return None, leaving vectors
-and index.json untouched. Missing tables use an explicit Arrow schema: string
+`build_vector_database()` prepares reference metadata and checks table existence
+before constructing an encoder when needed. Existing tables resume missing identities and finalize through optimization. Missing tables use an explicit Arrow schema: string
 ID, class, source kind, source identity, value, and fixed-length float32 vector.
-Creation refuses overwrites; batches append with strict record/vector pairing
+Creation refuses overwrites; completed batches append with strict record/vector pairing
 and backend rejection of malformed vectors. UUIDs remain unchanged.
 A successful index.json saves `table`, resolved `uri`, source counts, and config.
-No compatibility or completeness checks are added; partial tables are also reused.
+No compatibility checks are added; partial tables resume missing identities.
 `run()` still generates or loads descriptions before the build stage.
 Evaluation opens an existing database/table without creating storage. It performs
 only searches, using explicit cosine distance and `bypass_vector_index()` for
@@ -237,7 +236,7 @@ and metric files have been removed. Metrics retain evaluated count, majority-vot
 plus classification, ranking, and cosine diagnostics defined below; no intermediate
 counts or coverage are saved. Historical collections and raw data
 are not overwritten. Every class requires a usable image reference when image
-references are enabled. Evaluation embeddings are recomputed for each run.
+references are enabled. Evaluation embeddings are recomputed when validation caching is disabled.
 `FoodX251ImageDataset` reads the local class list and split CSV annotations
 with pandas, independently of `data_wrappers.foodx251`. It builds an explicitly
 typed Hugging Face `DatasetDict` (`splits['train']`, `splits['validation']`) and exposes these
@@ -361,8 +360,7 @@ directories.
 abstract text/image encoding methods, with no shared constructor. Its `ImageInput`
 alias accepts strings, paths, and PIL images and is explicitly re-exported by
 `embeddings.py`. The interface imports neither concrete encoders nor experiments.
-Vertex's optional persistence callbacks remain on the concrete encoder; persistence
-helpers retain their concrete casts. The scoped ty check includes the interface.
+Both concrete encoders implement the shared batch-only interface. The scoped ty check includes the interface.
 Embedding contracts are isolated in `tests/test_embeddings.py` and require
 Sentence Transformers, CPU PyTorch, NumPy, and Pillow. `EmbeddingModel` wraps a
 `SentenceTransformer` directly; `encode()` owns inference batching and NumPy
@@ -391,7 +389,7 @@ legacy source, and must not be attributed to the new experiment runner.
 
 `google/ge-v2` is an application alias for Vertex AI `gemini-embedding-2`,
 implemented separately in `internvl.vertex_embeddings.VertexEmbeddingModel`.
-`VertexExperiment.embedder` constructs it lazily and reuses the wrapper. Local model IDs
+`Experiment.embedder` constructs it lazily and reuses the wrapper. Local model IDs
 ignore the `embedding.vertex` section. The Vertex route does not construct a
 Sentence Transformer or use its preprocessing. The local Hugging Face dataset
 adapter remains unchanged.
@@ -428,69 +426,49 @@ total attempts with one-second initial delay, base two, one-second jitter, and a
 other errors propagate. Timeout defaults to 60 seconds per attempt. Failure or
 interruption cancels queued work, waits for running requests, and closes the client.
 Batches return no partial vectors. The resumption contract below supersedes the
-existing-table early return for Vertex; local backends retain it. Configuration
+existing-table early return for every backend. Configuration
 recording and final-report-only evaluation still apply.
 
-### Vertex embedding resumption
+### Shared embedding resumption and batch persistence
 
-`internvl.vertex_utils` owns cache configuration, per-response persistence,
-reference resumption, validation-cache preparation, and bounded cached-vector
-reading. Its typed module functions take explicit inputs and narrow callbacks, never an
-experiment object. The module also defines `VertexExperiment(Experiment)`, which
-overrides reference building, evaluation, validation, encoder construction, and
-batch persistence. Imports flow from `vertex_utils` to `experiment`, never back.
-Direct Python callers choose `Experiment(config)` for local models and
-`VertexExperiment(config)` for Vertex. The CLI selects the class once using
-`embedding.model_id`, validates before W&B initialization, and constructs inside
-the W&B context. `Experiment` has no Vertex dispatch or imports; it retains one
-lazy encoder cache typed as `Embedder`, shared reference
-preparation and insertion loops, progress reporting, classification, reports,
-and `run()`. Local construction reads only supported local embedding options.
-Cache preparation receives lazy dimension lookup so complete caches never construct the embedder. Reference
-preparation filters pending text and saved image identities. The experiment validates
-capped, undecoded training metadata before insertion. Evaluation iterators yield metadata batches and vectors; conversion
-to prediction rows remains in the experiment.
+All backends now use `Experiment(config)`. `VertexExperiment`, `vertex_utils.py`,
+and the Vertex `on_embedding` callbacks are removed. `Experiment` owns selection,
+batching, resumption, and optional cache preparation. `LanceDBIndex` owns every
+DB operation, including identity scans, ordered vector retrieval, and optimization.
+The CLI validates the shared config before W&B initialization. Backend construction
+remains lazy, with a local import for Vertex. Complete caches need no encoder.
 
-Vertex reference builds resume existing tables automatically. Local model builds
-still return when a table exists. Records match by `(source_kind, source_identity)`;
-UUIDs remain random and saved rows are retained. Identity scans explicitly have no
-result limit and omit vectors. Training caps apply before excluding saved image
-identities, and exclusion precedes decoding. Every validated Vertex response is
-saved individually through a serial coordinator-thread callback. Successful
-in-flight responses are drained after API failure or interruption before the error
-propagates. Storage errors propagate without write retries or marking failed saves
-complete; encode calls never return partial matrices. Completed builds regenerate
-index.json using initial stored source counts plus successfully inserted batches.
-One metadata scan supplies an immutable identity snapshot for filtering and counts
-every stored row, including duplicates and records outside the current selection.
-The single-writer contract permits summary publication without rescanning identities.
-Reference preparation validates capped training metadata before creating a missing
-table; image PointRecords are constructed only for missing decoded batches.
-Text and image saving use typed helpers with a shared persistence callback; there
-is no mutable saved-identity state during insertion.
+Every successful encoding batch is appended once. Failed encoding batches save
+no vectors; earlier committed batches survive. Vertex still cancels queued requests,
+waits for running workers, and closes the client on failure. Restart may repeat paid
+requests from the unfinished batch. Storage errors propagate without write retries.
+Progress and counts advance only after successful appends.
 
-`cache_validation_embeddings` defaults to false when omitted. Vertex uses its
-truthiness: falsey values disable caching, and truthy values require a valid
-separate validation-table name; nonboolean values are accepted. `cfg/ge_v2.yml`
-enables it with the separate
-`lancedb.validation_table: foodx251_ge_v2_validation`; its name must be nonempty and
-different from the reference table. Local models ignore these settings. Validation
-records use `source_kind="validation_image"` and are never searched as references.
-Evaluation explicitly completes `vertex_utils.prepare_validation_cache()` before
-classification.
-The evaluation iterator receives that table and only reads metadata and bounded
-vector batches in
-annotation order. A complete cache needs no image decoding, embedder construction,
-credentials, or API calls. Disabled caching recomputes validation vectors as before.
-Separate tqdm bars display validation-cache insertion and evaluation. Reference
-and cache bars start at zero for pending work and advance after completed batches. A failed batch may save vectors without a
-final progress update. Reports publish only after a complete successful evaluation.
+Reference builds resume for all backends by `(source_kind, source_identity)`.
+One unlimited metadata-only scan supplies saved identities and initial counts,
+including duplicate and extra stored rows. Training caps precede saved-identity
+exclusion, which precedes image decoding. UUIDs and existing rows are preserved.
+After successful insertion, including no-work resumes, `LanceDBIndex.optimize()`
+uses LanceDB defaults before publishing index.json. This compacts files and applies
+seven-day historical-version retention with `delete_unverified=False`. Failures
+preserve committed vectors and the previous summary; rerunning index retries
+finalization without regenerating saved embeddings. Builds return a summary dict.
+Use one writer and finish building/optimization before concurrent reference readers.
 
-Use one writer per table. Changing inputs, descriptions, model, dimensions, or
-prompt mode requires fresh tables; there are no hashes, compatibility checks,
-migrations, or automatic isolation. Only successfully committed vectors are
-reusable: crashes between response and save, or timeouts after remote processing,
-can require resubmission. No live Vertex requests are authorized by synthetic tests.
+`cache_validation_embeddings` retains its existing truthiness semantics and defaults
+to false when omitted. All backends honor it. Enabled caching requires a nonempty
+`lancedb.validation_table` distinct from the reference table. Local YAML files
+provide false and null defaults; ge_v2.yml retains its enabled named cache.
+Validation rows use `validation_image` and never enter reference searches.
+Evaluation opens references first, completes missing cache batches, then reads
+vectors in metadata order. Complete cache evaluation requires no image decoding
+or model/client construction. Disabled caching recomputes vectors. Evaluation
+never optimizes reference tables. The Matryoshka sweep reads supplied caches and
+fails on missing vectors without generating replacements.
+
+Changing models, dimensions, prompts, descriptions, or inputs still requires fresh
+tables. There are no compatibility checks, hashes, automatic naming, or migrations.
+Reports are published only after complete successful evaluation.
 
 ## InternVL text architecture and experiment pipeline (historical)
 

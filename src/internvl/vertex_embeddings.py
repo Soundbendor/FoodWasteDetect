@@ -109,7 +109,6 @@ class VertexEmbeddingModel(Embedder):
 
     def _encode(
         self, inputs: Iterable[_Input], prepare: Callable[[_Input], types.Content],
-        on_embedding: Callable[[int, NDArray[np.float32]], None] | None = None,
     ) -> NDArray[np.float32]:
         records = list(inputs)
         if not records:
@@ -123,22 +122,6 @@ class VertexEmbeddingModel(Embedder):
         ) as client:
             executor = ThreadPoolExecutor(max_workers=self.max_concurrency)
             futures = {}
-            delivered = set()
-            storage_failed = False
-
-            def deliver(future):
-                nonlocal storage_failed
-                vector = future.result()
-                index = futures[future]
-                vectors[index] = vector
-                if on_embedding is not None:
-                    try:
-                        on_embedding(index, vector)
-                    except BaseException:
-                        storage_failed = True
-                        raise
-                delivered.add(future)
-
             try:
                 # Prepare images inside workers to bound serialized image memory too.
                 def encode(record: _Input) -> NDArray[np.float32]:
@@ -147,27 +130,13 @@ class VertexEmbeddingModel(Embedder):
                 for index, record in enumerate(records):
                     futures[executor.submit(encode, record)] = index
                 for future in as_completed(futures):
-                    deliver(future)
-            except BaseException:
-                executor.shutdown(wait=True, cancel_futures=True)
-                # Drain validated successes even when another request failed or was interrupted.
-                # A failed storage callback is never retried automatically.
-                if not storage_failed:
-                    for future in futures:
-                        if future not in delivered and not future.cancelled():
-                            try:
-                                future.result()
-                            except BaseException:
-                                continue
-                            deliver(future)
-                raise
+                    vectors[futures[future]] = future.result()
             finally:
                 executor.shutdown(wait=True, cancel_futures=True)
         return vectors
 
     def encode_text(
-        self, texts: Iterable[str], *,
-        on_embedding: Callable[[int, NDArray[np.float32]], None] | None = None,
+        self, texts: Iterable[str],
     ) -> NDArray[np.float32]:
         """Encode class names or descriptions, preserving source order."""
 
@@ -176,11 +145,10 @@ class VertexEmbeddingModel(Embedder):
                 text = _PREFIX + text
             return types.Content(parts=[types.Part.from_text(text=text)])
 
-        return self._encode(texts, prepare, on_embedding)
+        return self._encode(texts, prepare)
 
     def encode_images(
-        self, images: Iterable[ImageInput], *,
-        on_embedding: Callable[[int, NDArray[np.float32]], None] | None = None,
+        self, images: Iterable[ImageInput],
     ) -> NDArray[np.float32]:
         """Send RGB PNG pixels without labels, filenames, or resizing."""
 
@@ -198,4 +166,4 @@ class VertexEmbeddingModel(Embedder):
                 parts.insert(0, types.Part.from_text(text=_PREFIX))
             return types.Content(parts=parts)
 
-        return self._encode(images, prepare, on_embedding)
+        return self._encode(images, prepare)

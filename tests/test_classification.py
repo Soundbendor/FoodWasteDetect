@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from internvl.experiment import Experiment, _batch_rows, _prediction, validate_config
+from internvl.experiment import Experiment, _extract_batch_metadata, _prediction, validate_config
 from internvl.schemas import Neighbor, PointRecord
 from internvl.retrieval import LanceDBIndex
 
@@ -24,7 +24,7 @@ class Contracts(unittest.TestCase):
             'fname': ['fixture.png'], 'class': ['A'], 'source_id': ['image-1'],
             'source_split': ['val'], 'extra': ['retained'], 'image': [object()],
         }
-        record = _batch_rows(batch)[0]
+        record = _extract_batch_metadata(batch)[0]
         original = dict(record)
         cases = [
             (
@@ -55,9 +55,9 @@ class Contracts(unittest.TestCase):
                 self.assertIsNot(prediction, record)
                 self.assertEqual(json.loads(json.dumps(prediction)), prediction)
 
-    def test_batch_rows_requires_paired_metadata_columns(self):
+    def test_extract_batch_metadata_requires_paired_metadata_columns(self):
         with self.assertRaises(ValueError):
-            _batch_rows({'fname': ['first', 'second'], 'class': ['A']})
+            _extract_batch_metadata({'fname': ['first', 'second'], 'class': ['A']})
 
     def test_reference_switch_combinations(self):
         keys = ('embed_images', 'embed_class_labels', 'embed_descriptions')
@@ -673,42 +673,24 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual((exp.output / 'descriptions.json').exists(), flags[2])
             table = exp.config['lancedb']['table']
             self.assertEqual(report['table'], table)
-            with self.assertLogs(level='WARNING') as logs:
-                self.assertIsNone(exp.build_vector_database())
-            self.assertIn(table, logs.output[0])
+            self.assertEqual(exp.build_vector_database()['source_counts'], expected)
             self.assertEqual(self.client.open_table(table).count_rows(), sum(expected.values()))
-            with self.assertLogs(level='WARNING'):
-                self.assertEqual(exp.run()['metrics']['evaluated'], 2)
+            self.assertEqual(exp.run()['metrics']['evaluated'], 2)
             self.assertEqual(self.client.open_table(table).count_rows(), sum(expected.values()))
 
-    def test_existing_table_skips_all_build_work(self):
-        original = self.experiment()
-        artifact = original.build_vector_database()
-        snapshot = self.client.open_table(artifact['table']).to_arrow().to_pylist()
-        previous = (original.output / 'index.json').read_bytes()
-        with self.assertLogs(level='WARNING'):
-            self.assertIsNone(original.build_vector_database())
-        self.assertEqual((original.output / 'index.json').read_bytes(), previous)
-
-        reused = self.experiment((True, False, True), 'reused')
-        reused.config['lancedb']['table'] = artifact['table']
-        reused.config['n_imgs_per_class'] = 1
-        self.embedder_constructor.reset_mock()
-        with patch.object(reused, '_get_text_inputs', side_effect=AssertionError('Read text')), \
-             patch.object(self.dataset, 'iter_batches', side_effect=AssertionError('Read images')), \
-             patch.object(LanceDBIndex, 'create', side_effect=AssertionError('Create table')), \
-             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('Insert records')), \
-             self.assertLogs(level='WARNING') as logs:
-            self.assertIsNone(reused.build_vector_database())
-        self.assertIn(artifact['table'], logs.output[0])
-        self.embedder_constructor.assert_not_called()
-        self.assertFalse(reused.output.exists())
-        self.assertEqual(self.client.open_table(artifact['table']).to_arrow().to_pylist(), snapshot)
-        report = reused.evaluate()
-        self.assertEqual(report['table'], artifact['table'])
-        self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
-        self.assertNotIn('model', report)
-        self.assertIsNone(report['reference_source_counts'])
+    def test_complete_table_skips_embedding_and_retries_optimization(self):
+        exp = self.experiment()
+        artifact = exp.build_vector_database()
+        previous = (exp.output / 'index.json').read_bytes()
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')), \
+             patch.object(LanceDBIndex, 'optimize', side_effect=OSError('optimize')):
+            exp._embedder = None
+            with self.assertRaisesRegex(OSError, 'optimize'):
+                exp.build_vector_database()
+        self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
+        self.assertEqual(exp.build_vector_database(), artifact)
+        self.assertIsNone(exp._embedder)
 
     def test_evaluation_uses_configured_table_with_stale_summary(self):
         exp = self.experiment()

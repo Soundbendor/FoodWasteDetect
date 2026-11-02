@@ -12,10 +12,9 @@ import pyarrow as pa
 from lancedb.db import LanceDBConnection
 from lancedb.table import Table
 
-from .experiment import Experiment, _write_json
+from .experiment import Experiment, _write_json, cached_batches
 from .retrieval import LanceDBIndex
 from .tracking import Tracker
-from .vertex_utils import cached_batches
 
 DIMENSIONS = (768, 1536, 3072)
 

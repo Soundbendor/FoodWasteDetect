@@ -33,6 +33,7 @@ def _write_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+# TODO: Review overly defensive config checks
 def validate_config(config: dict) -> dict:
     """Validate experiment config does not force exp pipeline into invalid state.
 
@@ -57,11 +58,15 @@ def validate_config(config: dict) -> dict:
         output = Path(config["output_dir"]).expanduser().resolve()
         if output.is_relative_to(Path(raw).expanduser().resolve()):
             raise ValueError("Output directory must be separate from raw data")
+    if config.get("cache_validation_embeddings", False):
+        name = config["lancedb"].get("validation_table")
+        if not isinstance(name, str) or not name.strip() or name == config["lancedb"]["table"]:
+            raise ValueError("validation_table must be nonempty and distinct from reference table")
     return config
 
 
-def _batch_rows(batch: dict[str, list]) -> list[ImageMetadata]:
-    """Convert metadata columns into ordered rows, omitting decoded images."""
+def _extract_batch_metadata(batch: dict[str, list]) -> list[ImageMetadata]:
+    """Extract metadata from image batch, for use in LanceDB records."""
     metadata = batch.copy()
     metadata.pop("image", None)
     return [
@@ -71,7 +76,10 @@ def _batch_rows(batch: dict[str, list]) -> list[ImageMetadata]:
 
 
 def _prediction(
-    record: ImageMetadata, ranked: Sequence[Neighbor], k: int, relevant_count: int,
+    record: ImageMetadata,
+    ranked: Sequence[Neighbor],
+    k: int,
+    relevant_count: int,
 ) -> Prediction:
     """Combine image metadata, the vote result, and retrieved neighbors."""
     neighbors = ranked[:k]
@@ -85,6 +93,21 @@ def _prediction(
         "neighbors": list(neighbors),
         "retrieval_metrics": ranking_metrics(ranked, record["class"], k, relevant_count),
     }
+
+
+# TODO: why do we need this function?
+def cached_batches(
+    cache: LanceDBIndex,
+    metadata_batches: Iterable[dict[str, list]],
+) -> Iterator[tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]]:
+    """Fetch vectors from LanceDB table."""
+    for batch in metadata_batches:
+        yield (
+            batch,
+            cache.fetch_vectors(
+                [("validation_image", identity) for identity in batch["source_id"]]
+            ),
+        )
 
 
 class Experiment:
@@ -126,6 +149,13 @@ class Experiment:
 
     def _create_embedder(self) -> Embedder:
         options = self.config["embedding"]
+        if options.get("model_id") == "google/ge-v2":
+            from .vertex_embeddings import VertexEmbeddingModel
+
+            return VertexEmbeddingModel(
+                truncate_dim=options.get("truncate_dim"),
+                **options.get("vertex", {}),
+            )
         return EmbeddingModel(
             **{
                 key: options[key]
@@ -241,7 +271,7 @@ class Experiment:
             ):
                 records = [
                     PointRecord(row["class"], kind, row["source_id"], row["fname"])
-                    for row in _batch_rows(batch)
+                    for row in _extract_batch_metadata(batch)
                 ]
                 self._save_image_batch(index, records, batch["image"])
                 counts.update(record.source_kind for record in records)
@@ -264,19 +294,24 @@ class Experiment:
                 raise ValueError(f"Missing usable training references for {missing}")
         return records
 
-    def build_vector_database(self) -> dict | None:
-        """Build local references once, reusing existing tables unchanged."""
+    def build_vector_database(self) -> dict:
+        """Resume missing references, optimize, and publish the completed build."""
         index = self._lancedb_adapter()
-        if index.exists():
-            logging.warning(
-                "LanceDB table %r already exists; reusing its precomputed vectors "
-                "without inserting records or checking compatibility.",
-                index.name,
-            )
-            return None
         records = self._prepare_reference_inputs()
-        index.create(self.embedder.dimension)
-        counts = self._insert_references(index, records)
+        if index.exists():
+            index.open()
+            identities = index.identities()
+        else:
+            index.create(self.embedder.dimension)
+            identities = []
+        saved = frozenset(identities)
+        pending = [r for r in records if (r.source_kind, r.source_identity) not in saved]
+        excluded = {identity for kind, identity in saved if kind == "training_image"}
+        counts = Counter(kind for kind, _ in identities)
+        counts.update(self._insert_references(index, pending, excluded))
+        if not counts:
+            raise ValueError("No records inserted into LanceDB - check dataset and config.")
+        index.optimize()
         return self._publish_index(index, counts)
 
     def _insert_references(
@@ -311,9 +346,29 @@ class Experiment:
             self.tracker.reference_counts(dict(counts))
         return artifact
 
+    def _prepare_validation_cache(self) -> LanceDBIndex:
+        options = self.config["lancedb"]
+        cache = LanceDBIndex(uri=options["uri"], table=options["validation_table"])
+        if cache.exists():
+            cache.open()
+        else:
+            cache.create(self.embedder.dimension)
+        excluded = {identity for kind, identity in cache.identities() if kind == "validation_image"}
+        self._insert_image_records(cache, split="val", excluded_source_ids=excluded)
+        return cache
+
     def evaluate(self) -> dict:
-        """Classify the full validation split and save one report after success."""
-        return self.evaluate_from_batches(self._evaluation_batches())
+        """Complete optional validation caching, then classify the full split."""
+        index, artifact = self._prepare_evaluation()
+        if self.config.get("cache_validation_embeddings", False):
+            cache = self._prepare_validation_cache()
+            batches = cached_batches(
+                cache,
+                self.dataset.iter_batches("val", self.batch_size, decode=False),
+            )
+        else:
+            batches = self._evaluation_batches()
+        return self._execute_evaluation(index, artifact, batches)
 
     def evaluate_from_batches(
         self,
@@ -362,7 +417,7 @@ class Experiment:
         predictions: list[Prediction] = []
         with tqdm(total=total, desc="Evaluation", unit="image", mininterval=5) as progress:
             for batch, vectors in batches:
-                rows = _batch_rows(batch)
+                rows = _extract_batch_metadata(batch)
                 for record, vector in zip(rows, vectors, strict=True):
                     relevant_count = counts[record["class"]]
                     ranked = index.query(vector, max(k, 5, relevant_count))

@@ -238,20 +238,14 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
         [label, v["support"], v["correct"], v["recall"], v["precision"], v["f1"]]
         for label, v in report["metrics"]["per_class"].items()
     ]
-    # A fresh invocation reuses inputs without loading references or decoding images.
+    # Resume reads metadata but never regenerates saved vectors.
     reused = Mock(id="reused", summary={})
     exp.tracker = Tracker(reused)
-    with (
-        patch.object(exp, "_get_text_inputs", side_effect=AssertionError("read references")),
-        patch.object(
-            exp.dataset,
-            "train_set",
-            side_effect=AssertionError("read training metadata"),
-        ),
-    ):
+    with patch.object(exp, '_save_text_batch', side_effect=AssertionError('encode')), \
+         patch.object(exp, '_save_image_batch', side_effect=AssertionError('encode')):
         exp.generate_descriptions()
         exp.build_vector_database()
-    assert reused.summary == {}
+    assert reused.summary == {'reference_source_counts': report['reference_source_counts']}
     reused.define_metric.assert_not_called()
     reused.log.assert_not_called()
 

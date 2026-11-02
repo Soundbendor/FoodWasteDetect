@@ -1176,3 +1176,36 @@ Verification results:
   were interrupted; completed suites ran outside the sandbox. No new dependencies,
   model downloads, live services, or GPU work were used. Unrelated embedding-guard
   suites were outside this focused verification.
+
+### Unified experiment pipeline (November 2, 2026)
+
+Branch `vertex_refactor` uses `Experiment` for local and Vertex backends. Reference
+builds resume by source identity and commit complete embedding batches. Optional
+validation caching is shared. The Vertex callback API and `vertex_utils.py` are
+removed; the Matryoshka sweep reuses the shared metadata/vector iterator.
+
+Reference build finalization calls `LanceDBIndex.optimize()` before publishing
+index.json, including when no references are missing. LanceDB 0.40.0 defaults
+compact data and retain historical versions for seven days. Failed encoding batches
+save nothing, previously committed batches remain reusable, and optimization failures
+preserve the previous summary. No dependency changes or real service calls were used.
+
+Verification uses Pixi's installed default and jina-cpu environments with synthetic
+encoders, mocked Vertex transports, and real temporary LanceDB databases. Sandboxed
+runs stalled in the initial `lancedb.connect()` call, before experiment execution;
+CPU tests were rerun outside the sandbox. The final focused suites cover classification,
+Vertex, retrieval, Matryoshka, and tracking. Both focused CPU suites passed 228 tests
+and 111 subtests each. Ruff and the scoped ty check passed.
+
+The broader modern suite reported 326 passed, 2 skipped, and 10 failures; Jina reported
+326 passed, 3 skipped, and 9 failures before the final two recovery cases were added.
+All failures are in unchanged test_embeddings.py and unchanged embeddings.py: tests
+expect the removed `_check_dependency_family` helper or `version` symbol. These
+pre-existing loader/guard failures remain separate from this refactor.
+
+A small synthetic measurement used 256 float32 vectors of dimension 64, inserted
+in 32 batches, and 32 identical cosine queries before and after optimization.
+Current-version fragments decreased from 32 to 1. Local p50/p95 query times were
+3.26/3.52 ms before and 1.95/2.13 ms after. This single warm-process measurement
+establishes neither production throughput nor HPC/shared-filesystem performance.
+The integration test separately checks preservation of vectors, IDs, and query results.

@@ -12,7 +12,6 @@ from omegaconf.errors import OmegaConfBaseException
 from .experiment import Experiment
 from .matroyshka_sweep import evaluate_cached, run_sweep
 from .tracking import Tracker
-from .vertex_utils import VertexExperiment
 
 
 def download_model(model_name: str) -> None:
@@ -86,13 +85,10 @@ def _run_experiment(config: dict[str, Any], stage: str) -> None:
     if stage == "matroyshka-sweep":
         run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
         return
-    experiment_class = (
-        VertexExperiment if config.get("embedding", {}).get("model_id") == "google/ge-v2" else Experiment
-    )
-    experiment_class.validate_config(config)
+    Experiment.validate_config(config)
 
     def execute(effective: dict, tracker: Tracker) -> Any:
-        experiment = experiment_class(effective, tracker=tracker)
+        experiment = Experiment(effective, tracker=tracker)
         stages = {
             "describe": experiment.generate_descriptions,
             "index": experiment.build_vector_database,

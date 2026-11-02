@@ -181,6 +181,12 @@ class LanceDBIndex:
             on_bad_vectors="error",
         )
 
+    def optimize(self) -> None:
+        """Compact with LanceDB's default maintenance and version-retention policy."""
+        if self.table is None:
+            raise RuntimeError("Open or create the table before optimization")
+        self.table.optimize()
+
     def class_counts(self) -> Counter[str]:
         """Stream all class metadata, counting every stored row without loading vectors."""
         if self.table is None:
