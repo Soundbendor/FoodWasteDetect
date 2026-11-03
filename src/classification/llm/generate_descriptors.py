@@ -61,7 +61,7 @@ class DescriberLLM:
             messages=[prompt],
             format=FoodDescriptor.model_json_schema(),
         )
-        output = FoodDescriptor.model_validate_json(response.message.content)
+        output = FoodDescriptor.model_validate_json(response.message.content or "")
         output.food_class = label
         output.description = output.description.replace("*", "")
         return output

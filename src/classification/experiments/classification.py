@@ -45,7 +45,7 @@ class Experiment:
     def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         return validate_config(config)
 
-    def __init__(self, config: dict[str, Any], *, tracker: Tracker | None = None):
+    def __init__(self, config: dict[str, Any], *, tracker: Tracker | None = None) -> None:
         self.tracker = tracker
         # Load dataset metadata and settings
         self.config = validate_config(config)

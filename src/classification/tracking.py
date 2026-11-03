@@ -14,7 +14,7 @@ from classification.experiments.report_types import EvaluationReport
 class Tracker:
     """Track an experiment, uploading configuration and results artifacts to wandb."""
 
-    def __init__(self, run: wandb.Run):
+    def __init__(self, run: wandb.Run) -> None:
         self.run = run
 
     def configuration(self, config: dict[str, Any]) -> None:

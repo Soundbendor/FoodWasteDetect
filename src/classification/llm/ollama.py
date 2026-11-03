@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from types import TracebackType
+from typing import Any, Self
 
 import httpx
 from ollama import Client
@@ -13,7 +15,7 @@ from ollama import Client
 class OllamaSession:
     """Provide a client while managing only the server this session starts."""
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict[str, Any]) -> None:
         """Read required settings from the experiment's ollama configuration."""
         startup_timeout = config["startup_timeout"]
         request_timeout = config["request_timeout"]
@@ -23,13 +25,18 @@ class OllamaSession:
             self.host = "http://" + self.host
         self.startup_timeout = startup_timeout
         self.client = Client(host=self.host, timeout=request_timeout)
-        self._process: subprocess.Popen | None = None
+        self._process: subprocess.Popen[bytes] | None = None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self.start_server()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
     def close(self) -> None:

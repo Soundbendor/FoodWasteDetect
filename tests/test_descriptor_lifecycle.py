@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import httpx
+from pydantic import ValidationError
 
 from classification.experiments.config import validate_ollama_config
 from classification.llm import generate_descriptors as descriptors
@@ -76,6 +77,13 @@ class DescriptionTests(unittest.TestCase):
                     self.llm.generate_descriptions(['Apple', 'Pear'], 2)
                 self.assertIs(raised.exception, error)
                 describe.assert_called_once_with('Apple')
+
+    def test_missing_or_empty_response_content_fails_validation(self):
+        for content in (None, ""):
+            with self.subTest(content=content):
+                self.client.chat.return_value.message.content = content
+                with self.assertRaises(ValidationError):
+                    self.llm.describe_class("Apple")
 
     def test_single_description_preserves_label_and_removes_emphasis(self):
         response = self.llm.client.chat.return_value
