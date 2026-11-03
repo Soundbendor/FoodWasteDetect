@@ -509,7 +509,7 @@ class ExperimentTests(unittest.TestCase):
                 return np.array([[1., 0.] if 'Apple' in x else [0., 1.] for x in texts])
             def encode_images(self, images):
                 return np.array([[1., 0.] if image.getpixel((0, 0))[0] == 0 else [0., 1.] for image in images])
-        from internvl.generate_descriptors import DescriberLLM
+        from internvl.llm.generate_descriptors import DescriberLLM
         class Describer:
             generate_descriptions = DescriberLLM.generate_descriptions
             def __init__(self, config): pass

@@ -422,7 +422,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
 
 
 def test_description_bar_counts_requests_and_closes_on_failure(progress_bars):
-    from internvl.generate_descriptors import DescriberLLM
+    from internvl.llm.generate_descriptors import DescriberLLM
 
     llm = DescriberLLM.__new__(DescriberLLM)
     failure = RuntimeError("request failed")

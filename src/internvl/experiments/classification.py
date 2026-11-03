@@ -14,8 +14,8 @@ from tqdm import tqdm
 
 from ..encoders.base import Embedder
 from ..encoders.sentence_transformers import EmbeddingModel
-from ..generate_descriptors import DescriberLLM
 from ..image_dataset import load_dataset
+from ..llm.generate_descriptors import DescriberLLM
 from ..retrieval.lancedb import LanceDBIndex
 from ..retrieval.metrics import metrics, ranking_metrics
 from ..retrieval.voting import classify

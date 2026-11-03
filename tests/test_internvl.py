@@ -58,7 +58,7 @@ class CommandTests(unittest.TestCase):
                     patch("builtins.open", mock_open()) as opened,
                     patch(loader) as load,
                     patch("internvl.cli.Experiment") as experiment,
-                    patch("internvl.generate_descriptors.DescriberLLM") as descriptors,
+                    patch("internvl.llm.generate_descriptors.DescriberLLM") as descriptors,
                     self.assertRaises(type(failure)) as error,
                 ):
                     if source == "open":
@@ -113,7 +113,7 @@ class CommandTests(unittest.TestCase):
                 with patch.dict(
                     sys.modules,
                     {
-                        "internvl.generate_descriptors": backend,
+                        "internvl.llm.generate_descriptors": backend,
                         "yaml": yaml,
                         "util": None,
                     },
@@ -144,7 +144,7 @@ class CommandTests(unittest.TestCase):
                     patch.dict(
                         sys.modules,
                         {
-                            "internvl.generate_descriptors": backend,
+                            "internvl.llm.generate_descriptors": backend,
                             "yaml": yaml,
                         },
                     ),

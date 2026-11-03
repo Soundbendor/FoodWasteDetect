@@ -26,7 +26,6 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 | `tracking.py` | Publish resolved configuration, reference counts, and completed evaluation results. Read [tracking](../../docs/internvl/tracking.md) when changing W&B lifecycle, artifacts, summaries, or progress. |
 | `image_dataset.py` | Load local FoodX251 metadata and select/decode ordered batches. Read [data](../../docs/internvl/data.md) when changing splits, identities, image caps, or image ownership. |
 | `schemas.py` | Shared reference, neighbor, prediction, and retrieval-metric records. Read [data](../../docs/internvl/data.md#shared-records) when changing fields or record/vector associations. |
-| `generate_descriptors.py` | Class-description prompts, structured responses, and an owned Ollama process. Read [descriptions](../../docs/internvl/data.md#class-descriptions-and-ollama) when changing vocabulary generation or service lifecycle. |
 | `__init__.py` | Package description; no backend imports. |
 | `pyproject.toml`, `pixi.lock`, `.python-version`, `MANIFEST.in` | Standalone packaging, environment selection, tasks, and source-distribution inputs. Read [development](../../docs/development.md) before environment or packaging changes. |
 | `README.md` | Installation and running commands; edits require explicit approval under the root guide. |
@@ -37,6 +36,7 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 | --- | --- | --- |
 | `encoders/` | Shared batch interface, local Sentence Transformers, Vertex requests | [Guide](encoders/AGENTS.md); [model protocols](../../docs/internvl/encoders.md) for model, dimension, device, or request changes. |
 | `experiments/` | Orchestration, reference/cache construction, artifacts, configuration, dimension sweeps | [Guide](experiments/AGENTS.md); [experiment contracts](../../docs/internvl/experiments.md) for stage ordering, resumption, or report changes. |
+| `llm/` | Class-description prompts, structured responses, and owned Ollama processes | [Guide](llm/AGENTS.md); [descriptions](../../docs/internvl/data.md#class-descriptions-and-ollama) for vocabulary generation or service lifecycle changes. |
 | `retrieval/` | LanceDB adapter, voting, classification and ranking metrics | [Guide](retrieval/AGENTS.md); [retrieval contracts](../../docs/internvl/retrieval.md) for storage, search, scores, or evaluation changes. |
 | `scripts/` | Explicit maintenance and real-model checks | [Guide](scripts/AGENTS.md); [scripts](../../docs/internvl/scripts.md) for smoke checks or Slurm submission changes. |
 

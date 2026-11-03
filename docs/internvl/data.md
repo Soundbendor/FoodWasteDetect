@@ -75,7 +75,7 @@ sentences. The default classification YAML shares the existing vocabulary under
 limitation](experiments.md#description-inputs) before using a generated vocabulary
 in `index` or `run`.
 
-[`generate_descriptors.py`](../../src/internvl/generate_descriptors.py) owns the
+[`generate_descriptors.py`](../../src/internvl/llm/generate_descriptors.py) owns the
 prompt and service process. `DescriberLLM.generate_descriptions(classes, count)`
 loops through classes and requests; `describe_class(label)` uses the shared visual
 prompt. Pydantic validates the `FoodDescriptor` response, the requested class label

@@ -17,7 +17,7 @@ from .tracking import Tracker
 def download_model(model_name: str) -> None:
     import yaml
 
-    from .generate_descriptors import DescriberLLM
+    from .llm.generate_descriptors import DescriberLLM
 
     with open("cfg/experiment_config_internvl.yml", encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)

@@ -53,6 +53,7 @@ See [development](docs/development.md) for checks and hardware-selection boundar
 Start with [internvl](src/internvl/AGENTS.md) for package ownership, CLI, tracking,
 and top-level files. For changes within a subpackage, also read its guide:
 [encoders](src/internvl/encoders/AGENTS.md),
+[llm](src/internvl/llm/AGENTS.md),
 [experiments](src/internvl/experiments/AGENTS.md),
 [retrieval](src/internvl/retrieval/AGENTS.md), or
 [scripts](src/internvl/scripts/AGENTS.md).

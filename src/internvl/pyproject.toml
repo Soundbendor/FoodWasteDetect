@@ -36,7 +36,7 @@ dependencies = [
 internvl = "internvl.cli:main"
 
 [tool.setuptools]
-packages = ["internvl", "internvl.scripts", "internvl.encoders", "internvl.retrieval", "internvl.experiments"]
+packages = ["internvl", "internvl.scripts", "internvl.llm", "internvl.encoders", "internvl.retrieval", "internvl.experiments"]
 package-dir = {internvl = "."}
 
 [tool.setuptools.package-data]
