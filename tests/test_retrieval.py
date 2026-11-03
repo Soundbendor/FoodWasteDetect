@@ -254,7 +254,7 @@ def test_identity_scan_and_vector_fetch_preserve_source_and_order(tmp_path):
     order = np.random.default_rng(12).permutation(26)
     index.append([records[i] for i in order], vectors[order])
     identities = [(record.source_kind, record.source_identity) for record in records]
-    assert sorted(index.identities()) == sorted(identities)
+    assert sorted(index.get_record_ids()) == sorted(identities)
     requested = list(reversed(range(26))) + [3, 0]
     np.testing.assert_array_equal(
         index.fetch_vectors([identities[i] for i in requested]), vectors[requested],

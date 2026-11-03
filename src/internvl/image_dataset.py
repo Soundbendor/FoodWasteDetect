@@ -89,21 +89,17 @@ class FoodX251ImageDataset:
         """Return the official labeled validation split used for evaluation."""
         return self.splits["validation"]
 
-    def iter_batches(
-        self,
-        split: str,
-        batch_size: int,
+    @staticmethod
+    def select_images(
+        dataset: Dataset,
         *,
         n_imgs_per_class: int | None = None,
         excluded_source_ids: set[str] | None = None,
-        decode: bool = True,
-    ) -> Iterator[dict[str, list]]:
-        """Yield annotation-order batches, optionally metadata only without image reads.
+    ) -> Dataset:
+        """Select in annotation order without decoding or changing the input dataset.
 
-        Apply the per-class cap before identity exclusion and decoding. Decoded
-        images belong to the caller and are released through garbage collection.
+        Apply the class cap before exclusions so resumption preserves the selection.
         """
-        dataset = self.splits[SPLIT_NAMES.get(split, split)]
         if n_imgs_per_class is not None:
             counts: Counter[str] = Counter()
             indices: list[int] = []
@@ -117,13 +113,35 @@ class FoodX251ImageDataset:
                 i for i, source_id in enumerate(dataset["source_id"])
                 if source_id not in excluded_source_ids
             ])
+        return dataset
+
+    @staticmethod
+    def iter_dataset_batches(
+        dataset: Dataset, batch_size: int, *, decode: bool = True
+    ) -> Iterator[dict[str, list]]:
+        """Batch a prepared dataset, decoding images only when requested."""
         if not decode:
             dataset = dataset.remove_columns("image")
         else:
             dataset = dataset.cast_column("image", Image())
-        return dataset.iter(
-            batch_size=batch_size, drop_last_batch=False
+        return dataset.iter(batch_size=batch_size, drop_last_batch=False)
+
+    def iter_batches(
+        self,
+        split: str,
+        batch_size: int,
+        *,
+        n_imgs_per_class: int | None = None,
+        excluded_source_ids: set[str] | None = None,
+        decode: bool = True,
+    ) -> Iterator[dict[str, list]]:
+        """Select and batch a split, applying caps before exclusion and decoding."""
+        dataset = self.select_images(
+            self.splits[SPLIT_NAMES.get(split, split)],
+            n_imgs_per_class=n_imgs_per_class,
+            excluded_source_ids=excluded_source_ids,
         )
+        return self.iter_dataset_batches(dataset, batch_size, decode=decode)
 
 
 def load_dataset(config: dict[str, str]) -> FoodX251ImageDataset:

@@ -196,7 +196,7 @@ class LanceDBIndex:
             counts.update(batch.column(0).to_pylist())
         return counts
 
-    def identities(self) -> list[SourceIdentity]:
+    def get_record_ids(self) -> list[SourceIdentity]:
         """Scan all identity metadata without reading vectors."""
         if self.table is None:
             raise RuntimeError("Open or create the table before scanning")

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
+from datasets import Dataset
 from PIL import Image
 from tqdm import tqdm
 
@@ -21,6 +22,8 @@ from .image_dataset import load_dataset
 from .retrieval import LanceDBIndex, classify, metrics, ranking_metrics
 from .schemas import ImageMetadata, Neighbor, PointRecord, Prediction
 from .tracking import Tracker
+
+type EmbeddingBatch = tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -66,7 +69,7 @@ def validate_config(config: dict) -> dict:
 
 
 def _extract_batch_metadata(batch: dict[str, list]) -> list[ImageMetadata]:
-    """Extract metadata from image batch, for use in LanceDB records."""
+    """Convert metadata columns into ordered report rows, omitting images."""
     metadata = batch.copy()
     metadata.pop("image", None)
     return [
@@ -95,12 +98,11 @@ def _prediction(
     }
 
 
-# TODO: why do we need this function?
 def cached_batches(
     cache: LanceDBIndex,
     metadata_batches: Iterable[dict[str, list]],
-) -> Iterator[tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]]:
-    """Fetch vectors from LanceDB table."""
+) -> Iterator[EmbeddingBatch]:
+    """Pair metadata with cached vectors in source identity order."""
     for batch in metadata_batches:
         yield (
             batch,
@@ -142,7 +144,7 @@ class Experiment:
 
     @property
     def embedder(self) -> Embedder:
-        """Construct the embedder on first use and reuse it across stages."""
+        """Lazy-loading for embedding model."""
         if self._embedder is None:
             self._embedder = self._create_embedder()
         return self._embedder
@@ -182,7 +184,7 @@ class Experiment:
 
     def _evaluation_batches(
         self,
-    ) -> Iterator[tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]]:
+    ) -> Iterator[EmbeddingBatch]:
         """Encode uncached validation images in bounded batches."""
         for batch in self.dataset.iter_batches("val", self.batch_size):
             vectors = self.embedder.encode_images(batch.pop("image"))
@@ -254,63 +256,67 @@ class Experiment:
     def _insert_image_records(
         self,
         index: LanceDBIndex,
+        dataset: Dataset,
         *,
         split: Literal["train", "val"],
-        excluded_source_ids: set[str] | None = None,
     ) -> Counter[str]:
-        """Decode and persist only missing images, applying training caps first."""
+        """Decode and persist the prepared image dataset in batches."""
         kind = "training_image" if split == "train" else "validation_image"
         counts: Counter[str] = Counter()
         description = "Image references" if split == "train" else "Validation embeddings"
         with tqdm(desc=description, unit="image", mininterval=5) as progress:
-            for batch in self.dataset.iter_batches(
-                split,
-                self.batch_size,
-                n_imgs_per_class=self.config.get("n_imgs_per_class") if split == "train" else None,
-                excluded_source_ids=excluded_source_ids,
-            ):
+            for batch in self.dataset.iter_dataset_batches(dataset, self.batch_size):
                 records = [
-                    PointRecord(row["class"], kind, row["source_id"], row["fname"])
-                    for row in _extract_batch_metadata(batch)
+                    PointRecord(label, kind, source_id, fname)
+                    for label, source_id, fname in zip(
+                        batch["class"], batch["source_id"], batch["fname"], strict=True
+                    )
                 ]
                 self._save_image_batch(index, records, batch["image"])
                 counts.update(record.source_kind for record in records)
                 progress.update(len(records))
         return counts
 
-    def _prepare_reference_inputs(self) -> list[PointRecord]:
-        records = self._get_text_inputs()
+    def _prepare_reference_inputs(self) -> tuple[Dataset | None, list[PointRecord]]:
+        images = None
         if self.config["embed_images"]:
-            represented: set[str] = set()
-            for batch in self.dataset.iter_batches(
-                "train",
-                self.batch_size,
-                decode=False,
+            images = self.dataset.select_images(
+                self.dataset.train_set(),
                 n_imgs_per_class=self.config.get("n_imgs_per_class"),
-            ):
-                represented.update(batch["class"])
-            missing = set(self.classes) - represented
+            )
+            missing = set(self.classes) - set(images["class"])
             if missing:
                 raise ValueError(f"Missing usable training references for {missing}")
-        return records
+        return images, self._get_text_inputs()
 
     def build_vector_database(self) -> dict:
-        """Resume missing references, optimize, and publish the completed build."""
+        """Generate embedding vectors from training data, storing in LanceDB table.
+
+        From training dataset (including class labels, description captions, and images), run
+        embedding model to generate vectors and store embeddings in LanceDB."""
         index = self._lancedb_adapter()
-        records = self._prepare_reference_inputs()
         if index.exists():
+            logging.info("Loading existing table...")
             index.open()
-            identities = index.identities()
+            # Load a list of files which are already stored in the vector db
+            vector_ids = index.get_record_ids()
         else:
             index.create(self.embedder.dimension)
-            identities = []
-        saved = frozenset(identities)
-        pending = [r for r in records if (r.source_kind, r.source_identity) not in saved]
-        excluded = {identity for kind, identity in saved if kind == "training_image"}
-        counts = Counter(kind for kind, _ in identities)
-        counts.update(self._insert_references(index, pending, excluded))
+            vector_ids = []
+        images, records = self._prepare_reference_inputs()
+        # convert to set for efficient filtering
+        existing_ids = frozenset(vector_ids)
+        new_record_refs = [
+            r for r in records if (r.source_kind, r.source_identity) not in existing_ids
+        ]
+        if images is not None:
+            excluded = {identity for kind, identity in existing_ids if kind == "training_image"}
+            images = self.dataset.select_images(images, excluded_source_ids=excluded)
+        counts = Counter(kind for kind, _ in vector_ids)
+        counts.update(self._insert_references(index, new_record_refs, images))
         if not counts:
             raise ValueError("No records inserted into LanceDB - check dataset and config.")
+        logging.info("Compressing LanceDB table...")
         index.optimize()
         return self._publish_index(index, counts)
 
@@ -318,17 +324,11 @@ class Experiment:
         self,
         index: LanceDBIndex,
         records: list[PointRecord],
-        excluded_source_ids: set[str] | None = None,
+        images: Dataset | None,
     ) -> Counter[str]:
         counts = self._insert_text_records(index, records)
-        if self.config["embed_images"]:
-            counts.update(
-                self._insert_image_records(
-                    index,
-                    split="train",
-                    excluded_source_ids=excluded_source_ids,
-                )
-            )
+        if images is not None:
+            counts.update(self._insert_image_records(index, images, split="train"))
         return counts
 
     def _publish_index(self, index: LanceDBIndex, counts: Counter[str]) -> dict:
@@ -353,8 +353,11 @@ class Experiment:
             cache.open()
         else:
             cache.create(self.embedder.dimension)
-        excluded = {identity for kind, identity in cache.identities() if kind == "validation_image"}
-        self._insert_image_records(cache, split="val", excluded_source_ids=excluded)
+        excluded = {
+            identity for kind, identity in cache.get_record_ids() if kind == "validation_image"
+        }
+        images = self.dataset.select_images(self.dataset.test_set(), excluded_source_ids=excluded)
+        self._insert_image_records(cache, images, split="val")
         return cache
 
     def evaluate(self) -> dict:
@@ -372,9 +375,7 @@ class Experiment:
 
     def evaluate_from_batches(
         self,
-        batches: Iterable[
-            tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
-        ],
+        batches: Iterable[EmbeddingBatch],
     ) -> dict:
         """Evaluate supplied, ordered metadata/vector batches through standard reporting."""
         index, artifact = self._prepare_evaluation()
@@ -405,9 +406,7 @@ class Experiment:
         self,
         index: LanceDBIndex,
         artifact: dict,
-        batches: Iterable[
-            tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
-        ],
+        batches: Iterable[EmbeddingBatch],
     ) -> dict:
         k = self.config["k"]
         if type(k) is not int or k <= 0:

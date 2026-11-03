@@ -322,7 +322,7 @@ class ExperimentTests(unittest.TestCase):
                         getattr(exp, stage)()
 
     def test_bad_batch_columns_and_vector_counts_fail(self):
-        original = self.dataset.iter_batches
+        original = self.dataset.iter_dataset_batches
         for stage in ('build_vector_database', 'evaluate'):
             for failure in ('columns', 'vectors'):
                 with self.subTest(stage=stage, failure=failure):
@@ -330,8 +330,8 @@ class ExperimentTests(unittest.TestCase):
                     if stage == 'evaluate':
                         exp.build_vector_database()
 
-                    def batches(split, size, **kwargs):
-                        for batch in original(split, size, **kwargs):
+                    def batches(dataset, size, **kwargs):
+                        for batch in original(dataset, size, **kwargs):
                             if failure == 'columns':
                                 batch['source_id'] = batch['source_id'][:-1]
                             yield batch
@@ -340,11 +340,30 @@ class ExperimentTests(unittest.TestCase):
                     def short_vectors(batch):
                         return encode(batch)[:-1]
 
-                    with patch.object(self.dataset, 'iter_batches', side_effect=batches), \
+                    with patch.object(self.dataset, 'iter_dataset_batches', side_effect=batches), \
                          patch.object(exp.embedder, 'encode_images', side_effect=short_vectors if failure == 'vectors' else encode):
                         with self.assertRaises(ValueError):
                             getattr(exp, stage)()
                     self.assert_no_failed_report(exp, stage)
+
+    def test_image_insertion_rejects_mismatched_unused_metadata_before_encoding(self):
+        exp = self.experiment((True, False, False))
+        for split in ('train', 'val'):
+            for field in ('source_split', 'extra'):
+                with self.subTest(split=split, field=field):
+                    batch = {
+                        'class': ['Apple', 'Pear'], 'source_id': ['0', '1'],
+                        'fname': ['apple.png', 'pear.png'], 'source_split': [split, split],
+                        'extra': ['first', 'second'], 'image': [object(), object()],
+                    }
+                    batch[field].pop()
+                    with patch.object(self.dataset, 'iter_dataset_batches', return_value=iter([batch])), \
+                         patch.object(exp, '_save_image_batch') as save:
+                        with self.assertRaisesRegex(ValueError, 'metadata column length mismatch'):
+                            exp._insert_image_records(
+                                exp._lancedb_adapter(), self.dataset.train_set(), split=split
+                            )
+                        save.assert_not_called()
 
     def test_database_failures_and_interrupts_propagate(self):
         for stage, method in [('build_vector_database', 'append'), ('evaluate', 'query')]:
@@ -367,8 +386,9 @@ class ExperimentTests(unittest.TestCase):
             Dataset.from_list([extra]).cast_column('image', HFImage(decode=False)),
         ])
         exp = self.experiment((True, False, False))
-        with patch.object(self.dataset, 'train_set', side_effect=AssertionError('Extra metadata pass')):
+        with patch.object(self.dataset, 'iter_dataset_batches', wraps=self.dataset.iter_dataset_batches) as batches:
             artifact = exp.build_vector_database()
+        batches.assert_called_once()
         stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
         self.assertEqual(artifact['source_counts'], {'training_image': 3})
         self.assertEqual({p['source_identity'] for p in stored}, {'0', '1', 'extra'})
@@ -404,6 +424,7 @@ class ExperimentTests(unittest.TestCase):
         exp.config['n_imgs_per_class'] = 1
         with self.assertRaisesRegex(ValueError, 'Missing usable training references'):
             exp.build_vector_database()
+        self.assertFalse(exp._lancedb_adapter().exists())
         self.assertFalse((exp.output / 'index.json').exists())
 
     def test_artifact_formats_and_direct_loading_remain_compatible(self):
@@ -540,6 +561,54 @@ class ExperimentTests(unittest.TestCase):
         self.assertFalse(train.features['image'].decode)
         self.assertEqual(len(train), 5)
 
+    def test_prepare_images_before_batching_keeps_cap_and_original_split(self):
+        rows = self.interleaved_training()
+        original = self.dataset.train_set()
+        with patch('PIL.Image.open', side_effect=AssertionError('Eager image decode')):
+            selected = self.dataset.select_images(original, n_imgs_per_class=2)
+            pending = self.dataset.select_images(
+                selected, excluded_source_ids={rows[0]['source_id'], rows[4]['source_id']}
+            )
+        self.assertEqual(list(pending['source_id']), [rows[1]['source_id'], rows[2]['source_id']])
+        self.assertFalse(pending.features['image'].decode)
+        self.assertIs(self.dataset.train_set(), original)
+        self.assertEqual(list(original['source_id']), [row['source_id'] for row in rows])
+        batches = list(self.dataset.iter_dataset_batches(pending, 1))
+        self.assertEqual([batch['source_id'][0] for batch in batches],
+                         [rows[1]['source_id'], rows[2]['source_id']])
+        for batch in batches:
+            batch['image'][0].close()
+
+    def test_resume_passes_only_missing_capped_images_to_insertion(self):
+        import numpy as np
+
+        rows = self.interleaved_training()
+        exp = self.experiment((True, True, False), 'resume-filtered')
+        exp.config['n_imgs_per_class'] = 2
+        index = exp._lancedb_adapter()
+        index.create(2)
+        saved = [
+            PointRecord(rows[i]['class'], 'training_image', rows[i]['source_id'], rows[i]['fname'])
+            for i in (0, 1, 4)
+        ]
+        saved.append(PointRecord('Apple', 'class_name', 'Apple', 'Apple'))
+        index.append(saved, np.ones((len(saved), 2)))
+        Path(rows[0]['fname']).unlink()
+        Path(rows[1]['fname']).write_bytes(b'corrupt')
+        Path(rows[4]['fname']).unlink()
+        with patch.object(exp, '_insert_references', wraps=exp._insert_references) as insert:
+            artifact = exp.build_vector_database()
+        image_dataset = insert.call_args.args[2]
+        self.assertEqual(list(image_dataset['source_id']), [rows[2]['source_id']])
+        self.assertEqual(artifact['source_counts'], {'training_image': 4, 'class_name': 2})
+        stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
+        self.assertEqual(
+            {row['source_identity'] for row in stored if row['source_kind'] == 'training_image'},
+            {rows[i]['source_id'] for i in (0, 1, 2, 4)},
+        )
+        self.assertTrue({record.id for record in saved} <= {row['id'] for row in stored})
+        self.assertEqual(len(self.dataset.train_set()), 5)
+
     def test_capped_index_vectors_counts_and_full_evaluation(self):
         rows = self.interleaved_training()
         for limit, selected in [(None, [0, 1, 2, 3, 4]), (1, [0, 1]), (2, [0, 1, 2, 4]), (20, [0, 1, 2, 3, 4])]:
@@ -637,7 +706,8 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment((False, True, True))
         exp.config['n_imgs_per_class'] = 1
         exp.generate_descriptions()
-        with patch.object(self.dataset, 'iter_batches', side_effect=AssertionError('Read images')):
+        with patch.object(self.dataset, 'train_set', side_effect=AssertionError('Read images')), \
+             patch.object(self.dataset, 'iter_dataset_batches', side_effect=AssertionError('Batch images')):
             artifact = exp.build_vector_database()
         self.assertEqual(artifact['source_counts'], {'class_name': 2, 'generated_description': 10})
 

@@ -443,11 +443,20 @@ no vectors; earlier committed batches survive. Vertex still cancels queued reque
 waits for running workers, and closes the client on failure. Restart may repeat paid
 requests from the unfinished batch. Storage errors propagate without write retries.
 Progress and counts advance only after successful appends.
+Dataset batches remain column-oriented. Image insertion constructs `PointRecord`s
+directly from the batch columns after checking metadata column lengths. Cached and
+uncached evaluation pass ordered metadata/vector pairs as `EmbeddingBatch` values;
+metadata is converted to rows for predictions and reporting.
 
 Reference builds resume for all backends by `(source_kind, source_identity)`.
 One unlimited metadata-only scan supplies saved identities and initial counts,
-including duplicate and extra stored rows. Training caps precede saved-identity
-exclusion, which precedes image decoding. UUIDs and existing rows are preserved.
+including duplicate and extra stored rows. A build opens an existing table first,
+selects the unbatched training split, validates class coverage and prepares text,
+then removes saved text references and training images before insertion. Training
+caps precede saved-identity exclusion; batching and image decoding follow it.
+Selection leaves the original splits unchanged. `select_images()` and
+`iter_dataset_batches()` separate selection from batching; `iter_batches()` remains
+available for split-based callers. UUIDs and existing rows are preserved.
 After successful insertion, including no-work resumes, `LanceDBIndex.optimize()`
 uses LanceDB defaults before publishing index.json. This compacts files and applies
 seven-day historical-version retention with `delete_unverified=False`. Failures

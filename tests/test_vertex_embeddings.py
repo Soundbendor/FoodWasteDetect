@@ -480,13 +480,13 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     assert summary["source_counts"] == {
         "class_name": 1, "generated_description": 2, "training_image": 12}
     index.open()
-    assert len(index.identities()) == 15
+    assert len(index.get_record_ids()) == 15
     assert set(old_ids) <= {r["id"] for r in index.table.search().limit(None).to_list()}
     report = experiment.evaluate()
     assert len(requests) == 15
     assert [r["source_id"] for r in report["predictions"]] == [
         f"foodx251:val:{i}.png" for i in range(13)]
-    assert {kind for kind, _ in index.identities()} == {
+    assert {kind for kind, _ in index.get_record_ids()} == {
         "class_name", "generated_description", "training_image"}
     (experiment.output / "index.json").unlink()
     # Cached runs must work even when all image files are missing.
@@ -530,7 +530,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
     table = config["lancedb"]["validation_table" if stage == "validation" else "table"]
     index = LanceDBIndex(config["lancedb"]["uri"], table)
     index.open()
-    saved = set(index.identities())
+    saved = set(index.get_record_ids())
     assert len(saved) == committed
     expected = {}
     if stage == "reference":
@@ -559,7 +559,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
                 submitted.append(image.getpixel((0, 0))[0])
     assert Counter(submitted) == Counter(value for key, value in expected.items() if key not in saved)
     index.open()
-    assert len(index.identities()) == total
+    assert len(index.get_record_ids()) == total
 
 
 @pytest.mark.parametrize("value", [None, False, 0, "", [], 1, "true", [1]])
@@ -579,7 +579,7 @@ def test_cache_toggle_truthiness(transport, resume_config, value):
         cache = LanceDBIndex(resume_config["lancedb"]["uri"],
                              resume_config["lancedb"]["validation_table"])
         cache.open()
-        assert len(cache.identities()) == 13
+        assert len(cache.get_record_ids()) == 13
         resume_config["lancedb"]["validation_table"] = resume_config["lancedb"]["table"]
         with pytest.raises(ValueError, match="distinct"):
             Experiment.validate_config(resume_config)
@@ -751,14 +751,14 @@ def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config
     # Counts include duplicate and unrequested stored rows; filtering is a set.
     index.append([PointRecord("Apple", "class_name", identity, identity)
                   for identity in ("Apple", "Apple", "old")], np.ones((3, 128)))
-    original = LanceDBIndex.identities
+    original = LanceDBIndex.get_record_ids
     scans = []
 
-    def identities(index):
+    def get_record_ids(index):
         scans.append(index.name)
         return original(index)
 
-    with patch.object(LanceDBIndex, "identities", identities):
+    with patch.object(LanceDBIndex, "get_record_ids", get_record_ids):
         summary = experiment.build_vector_database()
     assert scans == [index.name]
     assert summary["source_counts"] == {
@@ -791,7 +791,7 @@ def test_validation_cache_completes_before_classification(transport, resume_conf
     def query(index, vector, k):
         cache = LanceDBIndex(index.uri, resume_config["lancedb"]["validation_table"])
         cache.open()
-        assert len(cache.identities()) == 13
+        assert len(cache.get_record_ids()) == 13
         return original(index, vector, k)
 
     with patch.object(LanceDBIndex, "query", query):
