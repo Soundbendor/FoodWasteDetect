@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from classification.datasets.image_dataset import load_dataset
 from classification.encoders.base import Embedder
@@ -19,6 +20,11 @@ from classification.experiments.config import validate_config, validate_ollama_c
 from classification.experiments.descriptions import load_descriptions
 from classification.experiments.evaluation import evaluate_batches
 from classification.experiments.index_builder import IndexBuilder
+from classification.experiments.report_types import (
+    EvaluationReport,
+    IndexSummary,
+    LoadedIndexSummary,
+)
 from classification.llm.generate_descriptors import DescriberLLM
 from classification.llm.ollama import OllamaSession
 from classification.retrieval.lancedb import LanceDBIndex
@@ -36,10 +42,10 @@ class Experiment:
     """
 
     @staticmethod
-    def validate_config(config: dict) -> dict:
+    def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         return validate_config(config)
 
-    def __init__(self, config: dict, *, tracker: Tracker | None = None):
+    def __init__(self, config: dict[str, Any], *, tracker: Tracker | None = None):
         self.tracker = tracker
         # Load dataset metadata and settings
         self.config = validate_config(config)
@@ -129,13 +135,13 @@ class Experiment:
             batch_size=self.batch_size,
         )
 
-    def build_vector_database(self) -> dict:
+    def build_vector_database(self) -> IndexSummary:
         index, counts = self._index_builder().build_reference_index()
         return self._publish_index(index, counts)
 
-    def _publish_index(self, index: LanceDBIndex, counts: Counter[str]) -> dict:
+    def _publish_index(self, index: LanceDBIndex, counts: Counter[str]) -> IndexSummary:
         """Write training summary to log file, update wandb tracking"""
-        artifact = dict(
+        artifact: IndexSummary = dict(
             table=index.name,
             uri=str(index.uri),
             source_counts=counts,
@@ -147,7 +153,7 @@ class Experiment:
             self.tracker.reference_counts(dict(counts))
         return artifact
 
-    def evaluate(self) -> dict:
+    def evaluate(self) -> EvaluationReport:
         """Complete optional validation caching, then classify the full split."""
         index, artifact = self._prepare_evaluation()
         if self.config.get("cache_validation_embeddings", False):
@@ -165,20 +171,20 @@ class Experiment:
     def evaluate_from_batches(
         self,
         batches: Iterable[EmbeddingBatch],
-    ) -> dict:
+    ) -> EvaluationReport:
         """Evaluate supplied, ordered metadata/vector batches through standard reporting."""
         index, artifact = self._prepare_evaluation()
         return self._execute_evaluation(index, artifact, batches)
 
-    def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict]:
+    def _prepare_evaluation(self) -> tuple[LanceDBIndex, LoadedIndexSummary]:
         table = self.config["lancedb"]["table"]
         index = self._lancedb_adapter()
         index.open()
-        artifact = {}
+        artifact: LoadedIndexSummary = {}
         path = self.output / "index.json"
         if path.exists():
             logging.info("Loading index.json from checkpoint...")
-            summary = json.loads(path.read_text(encoding="utf-8"))
+            summary: LoadedIndexSummary = json.loads(path.read_text(encoding="utf-8"))
             # Only attach metadata identifying this database and table.
             saved_uri = summary.get("uri")
             if (
@@ -194,9 +200,9 @@ class Experiment:
     def _execute_evaluation(
         self,
         index: LanceDBIndex,
-        artifact: dict,
+        artifact: LoadedIndexSummary,
         batches: Iterable[EmbeddingBatch],
-    ) -> dict:
+    ) -> EvaluationReport:
         predictions = evaluate_batches(
             batches,
             query=index.query,
@@ -204,7 +210,7 @@ class Experiment:
             k=self.config["k"],
             expected_count=len(self.dataset.validation_set()),
         )
-        report = dict(
+        report: EvaluationReport = dict(
             config=self.config,
             table=index.name,
             reference_source_counts=artifact.get("source_counts"),
@@ -219,7 +225,7 @@ class Experiment:
             self.tracker.evaluation(report, report_path)
         return report
 
-    def run(self) -> dict:
+    def run(self) -> EvaluationReport:
         """Describe, index, and evaluate, closing Ollama before loading the embedder."""
         self.generate_descriptions()  # Owned Ollama context exits before embedder construction.
         self.build_vector_database()

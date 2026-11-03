@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import wandb
 import yaml
+
+from classification.experiments.report_types import EvaluationReport
 
 
 class Tracker:
@@ -14,22 +17,22 @@ class Tracker:
     def __init__(self, run: wandb.Run):
         self.run = run
 
-    def configuration(self, config: dict) -> None:
+    def configuration(self, config: dict[str, Any]) -> None:
         """Publish the resolved configuration, including overrides."""
         artifact = wandb.Artifact(f"configuration-{self.run.id}", type="configuration")
         with artifact.new_file("resolved_config.yaml", encoding="utf-8") as stream:
             yaml.safe_dump(config, stream, sort_keys=False)
         self.run.log_artifact(artifact)
 
-    def reference_counts(self, counts: dict | None) -> None:
+    def reference_counts(self, counts: dict[str, int] | None) -> None:
         self.run.summary["reference_source_counts"] = counts
 
-    def evaluation(self, report: dict, report_path: Path) -> None:
+    def evaluation(self, report: EvaluationReport, report_path: Path) -> None:
         metrics = report["metrics"]
         self.run.summary.update(
             {
-                f"evaluation/{key}": metrics[key]
-                for key in metrics if key != "per_class"
+                f"evaluation/{key}": value
+                for key, value in metrics.items() if key != "per_class"
             }
         )
         self.run.log(

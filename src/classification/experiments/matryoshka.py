@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterator
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import lancedb
 import numpy as np
@@ -16,6 +16,7 @@ from classification.experiments.artifacts import write_json
 from classification.experiments.batches import cached_batches
 from classification.experiments.classification import Experiment
 from classification.experiments.config import validate_config as validate_experiment_config
+from classification.experiments.report_types import EvaluationReport
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.tracking import Tracker
 
@@ -81,7 +82,7 @@ def prepare_table(
     connection.create_table(destination, data=reader, schema=schema, mode="create", exist_ok=False)
 
 
-def evaluate_cached(config: dict, tracker: Tracker) -> dict:
+def evaluate_cached(config: dict[str, Any], tracker: Tracker) -> EvaluationReport:
     experiment = Experiment(config, tracker=tracker)
     options = config["lancedb"]
     cache = LanceDBIndex(options["uri"], options["validation_table"])
@@ -94,7 +95,10 @@ def evaluate_cached(config: dict, tracker: Tracker) -> dict:
     )
 
 
-def run_sweep(config: dict, evaluate: Callable[[dict], tuple[dict, str]]) -> dict:
+def run_sweep(
+    config: dict[str, Any],
+    evaluate: Callable[[dict[str, Any]], tuple[EvaluationReport, str]],
+) -> dict[str, list[dict[str, Any]]]:
     """Prepare each dimension and publish a combined summary only after all succeed."""
     validate_config(config)
     uri = Path(config["lancedb"]["uri"]).expanduser().resolve()

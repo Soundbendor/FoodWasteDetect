@@ -42,7 +42,7 @@ class PointRecord:
     value: str
     id: str = field(default_factory=lambda: str(uuid4()))
 
-    def to_payload(self) -> dict:
+    def to_payload(self) -> dict[str, str]:
         """Keep the stored class key, which is a reserved word in Python."""
         return {
             'id': self.id,
