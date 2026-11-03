@@ -19,13 +19,20 @@ def validate_ollama_config(settings: Mapping[str, Any]) -> None:
             raise ValueError(f"ollama.{name} must be positive finite seconds")
 
 
-# TODO: Review overly defensive config checks
 def validate_config(config: dict) -> dict:
-    """Validate experiment config does not force exp pipeline into invalid state.
+    """Check reference switches, retrieval limits, and output/cache destinations.
 
-    - Require that at least one modality (class labels, images, descriptions)
-        is used in training dataset
-    - Ensure that results output directory is not nested inside data directory.
+    Require at least one reference source, a positive integer k, and a null or
+    positive integer image cap. Booleans are invalid for both integer settings.
+    Output must stay outside the raw dataset; enabled validation caching needs a
+    nonempty table name distinct from the references.
+
+    Returns:
+        The supplied configuration unchanged.
+
+    Raises:
+        ValueError: A checked setting violates these constraints.
+        KeyError: A required setting is missing.
     """
     if type(config["k"]) is not int or config["k"] <= 0:
         raise ValueError("k must be a positive integer")

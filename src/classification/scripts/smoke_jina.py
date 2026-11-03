@@ -86,6 +86,11 @@ def _worker() -> None:
 
 
 def main() -> None:
+    """Run the Jina CPU check in a worker with temporary model caches.
+
+    The check can download weights. Worker shutdown precedes cache removal,
+    including when the parent receives a termination signal.
+    """
     if sys.argv[1:] == ["--worker"]:
         _worker()
     elif sys.argv[1:]:

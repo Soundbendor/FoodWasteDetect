@@ -16,6 +16,11 @@ from classification.tracking import Tracker
 
 
 def download_model(model_name: str) -> None:
+    """Pull a model using the working directory's legacy Ollama configuration.
+
+    Read ``cfg/experiment_config_internvl.yml`` and close the owned server when
+    the pull completes or fails. The requested name overrides ``ollama.llm``.
+    """
     import yaml
 
     from classification.llm.ollama import OllamaSession

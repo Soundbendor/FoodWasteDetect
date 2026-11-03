@@ -33,6 +33,20 @@ class VertexEmbeddingModel(Embedder):
         classification_prompt: bool = False,
         truncate_dim: int | None = None,
     ) -> None:
+        """Configure Vertex requests; each nonempty encode call owns its client.
+
+        Args:
+            project: Google Cloud project used for Vertex requests.
+            location: Vertex endpoint location.
+            max_concurrency: Maximum number of concurrent record requests.
+            max_attempts: Total SDK attempts per request, including the first.
+            request_timeout: Positive finite seconds allowed per attempt.
+            classification_prompt: Prefix text and images with the classification prompt.
+            truncate_dim: Output dimension from 128 through 3072, or None for 3072.
+
+        Raises:
+            ValueError: A setting is outside its supported range or has an invalid type.
+        """
         self._validate_config(
             project=project,
             location=location,

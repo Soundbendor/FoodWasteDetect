@@ -16,7 +16,10 @@ class OllamaSession:
     """Provide a client while managing only the server this session starts."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Read required settings from the experiment's ollama configuration."""
+        """Construct a client from settings checked by ``validate_ollama_config``.
+
+        The context manager starts the server on entry and stops it on exit.
+        """
         startup_timeout = config["startup_timeout"]
         request_timeout = config["request_timeout"]
         self.binary_path = config["binary_path"]
@@ -40,7 +43,7 @@ class OllamaSession:
         self.close()
 
     def close(self) -> None:
-        """Safely shut down the Ollama server launched by this instance."""
+        """Terminate the owned server, killing it if the shutdown wait expires."""
         process = self._process
         if process is None:
             return

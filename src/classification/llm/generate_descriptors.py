@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 
 def descriptor_prompt(cleaned_item: str) -> dict[str, str]:
+    """Build a visual-description request using the supplied food label verbatim."""
     return {
         "role": "user",
         "content": (
@@ -19,19 +20,22 @@ def descriptor_prompt(cleaned_item: str) -> dict[str, str]:
     }
 
 
+# Keep the response schema unchanged: Pydantic includes class docstrings in JSON Schema.
 class FoodDescriptor(BaseModel):
     food_class: str
     description: str
 
 
 class DescriberLLM:
+    """Generate food descriptions through a caller-owned Ollama client."""
+
     def __init__(self, client: Client, model: str) -> None:
         """Use an existing client without starting or stopping a server."""
         self.client = client
         self.model = model
 
     def describe_class(self, label: str) -> FoodDescriptor:
-        """Generate one visual description using the shared class prompt."""
+        """Generate one description, preserving the supplied label and stripping asterisks."""
         return self._describe_class(label, descriptor_prompt(label))
 
     def generate_descriptions(
@@ -39,7 +43,17 @@ class DescriberLLM:
         classes: Sequence[str],
         count: int,
     ) -> dict[str, list[str]]:
-        """Generate descriptions with progress after each returned request."""
+        """Generate ``count`` descriptions per class, preserving request order.
+
+        Progress advances after each returned request. Request and validation
+        errors propagate without retries or a partial result.
+
+        Returns:
+            A mapping from each supplied class label to its description list.
+
+        Raises:
+            ValueError: A class has no descriptions or a description is blank.
+        """
         descriptions = {}
         with tqdm(
             total=len(classes) * count, desc="Descriptions", unit="description", mininterval=5,

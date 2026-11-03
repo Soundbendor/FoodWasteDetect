@@ -12,7 +12,7 @@ from classification.experiments.report_types import EvaluationReport
 
 
 class Tracker:
-    """Track an experiment, uploading configuration and results artifacts to wandb."""
+    """Publish configuration and results through a caller-owned W&B run."""
 
     def __init__(self, run: wandb.Run) -> None:
         self.run = run
@@ -25,9 +25,11 @@ class Tracker:
         self.run.log_artifact(artifact)
 
     def reference_counts(self, counts: dict[str, int] | None) -> None:
+        """Publish source counts, or null when no matching index summary exists."""
         self.run.summary["reference_source_counts"] = counts
 
     def evaluation(self, report: EvaluationReport, report_path: Path) -> None:
+        """Publish completed metrics and the report already saved at ``report_path``."""
         metrics = report["metrics"]
         self.run.summary.update(
             {

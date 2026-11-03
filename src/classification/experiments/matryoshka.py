@@ -1,4 +1,4 @@
-"""Evaluate truncated embedding dimensions from embeddings generated with Matroyshka representation learning"""
+"""Evaluate cached Gemini embeddings at native and shorter prefix dimensions."""
 
 from collections.abc import Callable, Iterator
 from copy import deepcopy
@@ -23,12 +23,14 @@ DIMENSIONS = (768, 1536, 3072)
 
 
 def table_names(config: dict, dimension: int) -> tuple[str, str]:
+    """Return reference/cache names, leaving native-dimension names unchanged."""
     suffix = f"_d{dimension}" if dimension != 3072 else ""
     options = config["lancedb"]
     return options["table"] + suffix, options["validation_table"] + suffix
 
 
 def validate_config(config: dict) -> None:
+    """Require Gemini source tables and distinct source/destination names."""
     validate_experiment_config(config)
     if config["embedding"].get("model_id") != "google/ge-v2":
         raise ValueError("matroyshka-sweep requires google/ge-v2 source tables")
@@ -82,6 +84,7 @@ def prepare_table(
 
 
 def evaluate_cached(config: dict[str, Any], tracker: Tracker) -> EvaluationReport:
+    """Evaluate cached vectors in validation order and publish the complete report."""
     experiment = Experiment(config, tracker=tracker)
     options = config["lancedb"]
     cache = LanceDBIndex.open(options["uri"], options["validation_table"])

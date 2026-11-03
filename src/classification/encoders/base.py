@@ -12,7 +12,12 @@ ImageInput = str | Path | Image.Image
 
 
 class Embedder(ABC):
-    """Encode text and images into vectors with a declared dimension."""
+    """Encode inputs as ordered float32 matrices with ``dimension`` columns.
+
+    Each input produces one finite, nonzero vector. Empty calls return shape
+    ``(0, dimension)``. Errors propagate without returning partial matrices.
+    Backends preserve their model's normalization and keep caller-owned images open.
+    """
 
     dimension: int
 
@@ -22,4 +27,4 @@ class Embedder(ABC):
 
     @abstractmethod
     def encode_images(self, images: Iterable[ImageInput]) -> NDArray[np.float32]:
-        """Encode image records in input order."""
+        """Encode paths or PIL images in input order, preserving caller-owned images."""

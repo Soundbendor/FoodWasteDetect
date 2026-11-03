@@ -15,6 +15,11 @@ from classification.schemas import Neighbor, PointRecord, SourceIdentity
 
 
 class LanceDBIndex:
+    """Store and query references through an open local LanceDB table.
+
+    Use open() for existing tables or create() for a new fixed-dimension schema.
+    """
+
     def __init__(self, uri: str | Path, table: LanceTable) -> None:
         self.uri = Path(uri).expanduser().resolve()
         self.name = table.name
@@ -85,7 +90,11 @@ class LanceDBIndex:
         return [(row["source_kind"], row["source_identity"]) for row in rows]
 
     def fetch_vectors(self, identities: Sequence[SourceIdentity]) -> NDArray[np.float32]:
-        """Fetch a bounded selection and restore the caller's order."""
+        """Fetch vectors in the requested identity order, including repeats.
+
+        Empty input returns shape (0, table dimension). A missing identity raises
+        KeyError; storage errors propagate.
+        """
         if not identities:
             return np.empty((0, self.table.schema.field("vector").type.list_size), dtype=np.float32)
 

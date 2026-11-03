@@ -33,16 +33,16 @@ from classification.tracking import Tracker
 
 
 class Experiment:
-    """Execute experiment for open-vocabulary constrastive food image classification.
+    """Classify whole images with configured embeddings and LanceDB retrieval.
 
-    Uses Ollama (default: gemma3:27b) to generate description sentences for each class,
-    generating an embedding vector for training class labels, images, and descriptor captions
-    with CLIP. Populates a LanceDB vector database with these embedding vectors. Uses cosine
-    similarity search to classify samples at inference time.
+    Construction loads dataset metadata; the encoder loads on first use.
+    Stages generate or reuse descriptions, build references, and publish complete
+    evaluation reports. Tracking uses the supplied tracker when present.
     """
 
     @staticmethod
     def validate_config(config: dict[str, Any]) -> dict[str, Any]:
+        """Apply shared validation and return the supplied configuration unchanged."""
         return validate_config(config)
 
     def __init__(self, config: dict[str, Any], *, tracker: Tracker | None = None) -> None:
@@ -64,7 +64,7 @@ class Experiment:
 
     @property
     def embedder(self) -> Embedder:
-        """Lazy-loading for embedding model."""
+        """Construct the configured encoder on first access and reuse it."""
         if self._embedder is None:
             self._embedder = self._create_embedder()
         return self._embedder
@@ -98,10 +98,15 @@ class Experiment:
             yield batch, vectors
 
     def generate_descriptions(self) -> dict[str, list[str]] | None:
-        """Read an explicit vocabulary, or reuse/generate descriptions in the output directory.
+        """Load saved descriptions or generate and save a new vocabulary.
+
+        An explicit descriptions file is read-only; a missing file fails without
+        generation. Otherwise, reuse the output vocabulary or generate it through
+        an owned Ollama session. File and generation errors propagate.
 
         Returns:
-            A list of descriptions in {"class_name", ["desc1", "desc2",...]} format.
+            A mapping from class labels to description lists, or None when
+            description references are disabled.
         """
         if not self.config["embed_descriptions"]:
             logging.info("Description generation is disabled")
@@ -136,11 +141,12 @@ class Experiment:
         )
 
     def build_vector_database(self) -> IndexSummary:
+        """Build or resume references, optimize the table, and publish its summary."""
         index, counts = self._index_builder().build_reference_index()
         return self._publish_index(index, counts)
 
     def _publish_index(self, index: LanceDBIndex, counts: Counter[str]) -> IndexSummary:
-        """Write training summary to log file, update wandb tracking"""
+        """Write index.json before publishing reference counts to the tracker."""
         artifact: IndexSummary = dict(
             table=index.name,
             uri=str(index.uri),

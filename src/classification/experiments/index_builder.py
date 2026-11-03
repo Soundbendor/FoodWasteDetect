@@ -18,6 +18,12 @@ from classification.schemas import PointRecord
 
 
 class IndexBuilder:
+    """Resume reference and validation tables by saved source identity.
+
+    Request the encoder only for missing records. Persist each completed batch
+    before advancing counts or progress; propagate failures without rollback.
+    """
+
     def __init__(
         self,
         *,
@@ -156,6 +162,7 @@ class IndexBuilder:
         return counts
 
     def build_validation_table(self, table_name: str) -> LanceDBIndex:
+        """Complete missing validation embeddings and return the unoptimized cache."""
         if LanceDBIndex.exists(self.uri, table_name):
             cache = LanceDBIndex.open(self.uri, table_name)
         else:

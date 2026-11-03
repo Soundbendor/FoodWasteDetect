@@ -22,6 +22,7 @@ selection and image ownership use [data](data.md); for scoring use
 | `config.py` | Shared `validate_config()` used before CLI tracking and during construction |
 | `batches.py` | `EmbeddingBatch` and ordered cache reads through `cached_batches()` |
 | `artifacts.py` | Shared `write_json()` |
+| `report_types.py` | Typed index summaries and evaluation reports; loaded summaries allow missing fields without runtime schema validation |
 | `matryoshka.py` | Cached Gemini dimension sweep, table prefixes, and sweep summary |
 
 `LanceDBIndex` owns ordinary database operations. The sweep's streaming creation

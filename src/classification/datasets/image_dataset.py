@@ -28,7 +28,7 @@ def _read_class_map(path: Path) -> dict[int, str]:
 
 
 class FoodX251ImageDataset:
-    """Training references and labeled validation images, loaded from local files."""
+    """Load local FoodX251 metadata, deferring image decoding to batch iteration."""
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
@@ -80,9 +80,11 @@ class FoodX251ImageDataset:
         )
 
     def get_class_list(self) -> list[str]:
+        """Return canonical labels in taxonomy-file order."""
         return list(self.class_map.values())
 
     def train_set(self) -> Dataset:
+        """Return training references with undecoded image paths."""
         return self.splits["train"]
 
     def validation_set(self) -> Dataset:
@@ -123,7 +125,11 @@ class FoodX251ImageDataset:
     def iter_dataset_batches(
         dataset: Dataset, batch_size: int, *, decode: bool = True
     ) -> Iterator[dict[str, list]]:
-        """Batch a prepared dataset, decoding images only when requested."""
+        """Yield ordered column batches, including the final partial batch.
+
+        With ``decode=False``, omit the image column and leave image files unread.
+        Otherwise, decode images during iteration and propagate loading errors.
+        """
         if not decode:
             dataset = dataset.remove_columns("image")
         else:
@@ -139,7 +145,11 @@ class FoodX251ImageDataset:
         excluded_source_ids: set[str] | None = None,
         decode: bool = True,
     ) -> Iterator[dict[str, list]]:
-        """Select and batch a split, applying caps before exclusion and decoding."""
+        """Select and batch ``train``, ``val``, or ``validation`` in annotation order.
+
+        Apply class caps before exclusions, then decode images only if requested.
+        Metadata-only batches omit the image column; both modes retain partial batches.
+        """
         dataset = self.select_images(
             self.splits[SPLIT_NAMES.get(split, split)],
             n_imgs_per_class=n_imgs_per_class,
@@ -149,6 +159,11 @@ class FoodX251ImageDataset:
 
 
 def load_dataset(config: dict[str, str]) -> FoodX251ImageDataset:
+    """Load metadata from ``config['root']`` for the supported ``foodx251`` dataset.
+
+    Raises:
+        ValueError: The configured dataset name is unsupported.
+    """
     if config["name"].lower() != "foodx251":
         raise ValueError("Only foodx251 is supported")
     return FoodX251ImageDataset(config["root"])
