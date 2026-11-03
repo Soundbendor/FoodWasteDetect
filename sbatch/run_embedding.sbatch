@@ -16,5 +16,5 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the repository root}"
 config_file="${1:-cfg/classification.yml}"
 if (($#)); then shift; fi
-exec pixi run --manifest-path src/internvl/pyproject.toml --as-is -e "${INTERNVL_PIXI_ENV:-cu126}" internvl experiment run \
+exec pixi run --manifest-path src/classification/pyproject.toml --as-is -e "${INTERNVL_PIXI_ENV:-cu126}" classification experiment run \
   --config_file "$config_file" "$@"

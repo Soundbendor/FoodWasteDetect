@@ -2,7 +2,7 @@
 
 Read this to interpret old text artifacts, commands, or branch decisions. This
 workflow is removed; source and model code are available in Git history. Current
-whole-image code is mapped in the [package guide](../../src/internvl/AGENTS.md).
+whole-image code is mapped in the [package guide](../../src/classification/AGENTS.md).
 
 ## Historical pipeline
 
@@ -33,7 +33,7 @@ triplet evaluation, caption/merge/conversion workflows, and their CLI commands a
 retired without compatibility aliases. Old `vlm`, `llm`, and `database.embedding`
 imports are unsupported. The separate `src/clip_finetune.py` image experiment and
 root `build_clip_db`, `test_clip`, and `test_yolo` commands remain separate.
-See [CLI documentation](../internvl/cli.md) for supported commands and migration.
+See [CLI documentation](../classification/cli.md) for supported commands and migration.
 
 The `vlm-refactor` extraction originally preserved runtime behavior and deferred
 bug fixes, caching/restart guarantees, training redesign, and model changes.

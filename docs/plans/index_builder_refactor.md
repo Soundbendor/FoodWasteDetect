@@ -2,8 +2,8 @@
 
 Status: historical plan; the helper simplifications and subpackage move are
 present in the current source. The paths below record the pre-subpackage layout.
-Use the [experiment guide](../../src/internvl/experiments/AGENTS.md) and
-[current contracts](../internvl/experiments.md) for further work.
+Use the [experiment guide](../../src/classification/experiments/AGENTS.md) and
+[current contracts](../classification/experiments.md) for further work.
 
 ## Summary
 

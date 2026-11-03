@@ -41,7 +41,7 @@ data and historical collections; write versioned derived outputs.
 
 These provenance and compatibility requirements belong to the CLIP target.
 The separate whole-image runner intentionally defers that machinery; follow its
-[experiment contract](../internvl/experiments.md) when working in `internvl`.
+[experiment contract](../classification/experiments.md) when working in `classification`.
 
 ## Evaluation contract
 

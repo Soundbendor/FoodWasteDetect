@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "foodwaste-internvl"
+name = "foodwaste-classification"
 version = "0.1.0"
 description = "Whole-image food classification with Jina CLIP and LanceDB"
 readme = "README.md"
@@ -33,14 +33,14 @@ dependencies = [
 ]
 
 [project.scripts]
-internvl = "internvl.cli:main"
+classification = "classification.cli:main"
 
 [tool.setuptools]
-packages = ["internvl", "internvl.scripts", "internvl.llm", "internvl.encoders", "internvl.retrieval", "internvl.experiments"]
-package-dir = {internvl = "."}
+packages = ["classification", "classification.scripts", "classification.llm", "classification.encoders", "classification.retrieval", "classification.experiments"]
+package-dir = {classification = "."}
 
 [tool.setuptools.package-data]
-internvl = ["scripts/*.sh"]
+classification = ["scripts/*.sh"]
 
 [tool.ruff]
 line-length = 100
@@ -51,7 +51,7 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["../../tests"]
-addopts = "--cov=internvl --cov-report=term-missing"
+addopts = "--cov=classification --cov-report=term-missing"
 
 [tool.ty.environment]
 root = [".."]
@@ -87,7 +87,7 @@ python = {version = "==3.13.13", build = "*_cp313"}
 qdrant = {version = "==1.19.0", channel = "anaconda"}
 
 [tool.pixi.pypi-dependencies]
-foodwaste-internvl = {path = ".", editable = true}
+foodwaste-classification = {path = ".", editable = true}
 datasets = "==4.8.5"
 build = "*"
 setuptools = ">=77"
@@ -133,9 +133,9 @@ jina-cpu = {features = ["jina", "cpu", "dev", "test"], solve-group = "jina-cpu"}
 jina-cu126 = {features = ["jina", "cu126", "dev", "test"], solve-group = "jina-cu126"}
 
 [tool.pixi.tasks]
-internvl = {cmd = "python -m internvl", cwd = "../.."}
-test = {cmd = "pytest -c src/internvl/pyproject.toml", cwd = "../..", env = {CUDA_VISIBLE_DEVICES = "", HF_HUB_OFFLINE = "1"}}
-lint = {cmd = "ruff check src/internvl", cwd = "../.."}
-typecheck = {cmd = 'ty check --project src/internvl --python "$CONDA_PREFIX"', cwd = "../.."}
-build = {cmd = "python -m build --no-isolation src/internvl --outdir src/internvl/dist", cwd = "../.."}
+classification = {cmd = "python -m classification", cwd = "../.."}
+test = {cmd = "pytest -c src/classification/pyproject.toml", cwd = "../..", env = {CUDA_VISIBLE_DEVICES = "", HF_HUB_OFFLINE = "1"}}
+lint = {cmd = "ruff check src/classification", cwd = "../.."}
+typecheck = {cmd = 'ty check --project src/classification --python "$CONDA_PREFIX"', cwd = "../.."}
+build = {cmd = "python -m build --no-isolation src/classification --outdir src/classification/dist", cwd = "../.."}
 qdrant = {cmd = "bash scripts/start_qdrant.sh", cwd = "../.."}

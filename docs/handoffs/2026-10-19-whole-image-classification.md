@@ -3,8 +3,8 @@
 Conversation date: October 19, 2026.
 
 Historical snapshot: the storage, API, and failure behavior below have been
-superseded. Read the [package guide](../../src/internvl/AGENTS.md) and
-[current experiment contract](../internvl/experiments.md) for implementation work.
+superseded. Read the [package guide](../../src/classification/AGENTS.md) and
+[current experiment contract](../classification/experiments.md) for implementation work.
 This handoff preserves decisions and context; it does not authorize restoring
 removed provenance or validation machinery.
 

@@ -17,5 +17,5 @@ config_file="${1:-cfg/classification.yml}"
 if (( $# )); then shift; fi
 
 # DescriberLLM manages Ollama using the YAML configuration.
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl experiment describe \
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e cu126 classification experiment describe \
   --config_file "$config_file" "$@"

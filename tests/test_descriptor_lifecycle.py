@@ -33,7 +33,7 @@ class DescriptorLifecycleTests(unittest.TestCase):
         ollama.ChatResponse = object
         pydantic = types.ModuleType('pydantic')
         pydantic.BaseModel = object
-        path = Path(__file__).resolve().parents[1] / 'src/internvl/llm/generate_descriptors.py'
+        path = Path(__file__).resolve().parents[1] / 'src/classification/llm/generate_descriptors.py'
         spec = importlib.util.spec_from_file_location('_descriptor_lifecycle_test', path)
         self.module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {

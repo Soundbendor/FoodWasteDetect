@@ -15,10 +15,10 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from internvl.retrieval.lancedb import LanceDBIndex
-from internvl.retrieval.voting import classify
-from internvl.retrieval.metrics import metrics, ranking_metrics
-from internvl.schemas import Neighbor, PointRecord, Prediction
+from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.voting import classify
+from classification.retrieval.metrics import metrics, ranking_metrics
+from classification.schemas import Neighbor, PointRecord, Prediction
 
 
 def prediction_row(
@@ -245,8 +245,8 @@ if __name__ == "__main__":
 
 
 def test_identity_scan_and_vector_fetch_preserve_source_and_order(tmp_path):
-    from internvl.retrieval.lancedb import LanceDBIndex
-    from internvl.schemas import PointRecord
+    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.schemas import PointRecord
 
     index = LanceDBIndex(tmp_path / "db", "vectors")
     index.create(3)
@@ -331,8 +331,8 @@ def test_class_counts_stream_all_rows_and_reference_types(tmp_path):
 
 
 def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
-    from internvl.retrieval.lancedb import LanceDBIndex
-    from internvl.schemas import PointRecord
+    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.schemas import PointRecord
 
     index = LanceDBIndex(tmp_path / 'db', 'references')
     with pytest.raises(RuntimeError, match='Open or create'):

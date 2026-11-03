@@ -1,6 +1,6 @@
 # Explicit maintenance scripts
 
-Read [script contracts](../../../docs/internvl/scripts.md) before changing or
+Read [script contracts](../../../docs/classification/scripts.md) before changing or
 running these commands. Repository-level submission wrappers are mapped there too.
 
 - `smoke_jina.py` is an explicit real-model CPU check. It can download weights and

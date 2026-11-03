@@ -7,8 +7,8 @@ current contracts. Consult the [root index](../AGENTS.md#documentation-index) fo
 current task references.
 
 Read [development](development.md) for environment selection and routine checks,
-[encoder contracts](internvl/encoders.md) for model protocols, and
-[experiment contracts](internvl/experiments.md) for persistence and evaluation.
+[encoder contracts](classification/encoders.md) for model protocols, and
+[experiment contracts](classification/experiments.md) for persistence and evaluation.
 The retired workflow is documented in [text history](history/internvl-text.md);
 legacy image findings live in the [CLIP review](clip/review.md).
 

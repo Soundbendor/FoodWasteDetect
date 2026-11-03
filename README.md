@@ -6,7 +6,7 @@ image-retrieval experiments:
 - Image retrieval: Currently, this experiment pipeline supports YOLO for object
   localization localization → Jina CLIP image embeddings → Qdrant vector
   retrieval. (Pending deprecation)
-  - Whole-image classification: the `internvl` package uses Jina CLIP v2 and
+  - Whole-image classification: the `classification` package uses Jina CLIP v2 and
     Qdrant to classify images using references drawn from training images, class
     names, and generated descriptions. The setup below runs this baseline.
 
@@ -25,24 +25,24 @@ These environments support Linux x86-64 with glibc 2.28 or newer. Pixi installs
 Python, the application dependencies, Ollama, and Qdrant.
 
 ```sh
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e default
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default internvl --help
+pixi install --manifest-path src/classification/pyproject.toml --locked -e default
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default classification --help
 ```
 
 For GPU experiments, install the separate `cu126` environment:
 
 ```sh
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e cu126
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 python -c \
+pixi install --manifest-path src/classification/pyproject.toml --locked -e cu126
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 python -c \
   "import torch; print(torch.__version__); print('CUDA available:', torch.cuda.is_available())"
 ```
 
 The GPU environment uses PyTorch with CUDA 12.6 and Ollama with CUDA 12.9. Use a
 CUDA 12.9-compatible NVIDIA driver, such as 580.178.04. Run the
-[V100 kernel check](src/internvl/README.md#v100-kernel-check) inside your
+[V100 kernel check](src/classification/README.md#v100-kernel-check) inside your
 allocation. Prepare environments on a node with internet access before
 submitting jobs; use `pixi run --as-is` in jobs to avoid installing dependencies
-there. The [environment guide](src/internvl/README.md) lists development
+there. The [environment guide](src/classification/README.md) lists development
 commands.
 
 ### Configure the dataset and services
@@ -93,7 +93,7 @@ separate Qdrant collection and output directory for each experiment.
 Start the bundled Qdrant server inside an approved allocation:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default qdrant
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default qdrant
 ```
 
 Keep it running during indexing and evaluation. It listens on `127.0.0.1:6333`
@@ -125,7 +125,7 @@ Set the Ollama binary and host in both your experiment YAML and
 latter and has no configuration flag. Then download the configured model:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl download_model gemma3:27b
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 classification download_model gemma3:27b
 ```
 
 Do not start Ollama manually: the download and description commands start and
@@ -134,8 +134,8 @@ If compute nodes lack internet, populate its cache beforehand on a permitted
 node, using the same `HF_HOME` available to the job:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 python -c \
-  "from internvl.embeddings import EmbeddingModel; EmbeddingModel('jinaai/jina-clip-v2', device='cpu')"
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 python -c \
+  "from classification.encoders.sentence_transformers import EmbeddingModel; EmbeddingModel('jinaai/jina-clip-v2', device='cpu')"
 ```
 
 The temporary smoke test deletes its downloads and does not prepare this cache.
@@ -145,9 +145,9 @@ The temporary smoke test deletes its downloads and does not prepare this cache.
 Inside your allocation, run each stage separately to check setup:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl experiment describe --config_file cfg/classification_hpc.yml
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl experiment index --config_file cfg/classification_hpc.yml
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl experiment evaluate --config_file cfg/classification_hpc.yml
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 classification experiment describe --config_file cfg/classification_hpc.yml
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 classification experiment index --config_file cfg/classification_hpc.yml
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 classification experiment evaluate --config_file cfg/classification_hpc.yml
 ```
 
 Use `experiment run` to execute all three stages in one command. For CPU runs,
@@ -171,7 +171,7 @@ Pass YAML keys as command-line flags to any experiment stage. Nested keys use
 dots, and command-line values take precedence for that invocation:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl experiment run \
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e cu126 classification experiment run \
   --config_file cfg/classification_hpc.yml \
   --ollama.llm "gemma3:27b" \
   --embedding.batch_size 16 \
@@ -183,7 +183,7 @@ pixi run --manifest-path src/internvl/pyproject.toml --as-is -e cu126 internvl e
 List available overrides and their types without starting an experiment:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default internvl experiment run \
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default classification experiment run \
   --config_file cfg/classification.yml --help
 ```
 
@@ -234,7 +234,7 @@ You can run the unit test suite locally, without downloading CUDA dependencies
 with the following command:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default test
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default test
 ```
 
 Routine checks use synthetic inputs, mocked model and Ollama backends, and
@@ -242,7 +242,7 @@ in-memory Qdrant. They do not establish model accuracy or GPU/HPC compatibility.
 
 ## Further reading
 
-- [Environment guide](src/internvl/README.md): installation, linting, type
+- [Environment guide](src/classification/README.md): installation, linting, type
   checks, and explicit model and GPU checks.
 - [Image-workflow limitations](docs/experiments.md#image-workflow-limitations):
   current status of the YOLO/CLIP experiments and legacy commands.

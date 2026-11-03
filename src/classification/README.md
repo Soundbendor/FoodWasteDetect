@@ -1,4 +1,4 @@
-# Standalone internvl environment
+# Standalone classification environment
 
 This environment installs the whole-image Jina CLIP/Qdrant experiment independently
 of the legacy image pipeline. Run these commands from the repository root.
@@ -12,16 +12,16 @@ Python dependencies, Ollama, and Qdrant from the committed `pixi.lock`.
 For CPU execution:
 
 ```sh
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e default
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default internvl --help
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default internvl experiment run --config_file cfg/classification.yml
+pixi install --manifest-path src/classification/pyproject.toml --locked -e default
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default classification --help
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default classification experiment run --config_file cfg/classification.yml
 ```
 
 For GPU execution, including V100 GPUs:
 
 ```sh
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e cu126
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 internvl --help
+pixi install --manifest-path src/classification/pyproject.toml --locked -e cu126
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 classification --help
 ```
 
 Select `-e default` or `-e cu126` for each command. Both environments can coexist.
@@ -46,16 +46,16 @@ compatibility.
 Both environments include Ruff, ty, pytest, coverage, and package build tools.
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default lint
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default typecheck
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default test
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default build
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default lint
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default typecheck
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default test
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default build
 ```
 
 The test task uses synthetic fixtures, mocked model construction, and in-memory
 Qdrant with GPUs hidden and Hugging Face offline. It does not download models or
 start servers. The type check covers `cli.py` and `schemas.py`. Builds are written
-to `src/internvl/dist/`.
+to `src/classification/dist/`.
 
 ## Explicit real-model smoke test
 
@@ -63,8 +63,8 @@ This separate check downloads Jina weights and remote code, then encodes one
 synthetic image and one text on CPU:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e default python -m internvl.scripts.smoke_jina
-pixi run --manifest-path src/internvl/pyproject.toml --locked -e cu126 python -m internvl.scripts.smoke_jina
+pixi run --manifest-path src/classification/pyproject.toml --locked -e default python -m classification.scripts.smoke_jina
+pixi run --manifest-path src/classification/pyproject.toml --locked -e cu126 python -m classification.scripts.smoke_jina
 ```
 
 Each invocation downloads into temporary caches that are removed when the worker

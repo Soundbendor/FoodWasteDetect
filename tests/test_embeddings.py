@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 
-from internvl.encoders.sentence_transformers import EmbeddingModel
+from classification.encoders.sentence_transformers import EmbeddingModel
 
 ENCODE_OPTIONS = {
     "batch_size": 2,
@@ -57,7 +57,7 @@ class SentenceTransformerIntegrationTests(unittest.TestCase):
     def test_library_batches_and_preserves_vectors_and_input_order(self):
         encoder = SyntheticEncoder()
         backend = SentenceTransformer(modules=[encoder], device="cpu")
-        with patch("internvl.encoders.sentence_transformers._load_backend", return_value=backend):
+        with patch("classification.encoders.sentence_transformers._load_backend", return_value=backend):
             model = EmbeddingModel("jinaai/jina-clip-v2", 2, device="cpu")
         texts = ["a", "longer text", "abc"]
         vectors = model.encode_text(iter(texts))
@@ -82,7 +82,7 @@ class SentenceTransformerIntegrationTests(unittest.TestCase):
         )
         # Match v4's modules.json routing through the real library.
         backend.module_kwargs = {"0": ["task", "truncate_dim"]}
-        with patch("internvl.encoders.sentence_transformers._load_backend", return_value=backend):
+        with patch("classification.encoders.sentence_transformers._load_backend", return_value=backend):
             model = EmbeddingModel("jinaai/jina-embeddings-v4", 2, device="cpu")
         texts = ["rice", "a bowl of noodles", "pie"]
         vectors = model.encode_text(iter(texts))
@@ -113,7 +113,7 @@ class AdditionalLibraryBatchingTests(unittest.TestCase):
                 backend = SentenceTransformer(
                     modules=[encoder], device="cpu", prompts={"Document": "Document: "}
                 )
-                with patch("internvl.encoders.sentence_transformers._load_backend", return_value=backend):
+                with patch("classification.encoders.sentence_transformers._load_backend", return_value=backend):
                     model = EmbeddingModel(model_id, 2, device="cpu")
                 texts = ["pie", "a bowl of rice", "pear"]
                 vectors = model.encode_text(texts)
@@ -135,7 +135,7 @@ class EmbeddingTests(unittest.TestCase):
     def setUp(self):
         self.backend = MagicMock()
         self.loader = self.enterContext(
-            patch("internvl.encoders.sentence_transformers._load_backend", return_value=self.backend)
+            patch("classification.encoders.sentence_transformers._load_backend", return_value=self.backend)
         )
         self.model = EmbeddingModel(self.model_id, 2, device="cpu")
         self.loader.assert_called_once_with(self.model_id, "cpu")
@@ -278,12 +278,12 @@ class V4EmbeddingTests(EmbeddingTests):
 
 class MockFamilyTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch("internvl.encoders.sentence_transformers._check_dependency_family"))
+        self.enterContext(patch("classification.encoders.sentence_transformers._check_dependency_family"))
 
 
 class BackendLoadingTests(MockFamilyTests):
     def test_constructor_loads_sentence_transformer_with_model_settings(self):
-        with patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor:
+        with patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor:
             del constructor.return_value[0].modalities
             model = EmbeddingModel("jinaai/jina-clip-v2", device="cpu")
         self.assertIs(model.model, constructor.return_value)
@@ -303,7 +303,7 @@ class BackendLoadingTests(MockFamilyTests):
     def test_loading_failure_propagates(self):
         with (
             patch(
-                "internvl.encoders.sentence_transformers._load_backend",
+                "classification.encoders.sentence_transformers._load_backend",
                 side_effect=OSError("model unavailable"),
             ),
             self.assertRaisesRegex(OSError, "model unavailable"),
@@ -313,7 +313,7 @@ class BackendLoadingTests(MockFamilyTests):
 
 class V4BackendLoadingTests(MockFamilyTests):
     def test_v4_uses_checkpoint_dtype_sdpa_and_modality_fallback(self):
-        with patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor:
+        with patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor:
             del constructor.return_value[0].modalities
             model = EmbeddingModel("jinaai/jina-embeddings-v4", device="cpu")
         self.assertEqual(model.dimension, 2048)
@@ -327,7 +327,7 @@ class V4BackendLoadingTests(MockFamilyTests):
         )
 
     def test_existing_modality_metadata_is_preserved(self):
-        with patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor:
+        with patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor:
             modalities = constructor.return_value[0].modalities
             model = EmbeddingModel("jinaai/jina-embeddings-v4", device="cpu")
         self.assertIs(model.model[0].modalities, modalities)
@@ -355,7 +355,7 @@ class NewBackendLoadingTests(MockFamilyTests):
         ]:
             with (
                 self.subTest(device=device, native=native),
-                patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor,
+                patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor,
                 patch("sentence_transformers.util.get_device_name", return_value="cuda:1"),
                 patch("torch.cuda.device") as selected,
                 patch("torch.cuda.is_bf16_supported", return_value=native) as support,
@@ -377,7 +377,7 @@ class NewBackendLoadingTests(MockFamilyTests):
                     support.assert_not_called()
 
     def test_clip_loads_fp32_and_explicit_token_limit_without_remote_code(self):
-        with patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor:
+        with patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor:
             del constructor.return_value[0].modalities
             model = EmbeddingModel("openai/clip-vit-base-patch32", device="cpu")
         constructor.assert_called_once_with(
@@ -401,7 +401,7 @@ class ProjectedCLIPIntegrationTests(unittest.TestCase):
         from transformers import (
             CLIPConfig, CLIPImageProcessor, CLIPModel, CLIPProcessor, CLIPTokenizer,
         )
-        from internvl.encoders.sentence_transformers import _load_backend
+        from classification.encoders.sentence_transformers import _load_backend
 
         # Local random weights and a tiny vocabulary: no checkpoint downloads.
         config = CLIPConfig(
@@ -428,9 +428,9 @@ class ProjectedCLIPIntegrationTests(unittest.TestCase):
                 self.assertEqual(model_id, "openai/clip-vit-base-patch32")
                 return SentenceTransformer(directory, **kwargs)
 
-            with patch("internvl.encoders.sentence_transformers.SentenceTransformer", side_effect=local_backend):
+            with patch("classification.encoders.sentence_transformers.SentenceTransformer", side_effect=local_backend):
                 backend = _load_backend("openai/clip-vit-base-patch32", "cpu")
-            with patch("internvl.encoders.sentence_transformers._load_backend", return_value=backend):
+            with patch("classification.encoders.sentence_transformers._load_backend", return_value=backend):
                 model = EmbeddingModel("openai/clip-vit-base-patch32", 2, device="cpu")
             long_text = "a " * 120
             short_text = "a " * 75
@@ -455,7 +455,7 @@ class ProjectedCLIPIntegrationTests(unittest.TestCase):
 
 class DependencyFamilyTests(unittest.TestCase):
     def test_dependency_families_before_pretrained_construction(self):
-        from internvl.encoders.sentence_transformers import _check_dependency_family
+        from classification.encoders.sentence_transformers import _check_dependency_family
 
         stacks = [
             {"sentence-transformers": "5.7.0", "transformers": "4.57.6", "peft": "0.17.1"},
@@ -465,8 +465,8 @@ class DependencyFamilyTests(unittest.TestCase):
                          "google/embeddinggemma-2", "openai/clip-vit-base-patch32"):
             for stack in stacks:
                 with self.subTest(model=model_id, stack=stack), patch(
-                    "internvl.encoders.sentence_transformers.version", side_effect=stack.__getitem__
-                ), patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor:
+                    "classification.encoders.sentence_transformers.version", side_effect=stack.__getitem__
+                ), patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor:
                     compatible = model_id.startswith("jinaai/") == stack["transformers"].startswith("4.")
                     if compatible:
                         _check_dependency_family(model_id)
@@ -483,8 +483,8 @@ class DependencyFamilyTests(unittest.TestCase):
 
     def test_missing_dependency_is_actionable(self):
         from importlib.metadata import PackageNotFoundError
-        with patch("internvl.encoders.sentence_transformers.version", side_effect=PackageNotFoundError), patch(
-            "internvl.encoders.sentence_transformers.SentenceTransformer"
+        with patch("classification.encoders.sentence_transformers.version", side_effect=PackageNotFoundError), patch(
+            "classification.encoders.sentence_transformers.SentenceTransformer"
         ) as constructor, self.assertRaisesRegex(RuntimeError, "peft=missing"):
             EmbeddingModel("jinaai/jina-clip-v2", device="cpu")
         constructor.assert_not_called()
@@ -518,7 +518,7 @@ class V4HardwareTests(MockFamilyTests):
                 "sentence_transformers.util.get_device_name", return_value=resolved
             ), patch("torch.cuda.device") as selected, patch(
                 "torch.cuda.is_bf16_supported", return_value=native
-            ) as support, patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor:
+            ) as support, patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor:
                 support.side_effect = lambda **kwargs: (
                     selected.return_value.__enter__.assert_called_once() or native
                 )
@@ -557,7 +557,7 @@ class TruncationTests(unittest.TestCase):
                         prompts={'passage': 'Passage: ', 'Document': 'Document: '},
                     )
                     backend.module_kwargs = {'0': ['task', 'truncate_dim']}
-                    with patch('internvl.encoders.sentence_transformers._load_backend', return_value=backend):
+                    with patch('classification.encoders.sentence_transformers._load_backend', return_value=backend):
                         model = EmbeddingModel(model_id, 2, device='cpu', **options)
                     dimension = options.get('truncate_dim') or native
                     self.assertEqual(model.dimension, dimension)
@@ -586,14 +586,14 @@ class TruncationTests(unittest.TestCase):
         for model_id, native, _ in self.models:
             for value in (True, False, 0, -1, native + 1, 1.0, '1', [], {}):
                 with self.subTest(model=model_id, value=value), patch(
-                    'internvl.encoders.sentence_transformers._load_backend'
+                    'classification.encoders.sentence_transformers._load_backend'
                 ) as loader:
                     with self.assertRaisesRegex(ValueError, 'truncate_dim'):
                         EmbeddingModel(model_id, truncate_dim=value)
                     loader.assert_not_called()
 
     def test_output_validation_uses_selected_dimension(self):
-        with patch('internvl.encoders.sentence_transformers._load_backend') as loader:
+        with patch('classification.encoders.sentence_transformers._load_backend') as loader:
             model = EmbeddingModel('jinaai/jina-embeddings-v4', truncate_dim=1024)
         for values in (np.ones((1, 2048)), np.zeros((1, 1024)),
                        np.full((1, 1024), np.nan)):
@@ -610,7 +610,7 @@ class QwenEmbeddingTests(EmbeddingTests):
 class QwenLoadingAndBatchingTests(unittest.TestCase):
     def test_checkpoint_loading_options(self):
         module = torch.nn.Identity()
-        with patch("internvl.encoders.sentence_transformers.SentenceTransformer") as constructor:
+        with patch("classification.encoders.sentence_transformers.SentenceTransformer") as constructor:
             constructor.return_value.__getitem__.return_value = module
             model = EmbeddingModel("Qwen/Qwen3-VL-Embedding-8B", 8, device="cuda")
         constructor.assert_called_once_with(
@@ -625,7 +625,7 @@ class QwenLoadingAndBatchingTests(unittest.TestCase):
 
         encoder = SyntheticEncoder(4096)
         backend = SentenceTransformer(modules=[encoder, Normalize()], device="cpu")
-        with patch("internvl.encoders.sentence_transformers._load_backend", return_value=backend):
+        with patch("classification.encoders.sentence_transformers._load_backend", return_value=backend):
             model = EmbeddingModel("Qwen/Qwen3-VL-Embedding-8B", 8, device="cpu")
         values = [3, 9, 1, 8, 2, 7, 4, 6, 5, 10]
         expected = np.ones((10, 4096), dtype=np.float32)

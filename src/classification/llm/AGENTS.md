@@ -1,8 +1,8 @@
 # LLM description generation
 
-Read [description contracts](../../../docs/internvl/data.md#class-descriptions-and-ollama)
+Read [description contracts](../../../docs/classification/data.md#class-descriptions-and-ollama)
 before changing prompts, structured responses, generation, or Ollama lifecycle.
-For download command changes, also read [CLI downloads](../../../docs/internvl/cli.md#ollama-downloads).
+For download command changes, also read [CLI downloads](../../../docs/classification/cli.md#ollama-downloads).
 
 `generate_descriptors.py` owns model requests and the Ollama process.
 `experiments.classification` owns vocabulary selection and persistence; `cli`

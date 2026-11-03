@@ -12,10 +12,10 @@ import pytest
 import yaml
 from test_tracking import Artifact
 
-from internvl import cli
-from internvl.experiments import matryoshka as sweep
-from internvl.experiments.classification import Experiment
-from internvl.retrieval.lancedb import LanceDBIndex
+from classification import cli
+from classification.experiments import matryoshka as sweep
+from classification.experiments.classification import Experiment
+from classification.retrieval.lancedb import LanceDBIndex
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def sources(tmp_path, monkeypatch):
             yield dict(source_id=[identity], source_split=['val'], fname=[identity], **{'class': ['A']})
 
     dataset.iter_batches.side_effect = batches
-    monkeypatch.setattr('internvl.experiments.classification.load_dataset', Mock(return_value=dataset))
+    monkeypatch.setattr('classification.experiments.classification.load_dataset', Mock(return_value=dataset))
     monkeypatch.setattr(Experiment, '_create_embedder', Mock(side_effect=AssertionError('embedding forbidden')))
     return config, connection, vectors, query
 
@@ -73,7 +73,7 @@ def runs(monkeypatch):
         return run
 
     monkeypatch.setattr(cli.wandb, 'init', Mock(side_effect=initialize))
-    monkeypatch.setattr('internvl.tracking.wandb.Artifact', Artifact)
+    monkeypatch.setattr('classification.tracking.wandb.Artifact', Artifact)
     return contexts
 
 

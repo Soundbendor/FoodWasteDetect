@@ -15,23 +15,23 @@ from unittest.mock import ANY, MagicMock, Mock, call, mock_open, patch
 
 import yaml
 
-from internvl.cli import main
+from classification.cli import main
 
 
 class CommandTests(unittest.TestCase):
     def setUp(self):
         # Dispatch-only tests use minimal settings; tracking/validation have dedicated tests.
-        self.enterContext(patch("internvl.cli.Experiment.validate_config"))
-        self.enterContext(patch("internvl.cli.wandb.init"))
-        self.enterContext(patch("internvl.cli.Tracker"))
+        self.enterContext(patch("classification.cli.Experiment.validate_config"))
+        self.enterContext(patch("classification.cli.wandb.init"))
+        self.enterContext(patch("classification.cli.Tracker"))
 
     def test_command_help_does_not_dispatch(self):
         for command in ([], ["experiment"], ["download_model"]):
             with (
                 self.subTest(command=command),
                 contextlib.redirect_stdout(io.StringIO()),
-                patch("internvl.cli._run_experiment") as run,
-                patch("internvl.cli.download_model") as download,
+                patch("classification.cli._run_experiment") as run,
+                patch("classification.cli.download_model") as download,
                 self.assertRaises(SystemExit) as error,
             ):
                 main([*command, "--help"])
@@ -43,7 +43,7 @@ class CommandTests(unittest.TestCase):
         for command, loader in (
             (
                 ["experiment", "run", "--config_file", "selected.yml"],
-                "internvl.cli.OmegaConf.load",
+                "classification.cli.OmegaConf.load",
             ),
             (["download_model", "requested:tag"], "yaml.safe_load"),
         ):
@@ -57,8 +57,8 @@ class CommandTests(unittest.TestCase):
                     self.subTest(command=command, source=source),
                     patch("builtins.open", mock_open()) as opened,
                     patch(loader) as load,
-                    patch("internvl.cli.Experiment") as experiment,
-                    patch("internvl.llm.generate_descriptors.DescriberLLM") as descriptors,
+                    patch("classification.cli.Experiment") as experiment,
+                    patch("classification.llm.generate_descriptors.DescriberLLM") as descriptors,
                     self.assertRaises(type(failure)) as error,
                 ):
                     if source == "open":
@@ -75,7 +75,7 @@ class CommandTests(unittest.TestCase):
             for failure in (RuntimeError("backend failed"), KeyboardInterrupt()):
                 with (
                     self.subTest(source=source, failure=type(failure).__name__),
-                    patch("internvl.cli.Experiment") as experiment,
+                    patch("classification.cli.Experiment") as experiment,
                     patch(
                         "builtins.open", mock_open(read_data="output_dir: synthetic")
                     ),
@@ -113,7 +113,7 @@ class CommandTests(unittest.TestCase):
                 with patch.dict(
                     sys.modules,
                     {
-                        "internvl.llm.generate_descriptors": backend,
+                        "classification.llm.generate_descriptors": backend,
                         "yaml": yaml,
                         "util": None,
                     },
@@ -144,7 +144,7 @@ class CommandTests(unittest.TestCase):
                     patch.dict(
                         sys.modules,
                         {
-                            "internvl.llm.generate_descriptors": backend,
+                            "classification.llm.generate_descriptors": backend,
                             "yaml": yaml,
                         },
                     ),
@@ -182,8 +182,8 @@ class CommandTests(unittest.TestCase):
         for argv in cases:
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
                 with (
-                    patch("internvl.cli.download_model") as download,
-                    patch("internvl.cli._run_experiment") as run,
+                    patch("classification.cli.download_model") as download,
+                    patch("classification.cli._run_experiment") as run,
                     self.assertRaises(SystemExit) as error,
                 ):
                     main(argv)
@@ -229,7 +229,7 @@ class CommandTests(unittest.TestCase):
         ):
             with (
                 self.subTest(stage=stage),
-                patch("internvl.cli.Experiment") as experiment,
+                patch("classification.cli.Experiment") as experiment,
                 patch(
                     "builtins.open", mock_open(read_data="output_dir: synthetic")
                 ) as opened,
@@ -258,7 +258,7 @@ class CommandTests(unittest.TestCase):
             ]:
                 with (
                     self.subTest(stage=stage),
-                    patch("internvl.cli.Experiment", experiment),
+                    patch("classification.cli.Experiment", experiment),
                 ):
                     main(["experiment", stage, "--config_file", str(config_path)])
                 experiment.assert_called_once_with({"k": 7}, tracker=ANY)
@@ -268,9 +268,9 @@ class CommandTests(unittest.TestCase):
 
 class ConfigOverrideTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch("internvl.cli.Experiment.validate_config"))
-        self.enterContext(patch("internvl.cli.wandb.init"))
-        self.enterContext(patch("internvl.cli.Tracker"))
+        self.enterContext(patch("classification.cli.Experiment.validate_config"))
+        self.enterContext(patch("classification.cli.wandb.init"))
+        self.enterContext(patch("classification.cli.Tracker"))
         directory = self.enterContext(tempfile.TemporaryDirectory())
         self.path = Path(directory) / "config.yml"
         self.config = {
@@ -288,7 +288,7 @@ class ConfigOverrideTests(unittest.TestCase):
         }
         self.content = yaml.safe_dump(self.config)
         self.path.write_text(self.content)
-        self.experiment = self.enterContext(patch("internvl.cli.Experiment"))
+        self.experiment = self.enterContext(patch("classification.cli.Experiment"))
 
     def invoke(self, *overrides, stage="run"):
         main(["experiment", stage, "--config_file", str(self.path), *overrides])
@@ -556,11 +556,11 @@ class SlurmOverrideTests(unittest.TestCase):
                             [
                                 "run",
                                 "--manifest-path",
-                                "src/internvl/pyproject.toml",
+                                "src/classification/pyproject.toml",
                                 "--as-is",
                                 "-e",
                                 "cu126",
-                                "internvl",
+                                "classification",
                                 "experiment",
                                 stage,
                                 "--config_file",
@@ -586,8 +586,8 @@ class SlurmOverrideTests(unittest.TestCase):
                     subprocess.run(["bash", str(root / f"sbatch/{script}.sbatch"), *extra],
                                    env=env, check=True)
                     actual = capture.read_bytes().decode().rstrip("\0").split("\0")
-                    self.assertEqual(actual, ["run", "--manifest-path", "src/internvl/pyproject.toml",
-                                              "--as-is", "-e", environment, "internvl", "experiment",
+                    self.assertEqual(actual, ["run", "--manifest-path", "src/classification/pyproject.toml",
+                                              "--as-is", "-e", environment, "classification", "experiment",
                                               stage, "--config_file", *extra])
 
 

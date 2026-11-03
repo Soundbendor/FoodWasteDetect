@@ -1,7 +1,7 @@
-# InternVL encoders
+# Classification encoders
 
 These backends serve the whole-image classification baseline. Source modules live
-in [`src/internvl/encoders`](../../src/internvl/encoders); dataset selection,
+in [`src/classification/encoders`](../../src/classification/encoders); dataset selection,
 resumption, and persistence belong to [experiments](experiments.md).
 
 ## Shared interface
@@ -93,7 +93,7 @@ migration, or automatic artifact naming; see the
 Use `jina-cpu` / `jina-cu126` for both Jina models, and `default` / `cu126` for
 EmbeddingGemma2, OpenAI CLIP, and Qwen. The four Pixi environments use independent
 solve groups. Exact family pins and installed dependencies belong to
-[`pyproject.toml`](../../src/internvl/pyproject.toml) and its lockfile. The default
+[`pyproject.toml`](../../src/classification/pyproject.toml) and its lockfile. The default
 classification YAML selects Jina CLIP v2, so choose its environment explicitly.
 
 Dependency-family and Jina v4 hardware guards are absent from the current loader.
@@ -101,7 +101,7 @@ Their tests still expect removed helpers; restoring them is separate work.
 Environment and hardware selection remain manual. Target native BF16 hardware for
 v4 and A100/H100-class hardware for Qwen. Qwen has no hardware guard, precision
 adaptation, or batch-size fallback. Keep the modern dependency stack unchanged
-when working on Qwen. Use the [script guide](../../src/internvl/scripts/AGENTS.md)
+when working on Qwen. Use the [script guide](../../src/classification/scripts/AGENTS.md)
 for submission defaults, environment forwarding, and sweep batch sizes.
 
 The isolated Jina family replaces remote-code compatibility patches following the
@@ -167,4 +167,4 @@ These checks establish neither real-checkpoint compatibility nor dataset, GPU,
 cloud, shared-filesystem, or HPC acceptance. V4 and Qwen real-checkpoint/GPU
 acceptance remain pending separate authorization; synthetic checks establish no
 memory or throughput guarantees. Latest recorded suite results and pre-existing
-failures are in the dated [verification log](../experiments.md#internvl-subpackage-refactor-verification-2026-11-02).
+failures are in the dated [verification log](../experiments.md#classification-subpackage-refactor-verification-2026-11-02).

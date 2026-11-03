@@ -8,9 +8,9 @@ cloud requests requires authorization under the root guide.
 
 ## Package scripts
 
-[`src/internvl/scripts/smoke_jina.py`](../../src/internvl/scripts/smoke_jina.py) is an
+[`src/classification/scripts/smoke_jina.py`](../../src/classification/scripts/smoke_jina.py) is an
 explicit real-checkpoint CPU check invoked as
-`python -m internvl.scripts.smoke_jina`. It constructs Jina CLIP v2, encodes one
+`python -m classification.scripts.smoke_jina`. It constructs Jina CLIP v2, encodes one
 text and one synthetic RGB image, and requires each result to be a finite, nonzero
 NumPy float32 matrix of shape `(1, 1024)`. It can download weights; it is not part
 of routine synthetic tests.
@@ -28,7 +28,7 @@ and cleanup with lightweight subprocesses; it does not establish checkpoint
 compatibility. Historical checkpoint results in [verification history](../experiments.md)
 apply only to the recorded stacks, not automatically to current locks.
 
-[`start_deepseek.sh`](../../src/internvl/scripts/start_deepseek.sh) is a historical
+[`start_deepseek.sh`](../../src/classification/scripts/start_deepseek.sh) is a historical
 shell launcher. It assumes `./deps/ollama/bin/ollama`, backgrounds the server, and
 writes `~/ollama.log`; its `PORT` assignment does not configure the process. It has
 no managed readiness or cleanup contract. Current description and download work
@@ -72,5 +72,5 @@ Both submitters accept at most one config path and require execution from the
 repository root. Existing strict CLI override keys must be present in custom YAML.
 Shared saved descriptions keep model comparisons on the same vocabulary; concurrent
 jobs that generate descriptions need distinct Ollama endpoints. Wrapper checks in
-[`tests/test_internvl.py`](../../tests/test_internvl.py) use fake executables and do
+[`tests/test_classification_cli.py`](../../tests/test_classification_cli.py) use fake executables and do
 not submit jobs or validate HPC execution.

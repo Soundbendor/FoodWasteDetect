@@ -47,7 +47,7 @@ def _load_config(config_file: str, overrides: Sequence[str]) -> dict[str, Any]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="internvl",
+        prog="classification",
         description="FoodWasteDetect utilities and food image recognition experiments",
         allow_abbrev=False,
     )

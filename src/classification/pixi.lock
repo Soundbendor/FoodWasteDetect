@@ -1025,7 +1025,7 @@ packages:
   size: 118849
   timestamp: 1784250406640
 - pypi: ./
-  name: foodwaste-internvl
+  name: foodwaste-classification
   requires_dist:
   - datasets<5
   - einops>=0.8.2

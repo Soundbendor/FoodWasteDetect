@@ -3,7 +3,7 @@
 ## Project goals
 
 Develop the selected food-recognition architecture: YOLO localization, Jina CLIP
-image embeddings, and Qdrant similarity classification. `src/internvl` provides a
+image embeddings, and Qdrant similarity classification. `src/classification` provides a
 separate whole-image embedding/LanceDB comparison. Keep those experiment contracts
 separate; existing box/class outputs do not establish instance segmentation.
 Read the [project overview](docs/overview.md) when choosing or extending a pipeline.
@@ -36,27 +36,27 @@ lockfile own these environments; select the model family explicitly:
 
 ```sh
 # Jina CLIP v2 / Jina Embeddings v4 (default classification YAML)
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e jina-cpu
+pixi install --manifest-path src/classification/pyproject.toml --locked -e jina-cpu
 # EmbeddingGemma2 / OpenAI CLIP / Qwen
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e default
+pixi install --manifest-path src/classification/pyproject.toml --locked -e default
 # Prepare the corresponding CUDA environment when needed
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e jina-cu126
-pixi install --manifest-path src/internvl/pyproject.toml --locked -e cu126
+pixi install --manifest-path src/classification/pyproject.toml --locked -e jina-cu126
+pixi install --manifest-path src/classification/pyproject.toml --locked -e cu126
 ```
 
 Use an installed environment without updating it:
-`pixi run --manifest-path src/internvl/pyproject.toml --as-is -e jina-cpu internvl --help`.
+`pixi run --manifest-path src/classification/pyproject.toml --as-is -e jina-cpu classification --help`.
 See [development](docs/development.md) for checks and hardware-selection boundaries.
 
 ## Scoped agent guides
 
-Start with [internvl](src/internvl/AGENTS.md) for package ownership, CLI, tracking,
+Start with [classification](src/classification/AGENTS.md) for package ownership, CLI, tracking,
 and top-level files. For changes within a subpackage, also read its guide:
-[encoders](src/internvl/encoders/AGENTS.md),
-[llm](src/internvl/llm/AGENTS.md),
-[experiments](src/internvl/experiments/AGENTS.md),
-[retrieval](src/internvl/retrieval/AGENTS.md), or
-[scripts](src/internvl/scripts/AGENTS.md).
+[encoders](src/classification/encoders/AGENTS.md),
+[llm](src/classification/llm/AGENTS.md),
+[experiments](src/classification/experiments/AGENTS.md),
+[retrieval](src/classification/retrieval/AGENTS.md), or
+[scripts](src/classification/scripts/AGENTS.md).
 
 ## Documentation index
 
@@ -69,13 +69,13 @@ module docs; plans, handoffs, and dated verification describe their recorded sta
 | Development: change dependencies, packaging, tests, or documentation | [Development and environment checks](docs/development.md) |
 | CLIP design: extend localization, masks, crop retrieval, or evaluation | [CLIP architecture](docs/clip/architecture.md) |
 | CLIP repairs: touch legacy annotations, crops, indexing, metrics, or training | [Source review and correctness gaps](docs/clip/review.md) |
-| CLI: change parsing, overrides, command dispatch, or downloads | [CLI and configuration](docs/internvl/cli.md) |
-| Tracking: change W&B lifecycle, artifacts, summaries, or progress | [Tracking and progress](docs/internvl/tracking.md) |
-| Data: change FoodX251 selection, schemas, descriptions, or Ollama ownership | [Data and descriptions](docs/internvl/data.md) |
-| Encoders: change local/Vertex models, dimensions, image ownership, or requests | [Encoder contracts](docs/internvl/encoders.md) |
-| Experiments: change stages, resumption, validation caching, reports, or sweeps | [Experiment contracts](docs/internvl/experiments.md) |
-| Retrieval: change LanceDB operations, voting, or metric definitions | [Storage and retrieval](docs/internvl/retrieval.md) |
-| Operations: change smoke helpers or Slurm/service scripts | [Script operations](docs/internvl/scripts.md) |
+| CLI: change parsing, overrides, command dispatch, or downloads | [CLI and configuration](docs/classification/cli.md) |
+| Tracking: change W&B lifecycle, artifacts, summaries, or progress | [Tracking and progress](docs/classification/tracking.md) |
+| Data: change FoodX251 selection, schemas, descriptions, or Ollama ownership | [Data and descriptions](docs/classification/data.md) |
+| Encoders: change local/Vertex models, dimensions, image ownership, or requests | [Encoder contracts](docs/classification/encoders.md) |
+| Experiments: change stages, resumption, validation caching, reports, or sweeps | [Experiment contracts](docs/classification/experiments.md) |
+| Retrieval: change LanceDB operations, voting, or metric definitions | [Storage and retrieval](docs/classification/retrieval.md) |
+| Operations: change smoke helpers or Slurm/service scripts | [Script operations](docs/classification/scripts.md) |
 | Verification: inspect environment checks, historical results, or acceptance limits | [Experiment verification notes](docs/experiments.md) |
 | Refactor history: inspect the IndexBuilder simplification plan | [IndexBuilder plan](docs/plans/index_builder_refactor.md) |
 | Proposed comparison: consider direct Ollama image classification | [Ollama classification plan](docs/plans/ollama_image_classification.md) |

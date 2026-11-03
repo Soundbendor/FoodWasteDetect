@@ -10,4 +10,4 @@
 # Prepare the default Pixi environment before submitting from the repository root.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the repository root}"
-exec pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default qdrant
+exec pixi run --manifest-path src/classification/pyproject.toml --as-is -e default qdrant

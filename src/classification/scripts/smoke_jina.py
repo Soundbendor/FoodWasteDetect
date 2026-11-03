@@ -41,7 +41,7 @@ def _run_worker(command: list[str]) -> int:
     try:
         for sig in previous:
             signal.signal(sig, _terminate)
-        with TemporaryDirectory(prefix="internvl-smoke-") as directory:
+        with TemporaryDirectory(prefix="classification-smoke-") as directory:
             try:
                 worker = subprocess.Popen(command, env=_cache_environment(Path(directory)))
                 return worker.wait()
@@ -66,7 +66,7 @@ def _worker() -> None:
     import numpy as np
     from PIL import Image
 
-    from internvl.encoders.sentence_transformers import EmbeddingModel
+    from classification.encoders.sentence_transformers import EmbeddingModel
 
     model = EmbeddingModel("jinaai/jina-clip-v2", device="cpu")
     with Image.new("RGB", (224, 224), color=(160, 80, 40)) as image:
@@ -89,10 +89,10 @@ def main() -> None:
     if sys.argv[1:] == ["--worker"]:
         _worker()
     elif sys.argv[1:]:
-        raise SystemExit("Usage: python -m internvl.scripts.smoke_jina")
+        raise SystemExit("Usage: python -m classification.scripts.smoke_jina")
     else:
         raise SystemExit(
-            _run_worker([sys.executable, "-m", "internvl.scripts.smoke_jina", "--worker"])
+            _run_worker([sys.executable, "-m", "classification.scripts.smoke_jina", "--worker"])
         )
 
 

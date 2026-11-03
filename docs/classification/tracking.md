@@ -1,8 +1,8 @@
 # W&B monitoring and progress
 
 Read this document when changing W&B initialization, artifacts, final summaries,
-or progress reporting. [`cli.py`](../../src/internvl/cli.py) owns run lifetime;
-[`tracking.py`](../../src/internvl/tracking.py) only publishes through a supplied
+or progress reporting. [`cli.py`](../../src/classification/cli.py) owns run lifetime;
+[`tracking.py`](../../src/classification/tracking.py) only publishes through a supplied
 run. Experiment and description loops own their progress bars.
 
 ## Run lifetime

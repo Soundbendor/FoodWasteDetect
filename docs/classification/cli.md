@@ -2,8 +2,8 @@
 
 Read this document when changing command parsing, overrides, stage dispatch, or
 the Ollama download entry point. The implementation is
-[`cli.py`](../../src/internvl/cli.py), reached by both the `internvl` console script
-and [`__main__.py`](../../src/internvl/__main__.py).
+[`cli.py`](../../src/classification/cli.py), reached by both the `classification` console script
+and [`__main__.py`](../../src/classification/__main__.py).
 
 ## Command flow
 
@@ -51,7 +51,7 @@ the native W&B context. See [tracking](tracking.md) for lifecycle ownership.
 
 ## Ollama downloads
 
-`internvl download_model MODEL_NAME` reads `cfg/experiment_config_internvl.yml`
+`classification download_model MODEL_NAME` reads `cfg/experiment_config_internvl.yml`
 relative to the working directory; it has no config flag or experiment overrides.
 The wrapper passes its `ollama` section into `DescriberLLM`, opens the owned server
 context, and streams the requested model pull. It leaves `ollama.llm` and the YAML
@@ -60,7 +60,7 @@ cleanup are specified in [descriptions](data.md#class-descriptions-and-ollama).
 
 ## Verification
 
-[`tests/test_internvl.py`](../../tests/test_internvl.py) covers parsing, dispatch,
+[`tests/test_classification_cli.py`](../../tests/test_classification_cli.py) covers parsing, dispatch,
 ordered overrides, YAML types, interpolation, unchanged source files, download
 cleanup, and wrapper argument forwarding with mocked backends. Lifecycle and
 configuration publication checks also live in

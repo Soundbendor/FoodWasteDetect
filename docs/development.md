@@ -6,7 +6,7 @@ The manifest and lockfile are authoritative for exact dependency versions.
 
 ## Environment selection
 
-`src/internvl/pyproject.toml` defines independent Linux x86-64 solve groups:
+`src/classification/pyproject.toml` defines independent Linux x86-64 solve groups:
 
 | Environment | Model family | Runtime |
 | --- | --- | --- |
@@ -24,19 +24,19 @@ The Ollama Python SDK is a separate dependency from the native binary.
 
 Slurm wrappers use `--as-is`, so prepare the selected environment before submission.
 Their defaults and model-family selection are described in
-[script operations](internvl/scripts.md). Environment/hardware selection is manual;
+[script operations](classification/scripts.md). Environment/hardware selection is manual;
 dependency-family and Jina V4 hardware guards are absent. See
-[encoder contracts](internvl/encoders.md) before choosing model hardware.
+[encoder contracts](classification/encoders.md) before choosing model hardware.
 
 ## Routine checks
 
 Run from the repository root in an already prepared CPU environment:
 
 ```sh
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default lint
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default typecheck
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default test
-pixi run --manifest-path src/internvl/pyproject.toml --as-is -e default internvl --help
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default lint
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default typecheck
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default test
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default classification --help
 ```
 
 Use `-e jina-cpu` for changes involving the Jina dependency family. The test task
@@ -45,7 +45,7 @@ and service transports, synthetic images/FoodX251 fixtures, and temporary real
 LanceDB databases. Keep explicit dependency skips where tests support them.
 The scoped ty task uses `$CONDA_PREFIX` to avoid resolving an old `.venv`.
 Use the `build` task for packaging changes; it writes distributions under
-`src/internvl/dist`.
+`src/classification/dist`.
 
 For the older extraction checks, the repository also supports
 `PYTHONPATH=src python -m unittest discover -s tests -v` when the required CPU
@@ -61,7 +61,7 @@ hardware evidence, including the V100 kernel procedure. Synthetic tests establis
 contracts for their fixtures; they do not establish model accuracy, GPU support,
 Ollama/cloud availability, shared-filesystem behavior, or HPC throughput.
 
-The real-model helper `internvl.scripts.smoke_jina` downloads checkpoints into
+The real-model helper `classification.scripts.smoke_jina` downloads checkpoints into
 temporary subprocess caches. It is excluded from routine checks. Earlier uv-era
 authorization and successful CPU encoding do not validate later Pixi/PyTorch
 profiles or authorize new model/GPU/service runs. Preserve the root guide's

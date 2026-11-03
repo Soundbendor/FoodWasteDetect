@@ -6,10 +6,10 @@ import sys
 
 import pytest
 
-from internvl.encoders.base import Embedder, ImageInput
-from internvl.encoders.sentence_transformers import EmbeddingModel
-from internvl.encoders.sentence_transformers import ImageInput as ExportedImageInput
-from internvl.encoders.vertex import VertexEmbeddingModel
+from classification.encoders.base import Embedder, ImageInput
+from classification.encoders.sentence_transformers import EmbeddingModel
+from classification.encoders.sentence_transformers import ImageInput as ExportedImageInput
+from classification.encoders.vertex import VertexEmbeddingModel
 
 
 @pytest.mark.parametrize("implemented", [(), ("encode_text",), ("encode_images",)])
@@ -39,10 +39,10 @@ def test_interface_import_does_not_load_backends_or_experiments():
     subprocess.run(
         [sys.executable, "-c", """
 import sys
-from internvl.encoders.base import Embedder
+from classification.encoders.base import Embedder
 assert not any(name in sys.modules for name in (
-    'internvl.encoders.sentence_transformers', 'internvl.encoders.vertex',
-    'internvl.experiments.classification', 'internvl.vertex_utils',
+    'classification.encoders.sentence_transformers', 'classification.encoders.vertex',
+    'classification.experiments.classification', 'classification.vertex_utils',
     'torch', 'sentence_transformers', 'google.genai',
 ))
 """],

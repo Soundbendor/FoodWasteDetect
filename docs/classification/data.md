@@ -7,7 +7,7 @@ persistence is specified in [experiments](experiments.md), and vector storage in
 
 ## FoodX251 metadata and image batches
 
-[`image_dataset.py`](../../src/internvl/image_dataset.py) reads local class and CSV
+[`image_dataset.py`](../../src/classification/image_dataset.py) reads local class and CSV
 annotation files through pandas, independently of `data_wrappers.foodx251`.
 `FoodX251ImageDataset` exposes a typed Hugging Face `DatasetDict`: `train` holds
 training references and `validation` holds labeled validation images.
@@ -45,7 +45,7 @@ and path-opened images is defined in [encoders](encoders.md).
 
 ## Shared records
 
-[`schemas.py`](../../src/internvl/schemas.py) contains shared data contracts without
+[`schemas.py`](../../src/classification/schemas.py) contains shared data contracts without
 backend construction:
 
 | Record | Meaning |
@@ -75,7 +75,7 @@ sentences. The default classification YAML shares the existing vocabulary under
 limitation](experiments.md#description-inputs) before using a generated vocabulary
 in `index` or `run`.
 
-[`generate_descriptors.py`](../../src/internvl/llm/generate_descriptors.py) owns the
+[`generate_descriptors.py`](../../src/classification/llm/generate_descriptors.py) owns the
 prompt and service process. `DescriberLLM.generate_descriptions(classes, count)`
 loops through classes and requests; `describe_class(label)` uses the shared visual
 prompt. Pydantic validates the `FoodDescriptor` response, the requested class label

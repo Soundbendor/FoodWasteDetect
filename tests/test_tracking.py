@@ -14,8 +14,8 @@ import pytest
 import test_classification
 import yaml
 
-from internvl.cli import main
-from internvl.tracking import Tracker
+from classification.cli import main
+from classification.tracking import Tracker
 
 
 class Artifact:
@@ -39,8 +39,8 @@ def sdk(monkeypatch):
     run = MagicMock(id="synthetic", summary={})
     run.__enter__.return_value = run
     run.__exit__.return_value = False
-    monkeypatch.setattr("internvl.cli.wandb.init", Mock(return_value=run))
-    monkeypatch.setattr("internvl.tracking.wandb.Artifact", Artifact)
+    monkeypatch.setattr("classification.cli.wandb.init", Mock(return_value=run))
+    monkeypatch.setattr("classification.tracking.wandb.Artifact", Artifact)
     return run
 
 
@@ -85,8 +85,8 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
     path.write_bytes(source.encode())
     overrides = ["embedding.batch_size=4", "embedding.batch_size=3"]
     with (
-        patch("internvl.cli.Experiment") as experiment,
-        patch("internvl.cli.wandb.init", return_value=sdk) as initialize,
+        patch("classification.cli.Experiment") as experiment,
+        patch("classification.cli.wandb.init", return_value=sdk) as initialize,
     ):
         def assert_active(*args, **kwargs):
             sdk.__enter__.assert_called_once_with()
@@ -153,8 +153,8 @@ def test_no_run_for_non_experiments_or_invalid_input(sdk, tmp_path, kind):
     elif kind == "download":
         args = ["download_model", "fake"]
     with (
-        patch("internvl.cli.wandb.init") as initialize,
-        patch("internvl.cli.download_model"),
+        patch("classification.cli.wandb.init") as initialize,
+        patch("classification.cli.download_model"),
     ):
         if kind == "download":
             main(args)
@@ -173,8 +173,8 @@ def test_native_context_exit_on_errors_and_success(sdk, tmp_path, source, cleanu
     failure = KeyboardInterrupt() if source == "interrupt" else RuntimeError(source)
     cleanup_error = RuntimeError("cleanup")
     with (
-        patch("internvl.cli.Experiment") as experiment,
-        patch("internvl.cli.wandb.init", return_value=sdk) as initialize,
+        patch("classification.cli.Experiment") as experiment,
+        patch("classification.cli.wandb.init", return_value=sdk) as initialize,
     ):
         if cleanup_fails:
             sdk.__exit__.side_effect = cleanup_error
@@ -252,13 +252,13 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
 
 def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_case, sdk, tmp_path):
     exp = experiment_case.experiment()
-    with patch("internvl.cli.wandb.init") as initialize:
+    with patch("classification.cli.wandb.init") as initialize:
         with patch.object(exp.dataset, "train_set", side_effect=AssertionError("tracking count")):
             exp.run()
         initialize.assert_not_called()
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(experiment_case.experiment(name="cli").config))
-    with patch("internvl.cli.wandb.init", return_value=sdk) as initialize:
+    with patch("classification.cli.wandb.init", return_value=sdk) as initialize:
         main(["experiment", "run", "--config_file", str(path)])
     initialize.assert_called_once()
     sdk.__enter__.assert_called_once_with()
@@ -303,8 +303,8 @@ from unittest.mock import patch
 import wandb
 import yaml
 from tqdm import tqdm
-from internvl.cli import _run_experiment
-from internvl.tracking import Tracker
+from classification.cli import _run_experiment
+from classification.tracking import Tracker
 report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
     "nearest_neighbor_accuracy": 1., "per_class": {
         "A": {"support": 1, "correct": 1, "recall": 1., "precision": 1., "f1": 1.},
@@ -327,7 +327,7 @@ def publish(tracker, config):
         original_configuration(tracker, config)
 
 class Experiment:
-    from internvl.experiments.config import validate_config
+    from classification.experiments.config import validate_config
     validate_config = staticmethod(validate_config)
 
     def __init__(self, config, *, tracker):
@@ -348,7 +348,7 @@ class Experiment:
         tracker.reference_counts(None)
         tracker.evaluation(report, path)
 
-with patch("internvl.cli.Experiment", Experiment), patch.object(Tracker, "configuration", publish):
+with patch("classification.cli.Experiment", Experiment), patch.object(Tracker, "configuration", publish):
     _run_experiment(config, "evaluate")
 """
     env = {k: v for k, v in os.environ.items() if not k.startswith("WANDB_")}
@@ -411,7 +411,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
     assert bar.disable  # Context exit closes the bar.
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
-        patch("internvl.experiments.classification.LanceDBIndex.query", side_effect=[[], failure]),
+        patch("classification.experiments.classification.LanceDBIndex.query", side_effect=[[], failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.evaluate()
@@ -422,7 +422,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
 
 
 def test_description_bar_counts_requests_and_closes_on_failure(progress_bars):
-    from internvl.llm.generate_descriptors import DescriberLLM
+    from classification.llm.generate_descriptors import DescriberLLM
 
     llm = DescriberLLM.__new__(DescriberLLM)
     failure = RuntimeError("request failed")
@@ -478,7 +478,7 @@ def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_
     exp.batch_size = 1
     exp.tracker = Tracker(sdk)
     with (
-        patch("internvl.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),
+        patch("classification.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.build_vector_database()
@@ -510,7 +510,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     from sentence_transformers import SentenceTransformer
     from test_embeddings import SyntheticEncoder
 
-    from internvl.encoders.sentence_transformers import EmbeddingModel
+    from classification.encoders.sentence_transformers import EmbeddingModel
 
     exp = experiment_case.experiment((True, True, True), 'truncated-v4')
     exp.config['embedding'].update(
@@ -524,7 +524,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
         modules=[encoder], device='cpu', prompts={'passage': 'Passage: '},
     )
     backend.module_kwargs = {'0': ['task', 'truncate_dim']}
-    with patch('internvl.encoders.sentence_transformers._load_backend', return_value=backend):
+    with patch('classification.encoders.sentence_transformers._load_backend', return_value=backend):
         main(['experiment', 'run', '--config_file', str(path),
               '--set', 'embedding.truncate_dim=1024'])
     experiment_case.embedder_constructor.assert_called_once_with(
@@ -537,7 +537,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
     assert report['metrics']['evaluated'] == 2
     assert report['config']['embedding']['truncate_dim'] == 1024
-    from internvl.cli import wandb
+    from classification.cli import wandb
     assert wandb.init.call_args.kwargs['config'] == report['config']
     artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
     config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
