@@ -9,21 +9,21 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..encoders.base import Embedder
-from ..encoders.sentence_transformers import EmbeddingModel
-from ..encoders.vertex import VertexEmbeddingModel
-from ..image_dataset import load_dataset
-from ..llm.generate_descriptors import DescriberLLM
-from ..llm.ollama import OllamaSession
-from ..retrieval.lancedb import LanceDBIndex
-from ..retrieval.metrics import metrics
-from ..tracking import Tracker
-from .artifacts import write_json
-from .batches import EmbeddingBatch, cached_batches
-from .config import validate_config
-from .descriptions import load_descriptions
-from .evaluation import evaluate_batches
-from .index_builder import IndexBuilder
+from classification.datasets.image_dataset import load_dataset
+from classification.encoders.base import Embedder
+from classification.encoders.sentence_transformers import EmbeddingModel
+from classification.encoders.vertex import VertexEmbeddingModel
+from classification.experiments.artifacts import write_json
+from classification.experiments.batches import EmbeddingBatch, cached_batches
+from classification.experiments.config import validate_config
+from classification.experiments.descriptions import load_descriptions
+from classification.experiments.evaluation import evaluate_batches
+from classification.experiments.index_builder import IndexBuilder
+from classification.llm.generate_descriptors import DescriberLLM
+from classification.llm.ollama import OllamaSession
+from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.metrics import metrics
+from classification.tracking import Tracker
 
 
 class Experiment:

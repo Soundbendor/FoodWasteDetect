@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ..schemas import PointRecord
+from classification.schemas import PointRecord
 
 
 def load_descriptions(path: Path) -> dict[str, list[str]]:

@@ -11,7 +11,7 @@ import pyarrow as pa
 from lancedb.db import LanceDBConnection
 from numpy.typing import NDArray
 
-from ..schemas import Neighbor, PointRecord, SourceIdentity
+from classification.schemas import Neighbor, PointRecord, SourceIdentity
 
 
 class LanceDBIndex:

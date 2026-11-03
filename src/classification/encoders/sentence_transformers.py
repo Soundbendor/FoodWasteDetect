@@ -10,8 +10,8 @@ from numpy.typing import NDArray
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 
-from .base import Embedder
-from .base import ImageInput as ImageInput
+from classification.encoders.base import Embedder
+from classification.encoders.base import ImageInput as ImageInput
 
 # Keep model-specific behavior here; batching remains owned by Sentence Transformers.
 _MODEL_SPECS = {

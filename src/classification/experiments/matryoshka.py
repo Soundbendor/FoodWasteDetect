@@ -12,12 +12,12 @@ import pyarrow as pa
 from lancedb.db import LanceDBConnection
 from lancedb.table import Table
 
-from ..retrieval.lancedb import LanceDBIndex
-from ..tracking import Tracker
-from .artifacts import write_json
-from .batches import cached_batches
-from .classification import Experiment
-from .config import validate_config as validate_experiment_config
+from classification.experiments.artifacts import write_json
+from classification.experiments.batches import cached_batches
+from classification.experiments.classification import Experiment
+from classification.experiments.config import validate_config as validate_experiment_config
+from classification.retrieval.lancedb import LanceDBIndex
+from classification.tracking import Tracker
 
 DIMENSIONS = (768, 1536, 3072)
 

@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 from math import log2
 from typing import Literal, TypedDict
 
-from ..schemas import Neighbor, Prediction, QueryRetrievalMetrics
+from classification.schemas import Neighbor, Prediction, QueryRetrievalMetrics
 
 
 class ClassMetrics(TypedDict):

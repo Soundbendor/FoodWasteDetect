@@ -7,7 +7,7 @@ persistence is specified in [experiments](experiments.md), and vector storage in
 
 ## FoodX251 metadata and image batches
 
-[`image_dataset.py`](../../src/classification/image_dataset.py) reads local class and CSV
+[`datasets/image_dataset.py`](../../src/classification/datasets/image_dataset.py) reads local class and CSV
 annotation files through pandas, independently of `data_wrappers.foodx251`.
 `FoodX251ImageDataset` exposes a typed Hugging Face `DatasetDict`: `train` holds
 training references and `validation` holds labeled validation images.

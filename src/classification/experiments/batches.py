@@ -4,7 +4,7 @@ from collections.abc import Iterable, Iterator
 
 import numpy as np
 
-from ..retrieval.lancedb import LanceDBIndex
+from classification.retrieval.lancedb import LanceDBIndex
 
 type EmbeddingBatch = tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
 

@@ -113,7 +113,7 @@ class DatasetTests(unittest.TestCase):
     def test_native_dataset_contract(self):
         from datasets import DatasetDict, Image as HFImage
         from PIL import Image
-        from classification.image_dataset import FoodX251ImageDataset
+        from classification.datasets.image_dataset import FoodX251ImageDataset
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -155,7 +155,7 @@ class DatasetTests(unittest.TestCase):
 
     def test_dataset_and_leakage(self):
         from PIL import Image
-        from classification.image_dataset import FoodX251ImageDataset
+        from classification.datasets.image_dataset import FoodX251ImageDataset
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'annot').mkdir()
@@ -502,7 +502,7 @@ class ExperimentTests(unittest.TestCase):
     def setUp(self):
         import numpy as np
         from datasets import Dataset, DatasetDict, Image as HFImage
-        from classification.image_dataset import FoodX251ImageDataset
+        from classification.datasets.image_dataset import FoodX251ImageDataset
         from PIL import Image
         import lancedb
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)

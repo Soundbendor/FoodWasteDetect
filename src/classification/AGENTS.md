@@ -24,7 +24,7 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 | --- | --- |
 | `cli.py`, `__main__.py` | Parse once, resolve YAML overrides, validate shared settings, and dispatch stages within native W&B contexts. Read [CLI](../../docs/classification/cli.md) when changing commands, configuration, or dispatch. |
 | `tracking.py` | Publish resolved configuration, reference counts, and completed evaluation results. Read [tracking](../../docs/classification/tracking.md) when changing W&B lifecycle, artifacts, summaries, or progress. |
-| `image_dataset.py` | Load local FoodX251 metadata and select/decode ordered batches. Read [data](../../docs/classification/data.md) when changing splits, identities, image caps, or image ownership. |
+| `datasets/image_dataset.py` | Load local FoodX251 metadata and select/decode ordered batches. Read [data](../../docs/classification/data.md) when changing splits, identities, image caps, or image ownership. |
 | `schemas.py` | Shared reference, neighbor, prediction, and retrieval-metric records. Read [data](../../docs/classification/data.md#shared-records) when changing fields or record/vector associations. |
 | `__init__.py` | Package description; no backend imports. |
 | `pyproject.toml`, `pixi.lock`, `.python-version`, `MANIFEST.in` | Standalone packaging, environment selection, tasks, and source-distribution inputs. Read [development](../../docs/development.md) before environment or packaging changes. |

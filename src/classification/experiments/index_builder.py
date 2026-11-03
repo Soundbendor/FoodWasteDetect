@@ -10,11 +10,11 @@ from typing import Literal
 from datasets import Dataset
 from tqdm import tqdm
 
-from ..encoders.base import Embedder
-from ..image_dataset import FoodX251ImageDataset
-from ..retrieval.lancedb import LanceDBIndex
-from ..schemas import PointRecord
-from .descriptions import load_descriptions, text_references
+from classification.datasets.image_dataset import FoodX251ImageDataset
+from classification.encoders.base import Embedder
+from classification.experiments.descriptions import load_descriptions, text_references
+from classification.retrieval.lancedb import LanceDBIndex
+from classification.schemas import PointRecord
 
 
 class IndexBuilder:

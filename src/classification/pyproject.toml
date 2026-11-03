@@ -36,7 +36,7 @@ dependencies = [
 classification = "classification.cli:main"
 
 [tool.setuptools]
-packages = ["classification", "classification.scripts", "classification.llm", "classification.encoders", "classification.retrieval", "classification.experiments"]
+packages = ["classification", "classification.datasets", "classification.scripts", "classification.llm", "classification.encoders", "classification.retrieval", "classification.experiments"]
 package-dir = {classification = "."}
 
 [tool.setuptools.package-data]
@@ -49,6 +49,9 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.isort]
+known-third-party = ["datasets"]
+
 [tool.pytest.ini_options]
 testpaths = ["../../tests"]
 addopts = "--cov=classification --cov-report=term-missing"
@@ -58,7 +61,7 @@ root = [".."]
 python-version = "3.13"
 
 [tool.ty.src]
-include = ["cli.py", "schemas.py", "tracking.py", "encoders/base.py", "encoders/vertex.py", "experiments", "retrieval", "image_dataset.py"]
+include = ["cli.py", "schemas.py", "tracking.py", "encoders/base.py", "encoders/vertex.py", "experiments", "retrieval", "datasets"]
 
 [dependency-groups]
 dev = [

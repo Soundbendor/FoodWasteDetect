@@ -7,10 +7,10 @@ import numpy as np
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-from ..retrieval.metrics import ranking_metrics
-from ..retrieval.voting import classify
-from ..schemas import ImageMetadata, Neighbor, Prediction
-from .batches import EmbeddingBatch
+from classification.experiments.batches import EmbeddingBatch
+from classification.retrieval.metrics import ranking_metrics
+from classification.retrieval.voting import classify
+from classification.schemas import ImageMetadata, Neighbor, Prediction
 
 
 def extract_batch_metadata(batch: dict[str, list]) -> list[ImageMetadata]:

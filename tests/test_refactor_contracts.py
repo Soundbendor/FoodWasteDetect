@@ -8,7 +8,7 @@ import pytest
 def test_validation_set_preserves_legacy_aliases(tmp_path):
     pytest.importorskip("datasets")
     pytest.importorskip("pandas")
-    from classification.image_dataset import FoodX251ImageDataset
+    from classification.datasets.image_dataset import FoodX251ImageDataset
 
     annotation = tmp_path / "annot"
     annotation.mkdir()

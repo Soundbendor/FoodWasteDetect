@@ -3,7 +3,7 @@
 from collections import Counter
 from collections.abc import Sequence
 
-from ..schemas import Neighbor
+from classification.schemas import Neighbor
 
 
 def classify(neighbors: Sequence[Neighbor]) -> tuple[str | None, float]:
