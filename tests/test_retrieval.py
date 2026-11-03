@@ -123,8 +123,7 @@ class MetricsTests(unittest.TestCase):
 
 
 def concurrent_reader(uri, barrier, queue):
-    index = LanceDBIndex(uri, "fixture")
-    index.open()
+    index = LanceDBIndex.open(uri, "fixture")
     barrier.wait(timeout=30)
     results = [index.query(np.array([1., 0.]), 10) for _ in range(10)]
     queue.put(results)
@@ -135,10 +134,9 @@ class LanceDBTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.uri = Path(self.temp.name) / "db"
-        self.index = LanceDBIndex(self.uri, "fixture")
 
-    def populate(self, dtype=np.float32):
-        self.index.create(2)
+    def populate(self, dtype=np.float32, uri=None):
+        self.index = LanceDBIndex.create(self.uri if uri is None else uri, "fixture", 2)
         records = [PointRecord(label, "class_name", label, label) for label in ("A", "B", "C")]
         vectors = np.array([[3., 0.], [1., 1.], [-2., 0.]], dtype=dtype)
         self.index.append(records[:2], vectors[:2])
@@ -146,7 +144,7 @@ class LanceDBTests(unittest.TestCase):
         return records, vectors
 
     def test_length_mismatch_does_not_append(self):
-        self.index.table = Mock()
+        self.index = LanceDBIndex(self.uri, Mock())
         record = PointRecord("A", "class_name", "A", "A")
         for records, vectors in [([record], np.empty((0, 2))), ([], np.ones((1, 2)))]:
             with self.assertRaisesRegex(ValueError, "Record/vector count mismatch"):
@@ -155,12 +153,10 @@ class LanceDBTests(unittest.TestCase):
 
     def test_round_trip_and_table_protection(self):
         for dtype in (np.float32, np.float64):
-            self.index = LanceDBIndex(self.uri / dtype.__name__, "fixture")
-            records, vectors = self.populate(dtype)
+            records, vectors = self.populate(dtype, self.uri / dtype.__name__)
             with self.assertRaises(ValueError):
-                self.index.create(2)
-            reopened = LanceDBIndex(self.index.uri, "fixture")
-            reopened.open()
+                LanceDBIndex.create(self.index.uri, "fixture", 2)
+            reopened = LanceDBIndex.open(self.index.uri, "fixture")
             stored = reopened.table.to_arrow()
             self.assertEqual(stored.schema.field("vector").type, pa.list_(pa.float32(), 2))
             for record, vector, point in zip(records, vectors, stored.to_pylist(), strict=True):
@@ -173,14 +169,13 @@ class LanceDBTests(unittest.TestCase):
             self.assertEqual(len(reopened.query(vectors[0], 1)), 1)
 
     def test_full_v4_vectors_round_trip_with_cosine_search(self):
-        self.index.create(2048)
+        self.index = LanceDBIndex.create(self.uri, "fixture", 2048)
         records = [PointRecord(label, "class_name", label, label) for label in ("A", "B")]
         vectors = np.zeros((2, 2048), dtype=np.float32)
         vectors[0, -1] = 3
         vectors[1, 0] = 2
         self.index.append(records, vectors)
-        reopened = LanceDBIndex(self.uri, "fixture")
-        reopened.open()
+        reopened = LanceDBIndex.open(self.uri, "fixture")
         self.assertEqual(
             reopened.table.schema.field("vector").type, pa.list_(pa.float32(), 2048)
         )
@@ -190,7 +185,7 @@ class LanceDBTests(unittest.TestCase):
         self.assertEqual(classify(neighbors), ("A", 0.5))
 
     def test_empty_and_bad_vectors(self):
-        self.index.create(2)
+        self.index = LanceDBIndex.create(self.uri, "fixture", 2)
         self.assertEqual(self.index.query(np.array([1., 0.]), 10), [])
         for vector in ([[1., 2., 3.]], [[float("nan"), 1.]]):
             with self.assertRaises((ValueError, pa.ArrowInvalid)):
@@ -198,18 +193,18 @@ class LanceDBTests(unittest.TestCase):
             self.assertEqual(self.index.table.count_rows(), 0)
 
     def test_missing_storage_is_not_created(self):
-        self.assertFalse(self.index.exists())
+        self.assertFalse(LanceDBIndex.exists(self.uri, "fixture"))
         with self.assertRaises(FileNotFoundError):
-            self.index.open()
+            LanceDBIndex.open(self.uri, "fixture")
         self.assertFalse(self.uri.exists())
         self.uri.mkdir()
         with self.assertRaises(ValueError):
-            self.index.open()
+            LanceDBIndex.open(self.uri, "fixture")
         self.assertEqual(list(self.uri.iterdir()), [])
 
     def test_path_resolution(self):
-        self.assertEqual(LanceDBIndex("~/fixtures", "a").uri, Path.home() / "fixtures")
-        self.assertEqual(LanceDBIndex("fixtures", "a").uri, Path.cwd() / "fixtures")
+        self.assertEqual(LanceDBIndex("~/fixtures", Mock()).uri, Path.home() / "fixtures")
+        self.assertEqual(LanceDBIndex("fixtures", Mock()).uri, Path.cwd() / "fixtures")
 
     def test_concurrent_readers_preserve_table(self):
         self.populate()
@@ -235,7 +230,7 @@ class LanceDBTests(unittest.TestCase):
                     process.terminate()
                 process.join(timeout=10)
             queue.close()
-        self.index.open()
+        self.index = LanceDBIndex.open(self.uri, "fixture")
         self.assertEqual(self.index.table.version, version)
         self.assertEqual(self.index.table.to_arrow(), before)
 
@@ -248,8 +243,7 @@ def test_identity_scan_and_vector_fetch_preserve_source_and_order(tmp_path):
     from classification.retrieval.lancedb import LanceDBIndex
     from classification.schemas import PointRecord
 
-    index = LanceDBIndex(tmp_path / "db", "vectors")
-    index.create(3)
+    index = LanceDBIndex.create(tmp_path / "db", "vectors", 3)
     records = [PointRecord("Apple", kind, f"quoted'{i}", "value")
                for kind in ("training_image", "validation_image") for i in range(13)]
     vectors = np.asarray([[i + 1, i + 2, i + 3] for i in range(26)], dtype=np.float32)
@@ -321,8 +315,7 @@ def test_support_cosine_is_query_weighted_and_keeps_negative_scores():
 
 
 def test_class_counts_stream_all_rows_and_reference_types(tmp_path):
-    index = LanceDBIndex(tmp_path, 'counts')
-    index.create(2)
+    index = LanceDBIndex.create(tmp_path, 'counts', 2)
     assert index.class_counts() == {}
     records = [PointRecord('A' if i % 2 else 'B', kind, str(i), '')
                for kind in ('class_name', 'description', 'training_image') for i in range(1100)]
@@ -334,10 +327,7 @@ def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
     from classification.retrieval.lancedb import LanceDBIndex
     from classification.schemas import PointRecord
 
-    index = LanceDBIndex(tmp_path / 'db', 'references')
-    with pytest.raises(RuntimeError, match='Open or create'):
-        index.optimize()
-    index.create(2)
+    index = LanceDBIndex.create(tmp_path / 'db', 'references', 2)
     for i in range(32):
         index.append([PointRecord(str(i), 'class_name', str(i), str(i))],
                      np.asarray([[1.0, i + 1.0]], dtype=np.float32))

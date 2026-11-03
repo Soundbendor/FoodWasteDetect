@@ -3,34 +3,39 @@
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Self
 
-import lancedb
 import numpy as np
 import pyarrow as pa
 from lancedb.db import LanceDBConnection
+from lancedb.table import LanceTable
 from numpy.typing import NDArray
 
 from classification.schemas import Neighbor, PointRecord, SourceIdentity
 
 
 class LanceDBIndex:
-    def __init__(self, uri: str | Path, table: str) -> None:
+    def __init__(self, uri: str | Path, table: LanceTable) -> None:
         self.uri = Path(uri).expanduser().resolve()
-        self.name = table
-        self.table = None
+        self.name = table.name
+        self.table: LanceTable = table
 
-    def exists(self) -> bool:
+    @staticmethod
+    def exists(uri: str | Path, table: str) -> bool:
         """Check without creating a missing database directory."""
-        return self.uri.is_dir() and self.name in cast(LanceDBConnection, lancedb.connect(self.uri))
+        path = Path(uri).expanduser().resolve()
+        return path.is_dir() and table in LanceDBConnection(path)
 
-    def open(self) -> None:
+    @classmethod
+    def open(cls, uri: str | Path, table: str) -> Self:
         """Open a completed table for reads without creating storage."""
-        if not self.uri.is_dir():
-            raise FileNotFoundError(f"LanceDB database does not exist: {self.uri}")
-        self.table = cast(LanceDBConnection, lancedb.connect(self.uri)).open_table(self.name)
+        path = Path(uri).expanduser().resolve()
+        if not path.is_dir():
+            raise FileNotFoundError(f"LanceDB database does not exist: {path}")
+        return cls(path, LanceDBConnection(path).open_table(table))
 
-    def create(self, dimension: int) -> None:
+    @classmethod
+    def create(cls, uri: str | Path, table: str, dimension: int) -> Self:
         """Create a typed table; the backend refuses existing names."""
         schema = pa.schema(
             [
@@ -39,9 +44,11 @@ class LanceDBIndex:
             ]
             + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)]
         )
-        self.table = cast(LanceDBConnection, lancedb.connect(self.uri)).create_table(
-            self.name, schema=schema, mode="create", exist_ok=False
+        path = Path(uri).expanduser().resolve()
+        opened = LanceDBConnection(path).create_table(
+            table, schema=schema, mode="create", exist_ok=False
         )
+        return cls(path, opened)
 
     def append(
         self,
@@ -51,8 +58,6 @@ class LanceDBIndex:
         """Append paired records; malformed vectors fail backend validation."""
         if len(records) != len(vectors):
             raise ValueError("Record/vector count mismatch")
-        if self.table is None:
-            raise RuntimeError("Open or create the table before insertion")
         self.table.add(
             [
                 dict(r.to_payload(), vector=v.tolist())
@@ -63,14 +68,10 @@ class LanceDBIndex:
 
     def optimize(self) -> None:
         """Compact with LanceDB's default maintenance and version-retention policy."""
-        if self.table is None:
-            raise RuntimeError("Open or create the table before optimization")
         self.table.optimize()
 
     def class_counts(self) -> Counter[str]:
         """Stream all class metadata, counting every stored row without loading vectors."""
-        if self.table is None:
-            raise RuntimeError("Open or create the table before scanning")
         counts: Counter[str] = Counter()
         for batch in self.table.search().select(["class"]).limit(None).to_batches():
             counts.update(batch.column(0).to_pylist())
@@ -78,8 +79,6 @@ class LanceDBIndex:
 
     def get_record_ids(self) -> list[SourceIdentity]:
         """Scan all identity metadata without reading vectors."""
-        if self.table is None:
-            raise RuntimeError("Open or create the table before scanning")
         rows = self.table.search().select(
             ["source_kind", "source_identity"]
         ).limit(None).to_list()
@@ -87,8 +86,6 @@ class LanceDBIndex:
 
     def fetch_vectors(self, identities: Sequence[SourceIdentity]) -> NDArray[np.float32]:
         """Fetch a bounded selection and restore the caller's order."""
-        if self.table is None:
-            raise RuntimeError("Open or create the table before fetching")
         if not identities:
             return np.empty((0, self.table.schema.field("vector").type.list_size), dtype=np.float32)
 
@@ -109,8 +106,6 @@ class LanceDBIndex:
         self, vector: np.ndarray[tuple[int], np.dtype[np.float32 | np.float64]], k: int
     ) -> list[Neighbor]:
         """Retrieve exact cosine neighbors, converting distance to similarity."""
-        if self.table is None:
-            raise RuntimeError("Open or create the table before querying")
         points = (
             self.table.search(vector.tolist())
             .distance_type("cosine")

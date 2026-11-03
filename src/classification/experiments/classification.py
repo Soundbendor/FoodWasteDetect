@@ -87,7 +87,7 @@ class Experiment:
 
     def _lancedb_adapter(self) -> LanceDBIndex:
         options = self.config["lancedb"]
-        return LanceDBIndex(uri=options["uri"], table=options["table"])
+        return LanceDBIndex.open(uri=options["uri"], table=options["table"])
 
     def _evaluation_batches(
         self,
@@ -179,7 +179,6 @@ class Experiment:
     def _prepare_evaluation(self) -> tuple[LanceDBIndex, LoadedIndexSummary]:
         table = self.config["lancedb"]["table"]
         index = self._lancedb_adapter()
-        index.open()
         artifact: LoadedIndexSummary = {}
         path = self.output / "index.json"
         if path.exists():

@@ -110,17 +110,16 @@ class IndexBuilder:
         return images, self._get_text_inputs()
 
     def _prepare_new_reference_build(
-        self, index: LanceDBIndex
-    ) -> tuple[Dataset | None, list[PointRecord], Counter[str]]:
+        self,
+    ) -> tuple[LanceDBIndex, Dataset | None, list[PointRecord], Counter[str]]:
         images, records = self._prepare_reference_inputs()
-        index.create(self.embedder.dimension)
-        return images, records, Counter()
+        index = LanceDBIndex.create(self.uri, self.table, self.embedder.dimension)
+        return index, images, records, Counter()
 
     def _prepare_resumed_reference_build(
         self, index: LanceDBIndex
     ) -> tuple[Dataset | None, list[PointRecord], Counter[str]]:
         logging.info("Loading existing table...")
-        index.open()
         images, records = self._prepare_reference_inputs()
         vector_ids = index.get_record_ids()
         existing_ids = frozenset(vector_ids)
@@ -133,11 +132,11 @@ class IndexBuilder:
 
     def build_reference_index(self) -> tuple[LanceDBIndex, Counter[str]]:
         """Build or resume and optimize the reference table, returning it and its counts."""
-        index = LanceDBIndex(uri=self.uri, table=self.table)
-        if index.exists():
+        if LanceDBIndex.exists(self.uri, self.table):
+            index = LanceDBIndex.open(self.uri, self.table)
             images, records, counts = self._prepare_resumed_reference_build(index)
         else:
-            images, records, counts = self._prepare_new_reference_build(index)
+            index, images, records, counts = self._prepare_new_reference_build()
         counts.update(self._insert_references(index, records, images))
         if not counts:
             raise ValueError("No records inserted into LanceDB - check dataset and config.")
@@ -157,11 +156,10 @@ class IndexBuilder:
         return counts
 
     def build_validation_table(self, table_name: str) -> LanceDBIndex:
-        cache = LanceDBIndex(uri=self.uri, table=table_name)
-        if cache.exists():
-            cache.open()
+        if LanceDBIndex.exists(self.uri, table_name):
+            cache = LanceDBIndex.open(self.uri, table_name)
         else:
-            cache.create(self.embedder.dimension)
+            cache = LanceDBIndex.create(self.uri, table_name, self.embedder.dimension)
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"
         }

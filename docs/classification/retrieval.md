@@ -15,7 +15,12 @@ and publication; [tracking](tracking.md) owns W&B summaries and tables.
 
 `lancedb.uri` is a filesystem path resolved from the working directory with `~`
 expansion, independently of `output_dir`. `exists()` and `open()` do not create
-missing database directories. Creation uses an explicit Arrow schema with
+missing database directories. `LanceDBIndex.open(uri, table)` and
+`LanceDBIndex.create(uri, table, dimension)` return an index with an open
+`LanceTable`; `LanceDBIndex.exists(uri, table)` checks storage without constructing
+an index. Each factory uses the local `LanceDBConnection` directly. Index methods
+can therefore use their table without an unopened state or repeated guards.
+Creation uses an explicit Arrow schema with
 non-null string fields `id`, `class`, `source_kind`, `source_identity`, and `value`,
 plus a fixed-length float32 `vector`. `mode="create", exist_ok=False` refuses
 overwrites. `PointRecord` supplies UUIDs and maps its `label` to stored `class`.

@@ -32,8 +32,7 @@ def sources(tmp_path, monkeypatch):
         ('reference', 'class_name', ['A', 'B'], vectors),
         ('validation', 'validation_image', ['second', 'first'], [query * 2, query]),
     ):
-        index = LanceDBIndex(uri, name)
-        index.create(3072)
+        index = LanceDBIndex.create(uri, name, 3072)
         index.table.add([
             dict(id=f'{name}-{i}', source_kind=kind, source_identity=identity,
                  value=f'kept-{i}', vector=vector.tolist(), **{'class': label})

@@ -4,9 +4,8 @@ from collections.abc import Callable, Iterator
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import lancedb
 import numpy as np
 import pyarrow as pa
 from lancedb.db import LanceDBConnection
@@ -85,8 +84,7 @@ def prepare_table(
 def evaluate_cached(config: dict[str, Any], tracker: Tracker) -> EvaluationReport:
     experiment = Experiment(config, tracker=tracker)
     options = config["lancedb"]
-    cache = LanceDBIndex(options["uri"], options["validation_table"])
-    cache.open()
+    cache = LanceDBIndex.open(options["uri"], options["validation_table"])
     return experiment.evaluate_from_batches(
         cached_batches(
             cache,
@@ -104,7 +102,7 @@ def run_sweep(
     uri = Path(config["lancedb"]["uri"]).expanduser().resolve()
     if not uri.is_dir():
         raise FileNotFoundError(f"LanceDB database does not exist: {uri}")
-    connection = cast(LanceDBConnection, lancedb.connect(uri))
+    connection = LanceDBConnection(uri)
     sources = table_names(config, 3072)
     for name in sources:
         connection.open_table(name)

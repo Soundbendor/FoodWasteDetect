@@ -484,8 +484,7 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
 
     config = resume_config
     config["n_imgs_per_class"] = 12
-    index = LanceDBIndex(**{k: config["lancedb"][k] for k in ("uri", "table")})
-    index.create(128)
+    index = LanceDBIndex.create(config["lancedb"]["uri"], config["lancedb"]["table"], 128)
     initial = [PointRecord("Apple", "class_name", "Apple", "Apple"),
                PointRecord("Apple", "generated_description", "Apple:1", "round")]
     initial += [PointRecord("Apple", "training_image", f"foodx251:train:{i}.png", "old")
@@ -500,7 +499,7 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     assert len(requests) == 2  # one description and the twelfth capped image
     assert summary["source_counts"] == {
         "class_name": 1, "generated_description": 2, "training_image": 12}
-    index.open()
+    index = LanceDBIndex.open(index.uri, index.name)
     assert len(index.get_record_ids()) == 15
     assert set(old_ids) <= {r["id"] for r in index.table.search().limit(None).to_list()}
     report = experiment.evaluate()
@@ -549,8 +548,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
         action()
     assert not list(experiment.output.glob("evaluation_*/report.json"))
     table = config["lancedb"]["validation_table" if stage == "validation" else "table"]
-    index = LanceDBIndex(config["lancedb"]["uri"], table)
-    index.open()
+    index = LanceDBIndex.open(config["lancedb"]["uri"], table)
     saved = set(index.get_record_ids())
     assert len(saved) == committed
     expected = {}
@@ -579,7 +577,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
             with Image.open(BytesIO(base64.urlsafe_b64decode(part["inlineData"]["data"]))) as image:
                 submitted.append(image.getpixel((0, 0))[0])
     assert Counter(submitted) == Counter(value for key, value in expected.items() if key not in saved)
-    index.open()
+    index = LanceDBIndex.open(index.uri, index.name)
     assert len(index.get_record_ids()) == total
 
 
@@ -597,9 +595,8 @@ def test_cache_toggle_truthiness(transport, resume_config, value):
     experiment.build_vector_database()
     experiment.evaluate()
     if value:
-        cache = LanceDBIndex(resume_config["lancedb"]["uri"],
-                             resume_config["lancedb"]["validation_table"])
-        cache.open()
+        cache = LanceDBIndex.open(resume_config["lancedb"]["uri"],
+                                  resume_config["lancedb"]["validation_table"])
         assert len(cache.get_record_ids()) == 13
         resume_config["lancedb"]["validation_table"] = resume_config["lancedb"]["table"]
         with pytest.raises(ValueError, match="distinct"):
@@ -625,8 +622,8 @@ def test_default_cache_disabled_and_local_cache_supported(transport, resume_conf
     experiment = Experiment(resume_config)
     experiment.build_vector_database()
     experiment.evaluate()
-    assert not LanceDBIndex(resume_config["lancedb"]["uri"],
-                            resume_config["lancedb"]["validation_table"]).exists()
+    assert not LanceDBIndex.exists(resume_config["lancedb"]["uri"],
+                                   resume_config["lancedb"]["validation_table"])
     from classification.experiments.classification import Experiment
     from classification.experiments.config import validate_config
 
@@ -716,13 +713,11 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
         "".join(f"{i}.png,{i % 2}\n" for i in range(13))
     )
     config["k"] = 1
-    reference = LanceDBIndex(config["lancedb"]["uri"], config["lancedb"]["table"])
-    reference.create(128)
+    reference = LanceDBIndex.create(config["lancedb"]["uri"], config["lancedb"]["table"], 128)
     vectors = np.eye(2, 128, dtype=np.float32)
     reference.append([PointRecord(label, "class_name", label, label)
                       for label in ("Apple", "Banana")], vectors)
-    cache = LanceDBIndex(config["lancedb"]["uri"], config["lancedb"]["validation_table"])
-    cache.create(128)
+    cache = LanceDBIndex.create(config["lancedb"]["uri"], config["lancedb"]["validation_table"], 128)
     # Seed a partial cache in reverse order; new responses also finish out of order.
     for i in reversed(range(0, 13, 2)):
         cache.append([PointRecord("Apple", "validation_image", f"foodx251:val:{i}.png", "old")],
@@ -768,8 +763,7 @@ def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config
     transport(lambda request: response())
     tracker = Mock()
     experiment = Experiment(resume_config, tracker=tracker)
-    index = experiment._lancedb_adapter()
-    index.create(128)
+    index = LanceDBIndex.create(resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"], 128)
     # Counts include duplicate and unrequested stored rows; filtering is a set.
     index.append([PointRecord("Apple", "class_name", identity, identity)
                   for identity in ("Apple", "Apple", "old")], np.ones((3, 128)))
@@ -791,13 +785,14 @@ def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config
 
 def test_reference_inputs_fail_before_table_creation(transport, resume_config):
     from classification.experiments.classification import Experiment
+    from classification.retrieval.lancedb import LanceDBIndex
 
     transport(lambda request: response())
     Path(resume_config["descriptions_file"]).unlink()
     experiment = Experiment(resume_config)
     with pytest.raises(FileNotFoundError):
         experiment.build_vector_database()
-    assert not experiment._lancedb_adapter().exists()
+    assert not LanceDBIndex.exists(resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"])
     assert experiment._embedder is None
 
 
@@ -811,8 +806,7 @@ def test_validation_cache_completes_before_classification(transport, resume_conf
     original = LanceDBIndex.query
 
     def query(index, vector, k):
-        cache = LanceDBIndex(index.uri, resume_config["lancedb"]["validation_table"])
-        cache.open()
+        cache = LanceDBIndex.open(index.uri, resume_config["lancedb"]["validation_table"])
         assert len(cache.get_record_ids()) == 13
         return original(index, vector, k)
 
@@ -891,7 +885,7 @@ import sentence_transformers
 
 with (
     patch("google.genai.Client") as vertex,
-    patch("lancedb.connect") as storage,
+    patch("lancedb.db.LanceDBConnection") as storage,
     patch("ollama.Client") as ollama_client,
     patch("sentence_transformers.SentenceTransformer") as local,
 ):

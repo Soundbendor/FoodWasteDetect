@@ -375,6 +375,7 @@ class ExperimentTests(unittest.TestCase):
     def test_image_insertion_rejects_mismatched_record_columns_before_encoding(self):
         exp = self.experiment((True, False, False))
         builder = exp._index_builder()
+        index = LanceDBIndex.create(self.db_path, exp.config['lancedb']['table'], 2)
         for split in ('train', 'val'):
             for field in ('class', 'source_id', 'fname'):
                 with self.subTest(split=split, field=field):
@@ -389,7 +390,7 @@ class ExperimentTests(unittest.TestCase):
                          patch.object(LanceDBIndex, 'append') as append:
                         with self.assertRaises(ValueError):
                             builder._insert_image_records(
-                                exp._lancedb_adapter(), self.dataset.train_set(), split=split
+                                index, self.dataset.train_set(), split=split
                             )
                         encode.assert_not_called()
                         append.assert_not_called()
@@ -453,7 +454,7 @@ class ExperimentTests(unittest.TestCase):
         exp.config['n_imgs_per_class'] = 1
         with self.assertRaisesRegex(ValueError, 'Missing usable training references'):
             exp.build_vector_database()
-        self.assertFalse(exp._lancedb_adapter().exists())
+        self.assertFalse(LanceDBIndex.exists(self.db_path, exp.config['lancedb']['table']))
         self.assertFalse((exp.output / 'index.json').exists())
 
     def test_artifact_formats_and_direct_loading_remain_compatible(self):
@@ -485,8 +486,7 @@ class ExperimentTests(unittest.TestCase):
 
         exp = self.experiment()
         exp.config['k'] = 1
-        index = exp._lancedb_adapter()
-        index.create(2)
+        index = LanceDBIndex.create(self.db_path, exp.config['lancedb']['table'], 2)
         records = [PointRecord('Apple', 'description', str(i), '') for i in range(7)]
         index.append(records, np.tile([1., 0.], (7, 1)))
         with patch.object(exp, '_lancedb_adapter', return_value=index), \
@@ -500,8 +500,7 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(report['metrics'][key], 0.5)
         self.assertEqual(report['predictions'][0]['retrieval_metrics']['relevant_reference_count'], 7)
         exp.config['lancedb']['table'] = 'empty'
-        empty = LanceDBIndex(index.uri, 'empty')
-        empty.create(2)
+        LanceDBIndex.create(index.uri, 'empty', 2)
         report = exp.evaluate()
         self.assertEqual(report['metrics']['evaluated'], 2)
         self.assertEqual(report['metrics']['map_at_r'], 0)
@@ -550,7 +549,9 @@ class ExperimentTests(unittest.TestCase):
         self.dataset_constructor = self.enterContext(patch('classification.experiments.classification.load_dataset', return_value=self.dataset))
         self.embedder_constructor = self.enterContext(patch('classification.experiments.classification.EmbeddingModel', side_effect=Embedder))
         self.describer_constructor = self.enterContext(patch('classification.experiments.classification.DescriberLLM', side_effect=Describer))
-        self.client_constructor = self.enterContext(patch('classification.retrieval.lancedb.lancedb.connect', wraps=lancedb.connect))
+        self.client_constructor = self.enterContext(patch(
+            'classification.retrieval.lancedb.LanceDBConnection', wraps=lancedb.db.LanceDBConnection
+        ))
 
     def experiment(self, flags=(False, True, False), name='run'):
         cfg = dict(zip(('embed_images','embed_class_labels','embed_descriptions'), flags))
@@ -619,8 +620,7 @@ class ExperimentTests(unittest.TestCase):
         rows = self.interleaved_training()
         exp = self.experiment((True, True, False), 'resume-filtered')
         exp.config['n_imgs_per_class'] = 2
-        index = exp._lancedb_adapter()
-        index.create(2)
+        index = LanceDBIndex.create(self.db_path, exp.config['lancedb']['table'], 2)
         saved = [
             PointRecord(rows[i]['class'], 'training_image', rows[i]['source_id'], rows[i]['fname'])
             for i in (0, 1, 4)
@@ -751,8 +751,7 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment()
         records = [PointRecord(label, 'class_name', label, label) for label in ['Apple', 'Pear']]
         self.assertTrue(all(isinstance(record, PointRecord) for record in records))
-        index = LanceDBIndex(self.db_path, 'record_round_trip')
-        index.create(2)
+        index = LanceDBIndex.create(self.db_path, 'record_round_trip', 2)
         vectors = exp.embedder.encode_text([record.value for record in records])
         index.append(records, vectors)
         stored = self.client.open_table('record_round_trip').to_arrow().to_pylist()
@@ -855,7 +854,7 @@ class ExperimentTests(unittest.TestCase):
         with patch.object(LanceDBIndex, 'exists', side_effect=ConnectionError('offline')) as exists:
             with self.assertRaisesRegex(ConnectionError, 'offline'):
                 exp.build_vector_database()
-        exists.assert_called_once_with()
+        exists.assert_called_once_with(exp.config['lancedb']['uri'], exp.config['lancedb']['table'])
         self.embedder_constructor.assert_not_called()
         self.assertFalse(exp.output.exists())
 
