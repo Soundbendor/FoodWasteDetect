@@ -2,37 +2,11 @@
 
 Conversation date: October 19, 2026.
 
-This is a historical handoff. Current behavior supersedes the snapshot below:
-`Experiment(config)` loads dataset metadata and class names during construction,
-stores batch size once, and constructs the embedder and Qdrant client on first use.
-`validate_config()` checks boolean reference switches and requires at least one
-enabled source during construction.
-Text references use a private helper; image references come from decoded batches.
-The image batch context manager has been removed; indexing and evaluation rely
-on garbage collection for decoded images.
-Description generation delegates its loop and empty-description checks to
-`DescriberLLM.generate_descriptions(classes, count)`, which calls `describe_class(label)`.
-The experiment owns saved-file handling and closes Ollama before `run()` constructs
-the embedder. Stages save results only after success.
-Failures propagate without partial reports and may leave a partial collection;
-a failed rebuild preserves the last successful `index.json`. The YAML
-`qdrant.collection_prefix` now specifies the exact collection name. If it exists,
-`build_vector_database()` warns and returns None without embedding or insertion.
-Evaluation queries the configured collection; without a matching local index
-summary, stored model settings and source counts are null. No compatibility or
-completeness checks are added. Existing partial collections are also reused.
-Evaluation writes
-only `evaluation_<UTC timestamp>/report.json` with predictions and metrics for the complete,
-nonempty validation split. Status fields, duplicated manifests and files,
-prediction `value`, coverage, and intermediate counts are removed. CLI commands
-and YAML keys remain unchanged. The `index` CLI command now calls the renamed
-`Experiment.build_vector_database()` method, and `describe` calls
-`Experiment.generate_descriptions()`. No artifact validation or provenance
-is added.
-Argument parsing and YAML loading now live in `internvl.cli`, under
-`python -m internvl experiment ...`; the old module entry point has been removed.
-See README.md and AGENTS.md for the current contracts; the snapshot below also
-predates removal of exclusions.
+Historical snapshot: the storage, API, and failure behavior below have been
+superseded. Read the [package guide](../../src/internvl/AGENTS.md) and
+[current experiment contract](../internvl/experiments.md) for implementation work.
+This handoff preserves decisions and context; it does not authorize restoring
+removed provenance or validation machinery.
 
 The configurable whole-image classification runner is implemented in the working
 tree. The user then explicitly requested simplification: remove revision pins,
