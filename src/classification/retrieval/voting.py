@@ -10,8 +10,12 @@ def classify(neighbors: Sequence[Neighbor]) -> tuple[str | None, float]:
     """Vote by count, then best similarity, then class name."""
     if not neighbors:
         return None, 0.0
-    votes = Counter(n["label"] for n in neighbors)
-    best = {label: max(n["score"] for n in neighbors if n["label"] == label) for label in votes}
+    votes: Counter[str] = Counter()
+    best: dict[str, float] = {}
+    for neighbor in neighbors:
+        label, score = neighbor["label"], neighbor["score"]
+        votes[label] += 1
+        best[label] = max(best.get(label, score), score)
     winner = min(votes, key=lambda label: (-votes[label], -best[label], label))
     return winner, votes[winner] / len(neighbors)
 
