@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NotRequired, TypedDict
 
 import numpy as np
 import torch
@@ -13,8 +13,17 @@ from sentence_transformers import SentenceTransformer
 from classification.encoders.base import Embedder
 from classification.encoders.base import ImageInput as ImageInput
 
+
+class _ModelSpec(TypedDict):
+    dimension: int
+    load: dict[str, Any]
+    encode: NotRequired[dict[str, Any]]
+    text: NotRequired[dict[str, Any]]
+    image_dict: NotRequired[bool]
+
+
 # Keep model-specific behavior here; batching remains owned by Sentence Transformers.
-_MODEL_SPECS = {
+_MODEL_SPECS: dict[str, _ModelSpec] = {
     "jinaai/jina-clip-v2": {
         "dimension": 1024,
         "load": {
@@ -105,7 +114,7 @@ class EmbeddingModel(Embedder):
             raise ValueError(
                 f"Unsupported model {model_id!r}. Supported models: {list(_MODEL_SPECS)}"
             )
-        native_dimension = cast(int, _MODEL_SPECS[model_id]["dimension"])
+        native_dimension = _MODEL_SPECS[model_id]["dimension"]
         if truncate_dim is not None and (
             isinstance(truncate_dim, bool)
             or not isinstance(truncate_dim, int)
