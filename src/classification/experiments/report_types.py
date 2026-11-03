@@ -7,16 +7,7 @@ from classification.schemas import Prediction
 
 
 class IndexSummary(TypedDict):
-    """Summary published after a completed reference build."""
-
-    table: str
-    uri: str
-    source_counts: dict[str, int]
-    config: dict[str, Any]
-
-
-class LoadedIndexSummary(TypedDict, total=False):
-    """Optional fields read from an existing, unvalidated index summary."""
+    """Complete reference-build summary used for both writing and reading."""
 
     table: str
     uri: str

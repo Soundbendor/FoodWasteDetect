@@ -23,7 +23,6 @@ from classification.experiments.index_builder import IndexBuilder
 from classification.experiments.report_types import (
     EvaluationReport,
     IndexSummary,
-    LoadedIndexSummary,
 )
 from classification.llm.generate_descriptors import DescriberLLM
 from classification.llm.ollama import OllamaSession
@@ -182,30 +181,30 @@ class Experiment:
         index, artifact = self._prepare_evaluation()
         return self._execute_evaluation(index, artifact, batches)
 
-    def _prepare_evaluation(self) -> tuple[LanceDBIndex, LoadedIndexSummary]:
+    def _prepare_evaluation(self) -> tuple[LanceDBIndex, IndexSummary | None]:
         table = self.config["lancedb"]["table"]
         index = self._lancedb_adapter()
-        artifact: LoadedIndexSummary = {}
+        artifact: IndexSummary | None = None
         path = self.output / "index.json"
         if path.exists():
             logging.info("Loading index.json from checkpoint...")
-            summary: LoadedIndexSummary = json.loads(path.read_text(encoding="utf-8"))
+            summary: IndexSummary = json.loads(path.read_text(encoding="utf-8"))
             # Only attach metadata identifying this database and table.
-            saved_uri = summary.get("uri")
             if (
-                summary.get("table") == table
-                and saved_uri is not None
-                and Path(saved_uri).expanduser().resolve() == index.uri
+                summary["table"] == table
+                and Path(summary["uri"]).expanduser().resolve() == index.uri
             ):
                 artifact = summary
         if self.tracker:
-            self.tracker.reference_counts(artifact.get("source_counts"))
+            self.tracker.reference_counts(
+                artifact["source_counts"] if artifact is not None else None
+            )
         return index, artifact
 
     def _execute_evaluation(
         self,
         index: LanceDBIndex,
-        artifact: LoadedIndexSummary,
+        artifact: IndexSummary | None,
         batches: Iterable[EmbeddingBatch],
     ) -> EvaluationReport:
         predictions = evaluate_batches(
@@ -218,7 +217,7 @@ class Experiment:
         report: EvaluationReport = dict(
             config=self.config,
             table=index.name,
-            reference_source_counts=artifact.get("source_counts"),
+            reference_source_counts=artifact["source_counts"] if artifact is not None else None,
             predictions=predictions,
             metrics=metrics(predictions, self.classes),
         )

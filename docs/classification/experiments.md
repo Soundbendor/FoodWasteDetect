@@ -22,7 +22,7 @@ selection and image ownership use [data](data.md); for scoring use
 | `config.py` | Shared `validate_config()` used before CLI tracking and during construction |
 | `batches.py` | `EmbeddingBatch` and ordered cache reads through `cached_batches()` |
 | `artifacts.py` | Shared `write_json()` |
-| `report_types.py` | Typed index summaries and evaluation reports; loaded summaries allow missing fields without runtime schema validation |
+| `report_types.py` | Typed index summaries and evaluation reports; readers trust the complete summary shape |
 | `matryoshka.py` | Cached Gemini dimension sweep, table prefixes, and sweep summary |
 
 `LanceDBIndex` owns ordinary database operations. The sweep's streaming creation
@@ -135,7 +135,9 @@ For paid backends, restarting can repeat requests from the unfinished batch;
 `build_vector_database()` returns and writes `index.json` only after successful
 optimization. It contains `table`, resolved `uri`, `source_counts`, and effective
 `config`. Evaluation attaches counts from this file only when both URI and table
-match; otherwise `reference_source_counts` is null.
+match; otherwise `reference_source_counts` is null. Writers and readers share
+`IndexSummary`; loaded files are trusted to contain its required fields. An absent
+or mismatched summary is represented by None, with no runtime schema validation.
 
 `evaluate()` and `evaluate_from_batches()` share `_execute_evaluation()`. The
 latter accepts ordered supplied metadata/vector batches and lets the sweep reuse
