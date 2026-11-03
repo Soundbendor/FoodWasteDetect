@@ -15,7 +15,7 @@ generates class descriptions separately.
 
 Import concrete modules directly; package initializers stay lightweight. Keep
 backend construction and runtime side effects behind explicit calls. Shared
-configuration validation belongs in `experiments.config.validate_config`; shared
+configuration models belong in `experiments.config.ExperimentConfig`; shared
 JSON writing belongs in `experiments.artifacts.write_json`.
 
 ## Package responsibilities
@@ -46,4 +46,4 @@ validation caches; `LanceDBIndex` performs ordinary storage operations. The cach
 dimension sweep accesses derived tables directly in `experiments.matryoshka`.
 `experiments.evaluation` computes predictions from supplied batches; `Experiment`
 writes a complete local report before `Tracker` publishes it. Direct
-`Experiment(config)` calls have no W&B run unless a tracker is supplied.
+`Experiment(config: ExperimentConfig)` calls have no W&B run unless a tracker is supplied.

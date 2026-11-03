@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 import httpx
 from pydantic import ValidationError
 
-from classification.experiments.config import validate_ollama_config
+from classification.experiments.config import OllamaConfig
 from classification.llm import generate_descriptors as descriptors
 from classification.llm import ollama
 
@@ -24,19 +24,19 @@ class OllamaConfigTests(unittest.TestCase):
         for name in ("startup_timeout", "request_timeout"):
             for value in (0, -1, True, False, float("nan"), float("inf"), -float("inf"), "10", None):
                 with self.subTest(name=name, value=value):
-                    settings = {"startup_timeout": 10, "request_timeout": 30}
+                    settings = {"binary_path": "ollama", "host": "localhost:11434", "startup_timeout": 10, "request_timeout": 30}
                     settings[name] = value
                     with self.assertRaisesRegex(ValueError, name):
-                        validate_ollama_config(settings)
+                        OllamaConfig.model_validate(settings)
 
     def test_valid_timeouts_and_missing_keys(self):
         for value in (1, 0.25):
-            validate_ollama_config({"startup_timeout": value, "request_timeout": value})
+            OllamaConfig.model_validate({"binary_path": "ollama", "host": "localhost:11434", "startup_timeout": value, "request_timeout": value})
         for name in ("startup_timeout", "request_timeout"):
-            settings = {"startup_timeout": 10, "request_timeout": 30}
+            settings = {"binary_path": "ollama", "host": "localhost:11434", "startup_timeout": 10, "request_timeout": 30}
             del settings[name]
-            with self.assertRaises(KeyError):
-                validate_ollama_config(settings)
+            with self.assertRaises(ValueError):
+                OllamaConfig.model_validate(settings)
 
 
 class DescriptionTests(unittest.TestCase):
@@ -117,7 +117,7 @@ class OllamaLifecycleTests(unittest.TestCase):
             'startup_timeout': 120,
             'request_timeout': 600,
         }
-        self.session = ollama.OllamaSession(self.config)
+        self.session = ollama.OllamaSession(OllamaConfig.model_validate(self.config))
 
     def test_download_progress_environment_and_cleanup(self):
         for failure in (None, RuntimeError('pull failed'), KeyboardInterrupt()):
@@ -227,7 +227,7 @@ class OllamaLifecycleTests(unittest.TestCase):
     def test_constructor_uses_config_without_environment_fallback(self):
         config = dict(self.config, startup_timeout=7, request_timeout=19)
         with patch.dict(ollama.os.environ, {'OLLAMA_HOST': 'other:9999'}):
-            session = ollama.OllamaSession(config)
+            session = ollama.OllamaSession(OllamaConfig.model_validate(config))
         self.assertEqual(session.binary_path, config['binary_path'])
         self.assertEqual(session.host, 'http://127.0.0.1:12345')
         self.assertEqual(session.startup_timeout, 7)
@@ -238,8 +238,8 @@ class OllamaLifecycleTests(unittest.TestCase):
             with self.subTest(key=key):
                 config = self.config.copy()
                 del config[key]
-                with self.assertRaises(KeyError):
-                    ollama.OllamaSession(config)
+                with self.assertRaises(ValueError):
+                    ollama.OllamaSession(OllamaConfig.model_validate(config))
 
 
     def test_existing_server_is_rejected_without_starting_or_stopping_it(self):

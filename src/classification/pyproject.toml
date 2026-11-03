@@ -26,7 +26,6 @@ dependencies = [
     "timm>=1.0.30",
     "tqdm>=4.70.1",
     "transformers>=4.57.6,<6",
-    "omegaconf>=2.3,<3",
     "wandb>=0.28.1,<0.29",
     "peft>=0.15.2",
     "google-genai==2.33.0",

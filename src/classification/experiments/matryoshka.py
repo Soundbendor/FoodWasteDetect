@@ -1,7 +1,6 @@
 """Evaluate cached Gemini embeddings at native and shorter prefix dimensions."""
 
 from collections.abc import Callable, Iterator
-from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,7 +13,7 @@ from lancedb.table import Table
 from classification.experiments.artifacts import write_json
 from classification.experiments.batches import cached_batches
 from classification.experiments.classification import Experiment
-from classification.experiments.config import validate_config as validate_experiment_config
+from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
 from classification.experiments.table_metadata import derive_metadata
 from classification.retrieval.lancedb import LanceDBIndex
@@ -23,19 +22,21 @@ from classification.tracking import Tracker
 DIMENSIONS = (768, 1536, 3072)
 
 
-def table_names(config: dict, dimension: int) -> tuple[str, str]:
+def table_names(config: ExperimentConfig, dimension: int) -> tuple[str, str]:
     """Return reference/cache names, leaving native-dimension names unchanged."""
     suffix = f"_d{dimension}" if dimension != 3072 else ""
-    options = config["lancedb"]
-    return options["table"] + suffix, options["validation_table"] + suffix
+    options = config.lancedb
+    validation = options.validation_table
+    if validation is None:
+        raise ValueError("lancedb.validation_table is required for sweeps")
+    return options.table + suffix, validation + suffix
 
 
-def validate_config(config: dict) -> None:
+def validate_config(config: ExperimentConfig) -> None:
     """Require Gemini source tables and distinct source/destination names."""
-    validate_experiment_config(config)
-    if config["embedding"].get("model_id") != "google/ge-v2":
+    if config.embedding.model_id != "google/ge-v2":
         raise ValueError("matroyshka-sweep requires google/ge-v2 source tables")
-    names = [config["lancedb"].get(key) for key in ("table", "validation_table")]
+    names = [config.lancedb.table, config.lancedb.validation_table]
     if any(not isinstance(name, str) or not name.strip() for name in names):
         raise ValueError("Reference and validation table names must be nonempty")
     all_names = [name for dimension in DIMENSIONS for name in table_names(config, dimension)]
@@ -87,11 +88,12 @@ def prepare_table(
     connection.create_table(destination, data=reader, schema=schema, mode="create", exist_ok=False)
 
 
-def evaluate_cached(config: dict[str, Any], tracker: Tracker) -> EvaluationReport:
+def evaluate_cached(config: ExperimentConfig, tracker: Tracker) -> EvaluationReport:
     """Evaluate cached vectors in validation order and publish the complete report."""
     experiment = Experiment(config, tracker=tracker)
-    options = config["lancedb"]
-    cache = LanceDBIndex.open(options["uri"], options["validation_table"])
+    options = config.lancedb
+    assert options.validation_table is not None
+    cache = LanceDBIndex.open(options.uri, options.validation_table)
     return experiment.evaluate_from_batches(
         cached_batches(
             cache,
@@ -101,29 +103,30 @@ def evaluate_cached(config: dict[str, Any], tracker: Tracker) -> EvaluationRepor
 
 
 def run_sweep(
-    config: dict[str, Any],
-    evaluate: Callable[[dict[str, Any]], tuple[EvaluationReport, str]],
+    config: ExperimentConfig,
+    evaluate: Callable[[ExperimentConfig], tuple[EvaluationReport, str]],
 ) -> dict[str, list[dict[str, Any]]]:
     """Prepare each dimension and publish a combined summary only after all succeed."""
     validate_config(config)
-    uri = Path(config["lancedb"]["uri"]).expanduser().resolve()
+    uri = Path(config.lancedb.uri).expanduser().resolve()
     if not uri.is_dir():
         raise FileNotFoundError(f"LanceDB database does not exist: {uri}")
     connection = LanceDBConnection(uri)
     sources = table_names(config, 3072)
     for name in sources:
         connection.open_table(name)
-    output = Path(config["output_dir"]).expanduser().resolve() / datetime.now(UTC).strftime(
+    output = Path(config.output_dir).expanduser().resolve() / datetime.now(UTC).strftime(
         "matroyshka_sweep_%Y%m%dT%H%M%S_%fZ"
     )
     results = []
     for dimension in DIMENSIONS:
-        effective = deepcopy(config)
+        settings = config.model_dump()
         reference, validation = table_names(config, dimension)
-        effective["embedding"]["truncate_dim"] = dimension
-        effective["lancedb"].update(table=reference, validation_table=validation)
-        effective["cache_validation_embeddings"] = True
-        effective["output_dir"] = str(output / f"d{dimension}")
+        settings["embedding"]["truncate_dim"] = dimension
+        settings["lancedb"].update(table=reference, validation_table=validation)
+        settings["cache_validation_embeddings"] = True
+        settings["output_dir"] = str(output / f"d{dimension}")
+        effective = ExperimentConfig.model_validate(settings)
         if dimension != 3072:
             for source, destination in zip(sources, (reference, validation), strict=True):
                 prepare_table(
@@ -131,7 +134,7 @@ def run_sweep(
                     source,
                     destination,
                     dimension,
-                    effective["embedding"].get("batch_size", 32),
+                    effective.embedding.batch_size,
                 )
         report, run_id = evaluate(effective)
         results.append(
@@ -139,9 +142,9 @@ def run_sweep(
                 dimension=dimension,
                 table=reference,
                 validation_table=validation,
-                output_dir=effective["output_dir"],
+                output_dir=effective.output_dir,
                 wandb_run_id=run_id,
-                **{key: value for key, value in report["metrics"].items() if key != "per_class"},
+                **{key: value for key, value in report.metrics.items() if key != "per_class"},
             )
         )
     summary = {"results": results}

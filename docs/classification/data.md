@@ -44,6 +44,8 @@ column-oriented and ordered. Image-loading failures propagate. Experiment loops
 leave decoded PIL images to garbage collection; encoder ownership of caller images
 and path-opened images is defined in [encoders](encoders.md).
 
+`load_dataset()` accepts a validated `DatasetConfig` with string name/root fields.
+
 ## Shared records
 
 [`schemas.py`](../../src/classification/schemas.py) contains shared data contracts without
@@ -86,16 +88,14 @@ Empty or whitespace-only descriptions fail the stage. Errors and interrupts
 propagate without retries or partial description files. Progress semantics are in
 [tracking](tracking.md).
 
-`llm/ollama.py` owns the `OllamaSession` context manager, which requires
-`binary_path`, `host`, `startup_timeout`, and `request_timeout` from the `ollama`
-section, with no environment fallback for those settings. Description generation
-also requires `ollama.llm`, read before entering the session; downloading uses the
-explicit requested model name. Timeouts must be positive finite numeric seconds, excluding booleans.
-`experiments.config.validate_ollama_config` owns these checks. Description generation
-and model downloads validate settings before constructing a session; cached and
-disabled description paths need no Ollama settings. Direct session callers must
-validate their settings through the same helper. Startup validates an
-executable before probing:
+`llm/ollama.py` owns the `OllamaSession` context manager. Callers pass an
+`OllamaConfig`, which validates `binary_path`, `host`, and positive finite
+`startup_timeout`/`request_timeout` seconds. These settings have no environment
+fallback. Before generating descriptions, `Experiment.generate_descriptions()`
+also requires `ollama.llm` and `description_count`; downloads use the explicit
+requested model name. Cached and disabled description paths need no Ollama settings.
+
+Startup validates an executable before probing:
 bare names resolve through PATH; explicit paths expand `~` and resolve from the
 working directory. Installation or OS launch errors provide Ollama setup guidance;
 there is no automatic installation.

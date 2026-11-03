@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch
 import httpx
 import numpy as np
 import pytest
+from config_helpers import config_data, updated
+from classification.experiments.config import ExperimentConfig
 import yaml
 from google import genai
 from google.auth.credentials import AnonymousCredentials
@@ -287,13 +289,13 @@ def test_routing_and_local_settings():
     experiment = object.__new__(Experiment)
     experiment._embedder = None
     experiment.batch_size = 2
-    experiment.config = {
+    experiment.config = ExperimentConfig.model_validate(config_data(**{
         "embedding": {
             "model_id": "google/ge-v2",
             "device": "cpu",
             "vertex": {"project": "fixture-project"},
         }
-    }
+    }))
     with patch("classification.experiments.classification.EmbeddingModel") as local:
         assert isinstance(experiment.embedder, VertexEmbeddingModel)
         assert experiment.embedder is experiment.embedder
@@ -305,11 +307,11 @@ def test_routing_and_local_settings():
     experiment.config = local_config
     experiment.batch_size = 2
     experiment._embedder = None
-    experiment.config["embedding"]["model_id"] = "openai/clip-vit-base-patch32"
+    experiment.config = updated(experiment.config, "embedding.model_id", "openai/clip-vit-base-patch32")
     with patch("classification.experiments.classification.EmbeddingModel") as local:
         assert experiment.embedder is local.return_value
         local.assert_called_once_with(
-            model_id="openai/clip-vit-base-patch32", device="cpu", batch_size=2
+            model_id="openai/clip-vit-base-patch32", device="cpu", truncate_dim=None, batch_size=2
         )
 
 
@@ -352,13 +354,13 @@ def test_yaml_cli_overrides_and_defaults():
             ]
         )
         effective = experiment.call_args.args[0]
-        assert effective["embedding"]["vertex"]["project"] == "fixture-project"
-        assert effective["embedding"]["vertex"]["max_concurrency"] == 2
-        assert effective["embedding"]["vertex"]["classification_prompt"] is True
-        assert effective["embedding"]["truncate_dim"] == 128
-        assert effective["embed_images"] is True
-        assert effective["cache_validation_embeddings"] is False
-        assert effective["lancedb"]["validation_table"] == "custom_validation"
+        assert effective.embedding.vertex.project == "fixture-project"
+        assert effective.embedding.vertex.max_concurrency == 2
+        assert effective.embedding.vertex.classification_prompt is True
+        assert effective.embedding.truncate_dim == 128
+        assert effective.embed_images is True
+        assert effective.cache_validation_embeddings is False
+        assert effective.lancedb.validation_table == "custom_validation"
     assert path.read_text() == original
 
 
@@ -392,8 +394,8 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
     config["embedding"]["vertex"]["project"] = "fixture-project"
     config["lancedb"]["uri"] = str(tmp_path / "lancedb")
     requests, clients, _ = transport(lambda request: response())
-    experiment = Experiment(config)
-    summary = experiment.build_vector_database()
+    experiment = Experiment(ExperimentConfig.model_validate(config))
+    summary = experiment.build_vector_database().model_dump(mode="json")
     assert summary["source_counts"] == {
         "class_name": 1,
         "generated_description": 3,
@@ -402,11 +404,11 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
     assert len(requests) == 7
     assert all(client.is_closed for client in clients)
     with patch("classification.encoders.vertex.genai.Client") as client:
-        cached = Experiment(config)
-        assert cached.build_vector_database()["source_counts"] == summary["source_counts"]
+        cached = Experiment(ExperimentConfig.model_validate(config))
+        assert cached.build_vector_database().model_dump(mode="json")["source_counts"] == summary["source_counts"]
         assert cached._embedder is None
         client.assert_not_called()
-    report = experiment.evaluate()
+    report = experiment.evaluate().model_dump(mode="json")
     assert report["metrics"]["evaluated"] == 3
     assert len(report["predictions"]) == 3
     assert len(requests) == 10
@@ -422,7 +424,7 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
             )
         return response()
 
-    config["cache_validation_embeddings"] = False
+    experiment.config = updated(experiment.config, "cache_validation_embeddings", False)
     transport(fail_second_batch)
     with pytest.raises(errors.APIError):
         experiment.evaluate()
@@ -460,14 +462,14 @@ def test_index_builder_direct_build_and_complete_resume(transport, resume_config
     from classification.experiments.classification import Experiment
 
     requests, _, _ = transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     builder = experiment._index_builder()
     index, counts = builder.build_reference_index()
     assert counts == {"class_name": 1, "generated_description": 2, "training_image": 13}
     cache = builder.build_validation_table(resume_config["lancedb"]["validation_table"])
     assert len(cache.get_record_ids()) == 13
     before = len(requests)
-    resumed = Experiment(resume_config)
+    resumed = Experiment(ExperimentConfig.model_validate(resume_config))
     resumed_builder = resumed._index_builder()
     resumed_index, resumed_counts = resumed_builder.build_reference_index()
     resumed_builder.build_validation_table(resume_config["lancedb"]["validation_table"])
@@ -493,8 +495,8 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     old_ids = [r.id for r in initial]
     requests, _, _ = transport(lambda request: response())
     tracker = Mock()
-    experiment = Experiment(config, tracker=tracker)
-    summary = experiment.build_vector_database()
+    experiment = Experiment(ExperimentConfig.model_validate(config), tracker=tracker)
+    summary = experiment.build_vector_database().model_dump(mode="json")
     tracker.progress.assert_not_called()
     assert len(requests) == 2  # one description and the twelfth capped image
     assert summary["source_counts"] == {
@@ -502,7 +504,7 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     index = LanceDBIndex.open(index.uri, index.name)
     assert len(index.get_record_ids()) == 15
     assert set(old_ids) <= {r["id"] for r in index.table.search().limit(None).to_list()}
-    report = experiment.evaluate()
+    report = experiment.evaluate().model_dump(mode="json")
     assert len(requests) == 15
     assert [r["source_id"] for r in report["predictions"]] == [
         f"foodx251:val:{i}.png" for i in range(13)]
@@ -514,10 +516,10 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
         path.unlink()
     config["embedding"]["vertex"]["project"] = None
     with patch("classification.encoders.vertex.genai.Client", side_effect=AssertionError("client")):
-        cached = Experiment(config)
-        assert cached.build_vector_database()["source_counts"] == summary["source_counts"]
+        cached = Experiment(ExperimentConfig.model_validate(config))
+        assert cached.build_vector_database().model_dump(mode="json")["source_counts"] == summary["source_counts"]
         config["k"] = 1
-        assert cached.evaluate()["metrics"]["evaluated"] == 13
+        assert cached.evaluate().model_dump(mode="json")["metrics"]["evaluated"] == 13
         assert cached._embedder is None
 
 
@@ -530,7 +532,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
     config = resume_config
     config["embedding"]["batch_size"] = batch_size
     transport(lambda request: response())
-    experiment = Experiment(config)
+    experiment = Experiment(ExperimentConfig.model_validate(config))
     if stage == "validation":
         experiment.build_vector_database()
     calls = 0
@@ -561,7 +563,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
     expected.update({(kind, f"foodx251:{split}:{i}.png"): i + 1 for i in range(13)})
     requests, _, _ = transport(lambda request: response())
     requests.clear()
-    restarted = Experiment(config)
+    restarted = Experiment(ExperimentConfig.model_validate(config))
     if stage == "validation":
         restarted.evaluate()
         total = 13
@@ -581,17 +583,17 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
     assert len(index.get_record_ids()) == total
 
 
-@pytest.mark.parametrize("value", [None, False, 0, "", [], 1, "true", [1]])
-def test_cache_toggle_truthiness(transport, resume_config, value):
+@pytest.mark.parametrize("value", [False, True])
+def test_cache_toggle_boolean(transport, resume_config, value):
     from classification.retrieval.lancedb import LanceDBIndex
     from classification.experiments.classification import Experiment
 
     resume_config["cache_validation_embeddings"] = value
     if not value:
         resume_config["lancedb"]["validation_table"] = None
-    Experiment.validate_config(resume_config)
+    ExperimentConfig.model_validate(resume_config)
     transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
     experiment.evaluate()
     if value:
@@ -600,7 +602,7 @@ def test_cache_toggle_truthiness(transport, resume_config, value):
         assert len(cache.get_record_ids()) == 13
         resume_config["lancedb"]["validation_table"] = resume_config["lancedb"]["table"]
         with pytest.raises(ValueError, match="distinct"):
-            Experiment.validate_config(resume_config)
+            ExperimentConfig.model_validate(resume_config)
 
 
 @pytest.mark.parametrize("name", [None, "", " ", "foodx251_ge_v2"])
@@ -610,7 +612,7 @@ def test_invalid_validation_table(resume_config, name):
 
     resume_config["lancedb"]["validation_table"] = name
     with pytest.raises(ValueError, match="distinct"):
-        Experiment.validate_config(resume_config)
+        ExperimentConfig.model_validate(resume_config)
 
 
 def test_default_cache_disabled_and_local_cache_supported(transport, resume_config):
@@ -619,19 +621,18 @@ def test_default_cache_disabled_and_local_cache_supported(transport, resume_conf
 
     resume_config.pop("cache_validation_embeddings")
     transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
     experiment.evaluate()
     assert not LanceDBIndex.exists(resume_config["lancedb"]["uri"],
                                    resume_config["lancedb"]["validation_table"])
     from classification.experiments.classification import Experiment
-    from classification.experiments.config import validate_config
 
     resume_config["embedding"]["model_id"] = "openai/clip-vit-base-patch32"
     resume_config["cache_validation_embeddings"] = True
-    validate_config(resume_config)
+    ExperimentConfig.model_validate(resume_config)
     resume_config["lancedb"]["table"] = "local_fresh"
-    local = Experiment(resume_config)
+    local = Experiment(ExperimentConfig.model_validate(resume_config))
     local._embedder = Mock(dimension=128)
     local._embedder.encode_text.side_effect = lambda inputs: np.ones((len(inputs), 128))
     local._embedder.encode_images.side_effect = lambda images: np.ones((len(images), 128))
@@ -644,7 +645,7 @@ def test_default_cache_disabled_and_local_cache_supported(transport, resume_conf
 
     with patch.object(LanceDBIndex, "append", save):
         local.build_vector_database()
-        assert local.evaluate()["metrics"]["evaluated"] == 13
+        assert local.evaluate().model_dump(mode="json")["metrics"]["evaluated"] == 13
     assert batch_sizes == [3, 13, 13]
 
 
@@ -652,7 +653,7 @@ def test_cached_report_failure_keeps_vectors(transport, resume_config):
     from classification.experiments.classification import Experiment
 
     requests, _, _ = transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
     with (
         patch("classification.experiments.classification.write_json", side_effect=OSError("report")),
@@ -671,7 +672,7 @@ def test_progress_and_storage_failure_resume(transport, resume_config, progress_
 
     transport(lambda request: response())
     tracker = Mock()
-    experiment = Experiment(resume_config, tracker=tracker)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config), tracker=tracker)
     original = LanceDBIndex.append
     calls = 0
 
@@ -733,7 +734,7 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
     requests, _, _ = transport(handle)
     config["embedding"]["batch_size"] = 4
     tracker = Mock()
-    report = Experiment(config, tracker=tracker).evaluate()
+    report = Experiment(ExperimentConfig.model_validate(config), tracker=tracker).evaluate().model_dump(mode="json")
     tracker.progress.assert_not_called()
     assert [(bar.desc, bar.n) for bar in progress_bars] == [
         ("Validation embeddings", 6), ("Evaluation", 13),
@@ -745,14 +746,14 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
     for path in root.glob("val/val_set/*.png"):
         path.unlink()
     with patch("classification.encoders.vertex.genai.Client", side_effect=AssertionError("client")):
-        cached = Experiment(config).evaluate()
+        cached = Experiment(ExperimentConfig.model_validate(config)).evaluate().model_dump(mode="json")
         assert cached["predictions"] == report["predictions"]
         assert cached["metrics"] == report["metrics"]
     for key in ("f1_macro", "f1_micro", "top5_hit_rate", "retrieval_precision_at_k",
                 "mrr_at_k", "ndcg_at_k", "map_at_r"):
         assert report["metrics"][key] == 1
     tracker.evaluation.assert_called_once()
-    assert tracker.evaluation.call_args.args[0]["metrics"] == report["metrics"]
+    assert tracker.evaluation.call_args.args[0].metrics == report["metrics"]
 
 
 def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config):
@@ -762,7 +763,7 @@ def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config
 
     transport(lambda request: response())
     tracker = Mock()
-    experiment = Experiment(resume_config, tracker=tracker)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config), tracker=tracker)
     index = LanceDBIndex.create(resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"], 128)
     # Counts include duplicate and unrequested stored rows; filtering is a set.
     index.append([PointRecord("Apple", "class_name", identity, identity)
@@ -775,7 +776,7 @@ def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config
         return original(index)
 
     with patch.object(LanceDBIndex, "get_record_ids", get_record_ids):
-        summary = experiment.build_vector_database()
+        summary = experiment.build_vector_database().model_dump(mode="json")
     assert scans == [index.name]
     assert summary["source_counts"] == {
         "class_name": 3, "generated_description": 2, "training_image": 13,
@@ -789,7 +790,7 @@ def test_reference_inputs_fail_before_table_creation(transport, resume_config):
 
     transport(lambda request: response())
     Path(resume_config["descriptions_file"]).unlink()
-    experiment = Experiment(resume_config)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     with pytest.raises(FileNotFoundError):
         experiment.build_vector_database()
     assert not LanceDBIndex.exists(resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"])
@@ -801,7 +802,7 @@ def test_validation_cache_completes_before_classification(transport, resume_conf
     from classification.experiments.classification import Experiment
 
     transport(lambda request: response())
-    experiment = Experiment(resume_config)
+    experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
     original = LanceDBIndex.query
 
@@ -828,15 +829,14 @@ def test_cli_selects_class_before_tracking(resume_config, stage, method, model, 
     events = []
     with (
         patch("classification.cli.Experiment") as chosen,
-        patch("classification.cli.validate_config") as validation,
         patch("classification.cli.wandb.init") as init,
         patch("classification.cli.Tracker"),
     ):
-        validation.side_effect = lambda config: events.append("validate")
         init.side_effect = lambda **kwargs: events.append("init") or MockContext()
         chosen.side_effect = lambda *args, **kwargs: events.append("construct") or chosen.return_value
-        _run_experiment(resume_config, stage)
-        assert events == ["validate", "init", "construct"]
+        _run_experiment(ExperimentConfig.model_validate(resume_config), stage)
+        assert events == ["init", "construct"]
+        assert isinstance(chosen.call_args.args[0], ExperimentConfig)
         getattr(chosen.return_value, method).assert_called_once_with()
 
 
@@ -854,7 +854,7 @@ def test_cli_rejects_invalid_vertex_cache_before_tracking(resume_config):
     resume_config["lancedb"]["validation_table"] = None
     with patch("classification.cli.wandb.init") as init:
         with pytest.raises(ValueError, match="distinct"):
-            _run_experiment(resume_config, "evaluate")
+            _run_experiment(ExperimentConfig.model_validate(resume_config), "evaluate")
         init.assert_not_called()
 
 

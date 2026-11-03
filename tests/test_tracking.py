@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from config_helpers import config_data, updated
 import test_classification
 import yaml
 
@@ -56,15 +57,10 @@ def experiment_case():
 
 def config_file(tmp_path):
     path = tmp_path / "config.yaml"
-    source = """# original comment
-embed_images: false
-embed_class_labels: true
-embed_descriptions: false
-output_dir: synthetic
-embedding:
-  batch_size: 2
-k: ${embedding.batch_size}
-"""
+    source = "# original comment\n" + yaml.safe_dump(config_data(
+        output_dir="synthetic", k=3,
+        embedding=dict(model_id="jinaai/jina-clip-v2", batch_size=2),
+    ))
     path.write_text(source)
     return path, source
 
@@ -115,8 +111,8 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
         )
     initialize.assert_called_once()
     cfg = experiment.call_args.args[0]
-    assert cfg == initialize.call_args.kwargs["config"]
-    assert cfg["k"] == cfg["embedding"]["batch_size"] == 3
+    assert cfg.model_dump(mode="json") == initialize.call_args.kwargs["config"]
+    assert cfg.k == cfg.embedding.batch_size == 3
     assert initialize.call_args.kwargs["job_type"] == stage
     settings = initialize.call_args.kwargs["settings"]
     assert settings.disable_git and settings.disable_code and not settings.save_code
@@ -130,7 +126,7 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
     artifact = sdk.log_artifact.call_args.args[0]
     assert artifact.name == "configuration-synthetic"
     assert set(artifact.files) == {"resolved_config.yaml"}
-    assert yaml.safe_load(artifact.files["resolved_config.yaml"]) == cfg
+    assert yaml.safe_load(artifact.files["resolved_config.yaml"]) == cfg.model_dump(mode="json")
     assert path.read_bytes() == source.encode()
 
 
@@ -216,7 +212,7 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
     exp = experiment_case.experiment(flags)
     exp.batch_size = 3
     exp.tracker = Tracker(sdk)
-    report = exp.run()
+    report = exp.run().model_dump(mode="json")
     history = [c.args[0] for c in sdk.log.call_args_list]
     assert len(history) == 1
     assert "evaluation/per_class" in history[0]
@@ -257,7 +253,7 @@ def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_c
             exp.run()
         initialize.assert_not_called()
     path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump(experiment_case.experiment(name="cli").config))
+    path.write_text(yaml.safe_dump(experiment_case.experiment(name="cli").config.model_dump(mode="json")))
     with patch("classification.cli.wandb.init", return_value=sdk) as initialize:
         main(["experiment", "run", "--config_file", str(path)])
     initialize.assert_called_once()
@@ -305,6 +301,9 @@ import yaml
 from tqdm import tqdm
 from classification.cli import _run_experiment
 from classification.tracking import Tracker
+from classification.experiments.config import ExperimentConfig
+from classification.experiments.report_types import EvaluationReport
+from classification.retrieval.metrics import metrics
 report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
     "nearest_neighbor_accuracy": 1., "per_class": {
         "A": {"support": 1, "correct": 1, "recall": 1., "precision": 1., "f1": 1.},
@@ -313,6 +312,9 @@ path = Path("report.json")
 path.write_text(json.dumps(report))
 config = {"k": 1, "embed_images": False, "embed_class_labels": True,
           "embed_descriptions": False, "embedding": {"model_id": "openai/clip-vit-base-patch32"}}
+config.update(dataset=dict(name="foodx251", root="/raw"), lancedb=dict(uri="/db", table="references"), output_dir="/output")
+config = ExperimentConfig.model_validate(config)
+report = EvaluationReport(config=config, table="references", reference_source_counts=None, predictions=[], metrics=dict(metrics([], ["A", "B"]), **report["metrics"]))
 original_configuration = Tracker.configuration
 
 def publish(tracker, config):
@@ -321,18 +323,16 @@ def publish(tracker, config):
     def inspect(artifact):
         assert set(artifact.manifest.entries) == {"resolved_config.yaml"}
         entry = artifact.manifest.entries["resolved_config.yaml"]
-        assert yaml.safe_load(Path(entry.local_path).read_text()) == config
+        assert yaml.safe_load(Path(entry.local_path).read_text()) == config.model_dump(mode="json")
         return log_artifact(artifact)
     with patch.object(tracker.run, "log_artifact", side_effect=inspect):
         original_configuration(tracker, config)
 
 class Experiment:
-    from classification.experiments.config import validate_config
-    validate_config = staticmethod(validate_config)
 
     def __init__(self, config, *, tracker):
         assert wandb.run is tracker.run
-        assert dict(tracker.run.config) == config
+        assert dict(tracker.run.config) == config.model_dump(mode="json")
         self.tracker = tracker
 
     def generate_descriptions(self):
@@ -454,11 +454,11 @@ def test_capped_reference_bars_match_inserted_records(
 ):
     experiment_case.interleaved_training()
     exp = experiment_case.experiment((images_enabled, True, True))
-    exp.config["n_imgs_per_class"] = limit
+    exp.config = updated(exp.config, 'n_imgs_per_class', limit)
     exp.batch_size = 3
     exp.tracker = Tracker(sdk)
     exp.generate_descriptions()
-    artifact = exp.build_vector_database()
+    artifact = exp.build_vector_database().model_dump(mode="json")
     bars = {bar.desc: bar for bar in progress_bars}
     expected_images = {None: 5, 1: 2, 2: 4, 20: 5}[limit] if images_enabled else 0
     assert sum(artifact["source_counts"].values()) == 12 + expected_images
@@ -513,11 +513,9 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     from classification.encoders.sentence_transformers import EmbeddingModel
 
     exp = experiment_case.experiment((True, True, True), 'truncated-v4')
-    exp.config['embedding'].update(
-        model_id='jinaai/jina-embeddings-v4', device='cpu', truncate_dim=None,
-    )
+    exp.config = updated(exp.config, 'embedding', dict(model_id='jinaai/jina-embeddings-v4', device='cpu', batch_size=2))
     path = tmp_path / 'truncated.yaml'
-    path.write_text(yaml.safe_dump(exp.config))
+    path.write_text(yaml.safe_dump(exp.config.model_dump(mode="json")))
     experiment_case.embedder_constructor.side_effect = EmbeddingModel
     encoder = SyntheticEncoder(2048)
     backend = SentenceTransformer(
@@ -531,7 +529,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
         model_id='jinaai/jina-embeddings-v4', device='cpu', batch_size=2,
         truncate_dim=1024,
     )
-    table = experiment_case.client.open_table(exp.config['lancedb']['table'])
+    table = experiment_case.client.open_table(exp.config.lancedb.table)
     assert table.schema.field('vector').type.list_size == 1024
     assert table.count_rows() == 14
     report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
@@ -542,3 +540,37 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
     config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
     assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == report['config']
+
+
+def test_historical_counts_do_not_validate_historical_configuration(experiment_case):
+    exp = experiment_case.experiment()
+    summary = exp.build_vector_database()
+    path = exp.output / "index.json"
+    # Historical config can be absent or use a retired schema.
+    for historical_config in (None, {"retired_field": "value"}):
+        historical = summary.model_dump(mode="json")
+        historical["config"] = historical_config
+        path.write_text(json.dumps(historical))
+        report = exp.evaluate()
+        assert report.config is exp.config
+        assert report.reference_source_counts == summary.source_counts
+        saved = json.loads(next(exp.output.glob("evaluation_*/report.json")).read_text())
+        assert saved["config"]["embedding"]["device"] == "auto"
+
+
+@pytest.mark.parametrize("path,value", [
+    ("ollama", None), ("ollama.llm", None), ("description_count", None),
+])
+def test_generation_requires_services_only_when_generating(experiment_case, path, value):
+    exp = experiment_case.experiment((False, False, True))
+    exp.config = updated(exp.config, path, value)
+    with pytest.raises(ValueError, match="ollama.llm and description_count"):
+        exp.generate_descriptions()
+    experiment_case.session_constructor.assert_not_called()
+    assert not exp.output.exists()
+    exp.output.mkdir()
+    descriptions = {"Apple": ["stored"], "Pear": ["stored"]}
+    (exp.output / "descriptions.json").write_text(json.dumps({"descriptions": descriptions}))
+    assert exp.generate_descriptions() == descriptions
+    assert exp.build_vector_database().source_counts == {"generated_description": 2}
+    experiment_case.session_constructor.assert_not_called()

@@ -82,8 +82,8 @@ rejected because a float32 norm underflows. It does not rescale the vectors.
 
 For example, Jina v4 at 1024 dimensions uses
 `--set embedding.model_id=jinaai/jina-embeddings-v4 --set embedding.truncate_dim=1024`.
-Custom YAML must declare `embedding.truncate_dim` before a strict CLI override can
-target it. The shipped classification configurations default to null.
+Schema-defined overrides accept `embedding.truncate_dim` even when omitted from
+YAML; it defaults to null.
 
 Changing model or dimension requires fresh reference/cache tables and output
 directories, with all enabled reference inputs re-embedded using the evaluation
@@ -123,8 +123,9 @@ Sentence Transformer or use local-model preprocessing. `embedding.device` is
 ignored; experiment `batch_size` still bounds dataset and insertion batches.
 
 [`cfg/ge_v2.yml`](../../cfg/ge_v2.yml) is the standalone configuration. Supply
-`--set embedding.vertex.project=PROJECT_ID`. Its reference-source choices, saved
-vocabulary path, cache setting, and artifact names are defined in that YAML.
+`--set embedding.vertex.project=PROJECT_ID` when constructing the backend;
+complete cached evaluations allow an omitted/null project. Reference-source choices,
+saved vocabulary path, cache setting, and artifact names are defined in that YAML.
 Live cloud requests and spending require explicit authorization; checks use mocked
 transports.
 

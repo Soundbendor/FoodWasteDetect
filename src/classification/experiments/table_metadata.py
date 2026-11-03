@@ -4,6 +4,8 @@ import json
 from collections.abc import Mapping
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
+from classification.experiments.config import ExperimentConfig
+
 BUILD_METADATA_KEY = "classification.build"
 
 
@@ -18,33 +20,31 @@ class TableMetadata(TypedDict):
 
 
 def build_metadata(
-    config: Mapping[str, Any],
+    config: ExperimentConfig,
     table_kind: Literal["reference", "validation"],
     dimension: int,
 ) -> TableMetadata:
     """Select configuration fields without copying runtime or sensitive settings."""
-    options = config["embedding"]
+    options = config.embedding
     embedding: dict[str, Any] = {
-        "model_id": options.get("model_id"),
-        "truncate_dim": options.get("truncate_dim"),
+        "model_id": options.model_id,
+        "truncate_dim": options.truncate_dim,
     }
-    if options.get("model_id") == "google/ge-v2":
-        embedding["vertex"] = {
-            "classification_prompt": options.get("vertex", {}).get("classification_prompt", False)
-        }
+    if options.model_id == "google/ge-v2":
+        embedding["vertex"] = {"classification_prompt": options.vertex.classification_prompt}
     settings: dict[str, Any] = {
-        "dataset": {"name": config["dataset"].get("name")},
+        "dataset": {"name": config.dataset.name},
         "embedding": embedding,
     }
     if table_kind == "reference":
         settings.update(
-            embed_images=config["embed_images"],
-            embed_class_labels=config["embed_class_labels"],
-            embed_descriptions=config["embed_descriptions"],
-            n_imgs_per_class=config.get("n_imgs_per_class"),
+            embed_images=config.embed_images,
+            embed_class_labels=config.embed_class_labels,
+            embed_descriptions=config.embed_descriptions,
+            n_imgs_per_class=config.n_imgs_per_class,
         )
-        if config["embed_descriptions"]:
-            settings["description_count"] = config.get("description_count")
+        if config.embed_descriptions:
+            settings["description_count"] = config.description_count
     return {
         "metadata_version": 1,
         "table_kind": table_kind,

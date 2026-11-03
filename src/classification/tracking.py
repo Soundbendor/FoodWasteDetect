@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import wandb
 import yaml
 
+from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
 
 
@@ -17,11 +17,11 @@ class Tracker:
     def __init__(self, run: wandb.Run) -> None:
         self.run = run
 
-    def configuration(self, config: dict[str, Any]) -> None:
+    def configuration(self, config: ExperimentConfig) -> None:
         """Publish the resolved configuration, including overrides."""
         artifact = wandb.Artifact(f"configuration-{self.run.id}", type="configuration")
         with artifact.new_file("resolved_config.yaml", encoding="utf-8") as stream:
-            yaml.safe_dump(config, stream, sort_keys=False)
+            yaml.safe_dump(config.model_dump(mode="json"), stream, sort_keys=False)
         self.run.log_artifact(artifact)
 
     def reference_counts(self, counts: dict[str, int] | None) -> None:
@@ -30,7 +30,7 @@ class Tracker:
 
     def evaluation(self, report: EvaluationReport, report_path: Path) -> None:
         """Publish completed metrics and the report already saved at ``report_path``."""
-        metrics = report["metrics"]
+        metrics = report.metrics
         self.run.summary.update(
             {f"evaluation/{key}": value for key, value in metrics.items() if key != "per_class"}
         )

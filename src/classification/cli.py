@@ -2,15 +2,13 @@
 
 import argparse
 from collections.abc import Callable, Sequence
-from typing import Any, cast
+from typing import Any
 
 import wandb
 import yaml
-from omegaconf import DictConfig, OmegaConf
-from omegaconf.errors import OmegaConfBaseException
 
 from classification.experiments.classification import Experiment
-from classification.experiments.config import validate_config, validate_ollama_config
+from classification.experiments.config import ExperimentConfig, OllamaConfig
 from classification.experiments.matryoshka import evaluate_cached, run_sweep
 from classification.tracking import Tracker
 
@@ -21,35 +19,45 @@ def download_model(model_name: str) -> None:
     Read ``cfg/experiment_config_internvl.yml`` and close the owned server when
     the pull completes or fails. The requested name overrides ``ollama.llm``.
     """
-    import yaml
-
     from classification.llm.ollama import OllamaSession
 
     with open("cfg/experiment_config_internvl.yml", encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)
-    validate_ollama_config(cfg["ollama"])
-    with OllamaSession(cfg["ollama"]) as session:
+    settings = OllamaConfig.model_validate(cfg["ollama"])
+    with OllamaSession(settings) as session:
         session.download_model(model_name)
 
 
-def _override_assignment(value: str) -> str:
-    path, separator, _ = value.partition("=")
+def _parse_override(assignment: str) -> dict[str, Any]:
+    """Turn a dotted PATH=VALUE assignment into a nested mapping."""
+    path, separator, raw = assignment.partition("=")
     if not separator or not path.strip():
-        raise argparse.ArgumentTypeError("expected a nonempty PATH followed by =VALUE")
+        raise ValueError("expected a nonempty PATH followed by =VALUE")
+    value = yaml.safe_load(raw)
+    for part in reversed(path.split(".")):
+        value = {part: value}
     return value
 
 
-def _load_config(config_file: str, overrides: Sequence[str]) -> dict[str, Any]:
-    with open(config_file, encoding="utf-8") as stream:
-        config = OmegaConf.load(stream)
-    if not isinstance(config, DictConfig):
-        raise ValueError("Experiment configuration must be a YAML mapping")
-    OmegaConf.set_struct(config, True)
+def _merge_mapping(target: dict, value: dict) -> None:
+    for key, item in value.items():
+        if isinstance(item, dict) and isinstance(target.get(key), dict):
+            _merge_mapping(target[key], item)
+        else:
+            target[key] = item
+
+
+def _load_config(config_file: str, overrides: Sequence[str]) -> ExperimentConfig:
     try:
-        config.merge_with_dotlist(list(overrides))
-    except (OmegaConfBaseException, yaml.YAMLError) as error:
+        with open(config_file, encoding="utf-8") as stream:
+            config = yaml.safe_load(stream)
+        if not isinstance(config, dict):
+            raise ValueError("Experiment configuration must be a YAML mapping")
+        for assignment in overrides:
+            _merge_mapping(config, _parse_override(assignment))
+        return ExperimentConfig.model_validate(config)
+    except (yaml.YAMLError, ValueError) as error:
         raise argparse.ArgumentTypeError(str(error)) from error
-    return cast(dict[str, Any], OmegaConf.to_container(config, resolve=True))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -75,9 +83,8 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="overrides",
         action="append",
         default=[],
-        type=_override_assignment,
         metavar="PATH=VALUE",
-        help="Override an existing config path; repeat as needed (e.g. --set embedding.batch_size=16). Values use YAML syntax.",
+        help="Override a schema field; repeat as needed (e.g. --set embedding.batch_size=16). Values use YAML syntax.",
     )
     download = commands.add_parser(
         "download_model",
@@ -88,13 +95,12 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_experiment(config: dict[str, Any], stage: str) -> None:
+def _run_experiment(config: ExperimentConfig, stage: str) -> None:
     if stage == "matroyshka-sweep":
         run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
         return
-    validate_config(config)
 
-    def execute(effective: dict, tracker: Tracker) -> Any:
+    def execute(effective: ExperimentConfig, tracker: Tracker) -> Any:
         experiment = Experiment(effective, tracker=tracker)
         stages = {
             "describe": experiment.generate_descriptions,
@@ -108,12 +114,12 @@ def _run_experiment(config: dict[str, Any], stage: str) -> None:
 
 
 def _tracked_run(
-    config: dict,
+    config: ExperimentConfig,
     stage: str,
-    execute: Callable[[dict, Tracker], Any],
+    execute: Callable[[ExperimentConfig, Tracker], Any],
 ) -> tuple[Any, str]:
     with wandb.init(
-        config=config,
+        config=config.model_dump(mode="json"),
         job_type=stage,
         settings=wandb.Settings(
             disable_git=True,

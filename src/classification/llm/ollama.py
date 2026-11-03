@@ -6,24 +6,26 @@ import subprocess
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self
+from typing import Self
 
 import httpx
 from ollama import Client
+
+from classification.experiments.config import OllamaConfig
 
 
 class OllamaSession:
     """Provide a client while managing only the server this session starts."""
 
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Construct a client from settings checked by ``validate_ollama_config``.
+    def __init__(self, config: OllamaConfig) -> None:
+        """Construct a client from validated ``OllamaConfig`` settings.
 
         The context manager starts the server on entry and stops it on exit.
         """
-        startup_timeout = config["startup_timeout"]
-        request_timeout = config["request_timeout"]
-        self.binary_path = config["binary_path"]
-        self.host = config["host"]
+        startup_timeout = config.startup_timeout
+        request_timeout = config.request_timeout
+        self.binary_path = config.binary_path
+        self.host = config.host
         if "://" not in self.host:
             self.host = "http://" + self.host
         self.startup_timeout = startup_timeout

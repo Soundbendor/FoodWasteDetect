@@ -1,24 +1,25 @@
-"""Typed dictionaries for persisted index summaries and evaluation reports."""
+"""Validated models for persisted index summaries and evaluation reports."""
 
-from typing import Any, TypedDict
+from pydantic import BaseModel
 
+from classification.experiments.config import ExperimentConfig
 from classification.retrieval.metrics import RetrievalMetrics
 from classification.schemas import Prediction
 
 
-class IndexSummary(TypedDict):
-    """Complete reference-build summary used for both writing and reading."""
+class IndexSummary(BaseModel):
+    """Completed reference-build summary with effective typed settings."""
 
     table: str
     uri: str
     source_counts: dict[str, int]
-    config: dict[str, Any]
+    config: ExperimentConfig
 
 
-class EvaluationReport(TypedDict):
+class EvaluationReport(BaseModel):
     """Completed predictions and metrics written before tracker publication."""
 
-    config: dict[str, Any]
+    config: ExperimentConfig
     table: str
     reference_source_counts: dict[str, int] | None
     predictions: list[Prediction]

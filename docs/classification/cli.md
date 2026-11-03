@@ -30,31 +30,32 @@ commands or old flat-module import shims.
 
 ## Override semantics
 
-`_load_config()` loads YAML with OmegaConf and requires a mapping. Struct mode
-rejects unknown paths; custom YAML must contain a key before `--set` can target it.
-Overrides merge in order, and the last assignment wins. Values use YAML parsing
-rather than conversion to the old value's type. For a string that resembles
-another type, quote inside the assignment: `--set 'output_dir="001"'`.
-OmegaConf's path and merge rules apply, including interpolation.
+`_load_config()` reads a top-level mapping with `yaml.safe_load()`, applies ordered
+overrides, then returns a validated `ExperimentConfig`. See
+[configuration models](experiments.md#lifecycle-and-configuration) for the Python API
+and validation contract.
 
-Each assignment requires a nonempty path and `=`. Malformed assignments and
-unknown paths fail before experiment construction. The resolved configuration is a
-plain nested dictionary passed to `_run_experiment()`; source YAML is never
-rewritten. Reports, W&B config, and the configuration artifact retain this effective
-dictionary. Overrides do not automatically choose isolated artifact names or
-manage services.
+Overrides form nested mappings from dotted paths, including fields omitted from
+YAML. Mapping values merge recursively; scalar/null values replace the old value.
+Pydantic validates field names and types in the completed mapping, with no schema
+inspection of individual assignments. The last assignment wins, and overrides can
+repair invalid input values. Values use YAML syntax; split occurs
+at the first equals sign, preserving additional equals signs. Quote strings that
+resemble other types: `--set 'output_dir="001"'`.
 
-The CLI calls `experiments.config.validate_config` before W&B initialization. This
-is distinct from backend validation, which can fail later when the lazy encoder
-loads. Parsing and shared-validation errors create no run; constructor or stage
-errors occur within the native W&B context. See [tracking](tracking.md) for
-lifecycle ownership.
+OmegaConf and interpolation have been removed. Strings containing interpolation
+syntax receive ordinary YAML/string handling. Source YAML remains unchanged.
+YAML, override, and schema errors produce argparse errors with field paths before
+W&B initialization or experiment construction, including sweep dispatch.
+Backend checks still occur when constructing the lazy encoder.
+
+Overrides do not select isolated artifact names or manage services.
 
 ## Ollama downloads
 
 `classification download_model MODEL_NAME` reads `cfg/experiment_config_internvl.yml`
 relative to the working directory; it has no config flag or experiment overrides.
-The wrapper passes its `ollama` section into `OllamaSession`, opens the owned server
+The wrapper validates only its `ollama` section as `OllamaConfig` and passes it into `OllamaSession`, opens the owned server
 context, and streams the requested model pull. Downloads require the connection and
 process settings; the explicit model name makes `ollama.llm` unnecessary. The YAML
 stays unchanged and no W&B run is created. Server ownership, executable validation,
@@ -63,7 +64,7 @@ and cleanup are specified in [descriptions](data.md#class-descriptions-and-ollam
 ## Verification
 
 [`tests/test_classification_cli.py`](../../tests/test_classification_cli.py) covers parsing, dispatch,
-ordered overrides, YAML types, interpolation, unchanged source files, download
+schema-defined ordered overrides, YAML types, unchanged source files, download
 cleanup, and wrapper argument forwarding with mocked backends. Lifecycle and
 configuration publication checks also live in
 [`tests/test_tracking.py`](../../tests/test_tracking.py). Use the

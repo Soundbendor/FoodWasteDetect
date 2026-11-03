@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from classification.datasets.image_dataset import FoodX251ImageDataset
 from classification.encoders.base import Embedder
+from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions, text_references
 from classification.experiments.table_metadata import build_metadata, serialize_metadata
 from classification.retrieval.lancedb import LanceDBIndex
@@ -32,7 +33,7 @@ class IndexBuilder:
         dataset: FoodX251ImageDataset,
         uri: str | Path,
         table: str,
-        config: dict,
+        config: ExperimentConfig,
         descriptions_path: Path,
         classes: list[str],
         batch_size: int,
@@ -53,11 +54,11 @@ class IndexBuilder:
     def _get_text_inputs(self) -> list[PointRecord]:
         """Read enabled descriptions and construct text references without generation."""
         descriptions = (
-            load_descriptions(self.descriptions_path) if self.config["embed_descriptions"] else None
+            load_descriptions(self.descriptions_path) if self.config.embed_descriptions else None
         )
         return text_references(
             self.classes,
-            include_class_labels=self.config["embed_class_labels"],
+            include_class_labels=self.config.embed_class_labels,
             descriptions=descriptions,
         )
 
@@ -105,10 +106,10 @@ class IndexBuilder:
 
     def _prepare_reference_inputs(self) -> tuple[Dataset | None, list[PointRecord]]:
         images = None
-        if self.config["embed_images"]:
+        if self.config.embed_images:
             images = self.dataset.select_images(
                 self.dataset.train_set(),
-                n_imgs_per_class=self.config.get("n_imgs_per_class"),
+                n_imgs_per_class=self.config.n_imgs_per_class,
             )
             missing = set(self.classes) - set(images["class"])
             if missing:

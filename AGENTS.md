@@ -83,6 +83,7 @@ state.
 | Retrieval: change LanceDB operations, voting, or metric definitions                | [Storage and retrieval](docs/classification/retrieval.md)                    |
 | Operations: change smoke helpers or Slurm/service scripts                          | [Script operations](docs/classification/scripts.md)                          |
 | Verification: inspect environment checks, historical results, or acceptance limits | [Experiment verification notes](docs/experiments.md)                         |
+| Migration history: inspect the Pydantic configuration migration                    | [Pydantic migration plan](docs/plans/pydantic_config_migration.md)             |
 | Refactor history: inspect the IndexBuilder simplification plan                     | [IndexBuilder plan](docs/plans/index_builder_refactor.md)                    |
 | Proposed comparison: consider direct Ollama image classification                   | [Ollama classification plan](docs/plans/ollama_image_classification.md)      |
 | Legacy text: interpret retired caption/retrieval code or artifacts                 | [Retired InternVL workflow](docs/history/internvl-text.md)                   |

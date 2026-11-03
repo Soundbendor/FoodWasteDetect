@@ -1,479 +1,147 @@
-"""CPU checks for CLI dispatch and Ollama downloads, with no model or service calls."""
+"""CPU checks for schema-defined CLI overrides and dispatch."""
 
 import contextlib
-import importlib.util
 import io
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, Mock, call, mock_open, patch
 
+import pytest
 import yaml
+from config_helpers import config_data
 
-from classification.cli import main
-
-
-class CommandTests(unittest.TestCase):
-    def setUp(self):
-        # Dispatch-only tests use minimal settings; tracking/validation have dedicated tests.
-        self.enterContext(patch("classification.cli.validate_config"))
-        self.enterContext(patch("classification.cli.wandb.init"))
-        self.enterContext(patch("classification.cli.Tracker"))
-
-    def test_command_help_does_not_dispatch(self):
-        for command in ([], ["experiment"], ["download_model"]):
-            with (
-                self.subTest(command=command),
-                contextlib.redirect_stdout(io.StringIO()),
-                patch("classification.cli._run_experiment") as run,
-                patch("classification.cli.download_model") as download,
-                self.assertRaises(SystemExit) as error,
-            ):
-                main([*command, "--help"])
-                self.assertEqual(error.exception.code, 0)
-                run.assert_not_called()
-                download.assert_not_called()
-
-    def test_configuration_failures_propagate(self):
-        for command, loader in (
-            (
-                ["experiment", "run", "--config_file", "selected.yml"],
-                "classification.cli.OmegaConf.load",
-            ),
-            (["download_model", "requested:tag"], "yaml.safe_load"),
-        ):
-            for source in ("open", "yaml"):
-                failure = (
-                    OSError("read failed")
-                    if source == "open"
-                    else ValueError("parse failed")
-                )
-                with (
-                    self.subTest(command=command, source=source),
-                    patch("builtins.open", mock_open()) as opened,
-                    patch(loader) as load,
-                    patch("classification.cli.Experiment") as experiment,
-                    patch("classification.llm.ollama.OllamaSession") as descriptors,
-                    self.assertRaises(type(failure)) as error,
-                ):
-                    if source == "open":
-                        opened.side_effect = failure
-                    else:
-                        load.side_effect = failure
-                    main(command)
-                self.assertIs(error.exception, failure)
-                experiment.assert_not_called()
-                descriptors.assert_not_called()
-
-    def test_experiment_failures_and_interrupts_propagate(self):
-        for source in ("constructor", "run"):
-            for failure in (RuntimeError("backend failed"), KeyboardInterrupt()):
-                with (
-                    self.subTest(source=source, failure=type(failure).__name__),
-                    patch("classification.cli.Experiment") as experiment,
-                    patch(
-                        "builtins.open", mock_open(read_data="output_dir: synthetic")
-                    ),
-                    self.assertRaises(type(failure)) as error,
-                ):
-                    target = (
-                        experiment
-                        if source == "constructor"
-                        else experiment.return_value.run
-                    )
-                    target.side_effect = failure
-                    main(["experiment", "run", "--config_file", "selected.yml"])
-                self.assertIs(error.exception, failure)
-
-    def test_download_reads_working_directory_config_and_exact_model(self):
-        backend = SimpleNamespace()
-        backend.OllamaSession = MagicMock()
-        yaml = SimpleNamespace()
-        cfg = {"ollama": {"llm": "configured:tag", "host": "synthetic",
-                          "startup_timeout": 10, "request_timeout": 30}}
-
-        def load(stream):
-            self.assertEqual(stream.read(), content)
-            return cfg
-
-        yaml.safe_load = Mock(side_effect=load)
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "cfg").mkdir()
-            path = root / "cfg/experiment_config_internvl.yml"
-            content = "ollama:\n  llm: configured:tag\n  host: synthetic\n"
-            path.write_text(content)
-            previous = Path.cwd()
-            try:
-                os.chdir(root)
-                with patch.dict(
-                    sys.modules,
-                    {
-                        "classification.llm.ollama": backend,
-                        "yaml": yaml,
-                        "util": None,
-                    },
-                ):
-                    main(["download_model", "requested:exact-tag"])
-            finally:
-                os.chdir(previous)
-            self.assertEqual(path.read_text(), content)
-        backend.OllamaSession.assert_called_once_with(
-            cfg["ollama"]
-        )
-        context = backend.OllamaSession.return_value
-        context.__enter__.return_value.download_model.assert_called_once_with(
-            "requested:exact-tag"
-        )
-        context.__exit__.assert_called_once_with(None, None, None)
-
-    def test_download_rejects_invalid_timeouts_before_session_construction(self):
-        for name in ("startup_timeout", "request_timeout"):
-            with self.subTest(name=name):
-                settings = {"startup_timeout": 10, "request_timeout": 30}
-                settings[name] = float("inf")
-                with (
-                    patch("builtins.open", mock_open()),
-                    patch("yaml.safe_load", return_value={"ollama": settings}),
-                    patch("classification.llm.ollama.OllamaSession") as session,
-                    self.assertRaisesRegex(ValueError, name),
-                ):
-                    main(["download_model", "fake"])
-                session.assert_not_called()
-
-    def test_download_cleanup_on_failure_and_interrupt(self):
-        for failure in (RuntimeError("pull failed"), KeyboardInterrupt()):
-            with self.subTest(failure=type(failure).__name__):
-                backend = SimpleNamespace()
-                backend.OllamaSession = MagicMock()
-                context = backend.OllamaSession.return_value
-                context.__enter__.return_value.download_model.side_effect = failure
-                yaml = SimpleNamespace()
-                yaml.safe_load = Mock(return_value={"ollama": {
-                    "llm": "fake", "startup_timeout": 10, "request_timeout": 30,
-                }})
-                with (
-                    patch.dict(
-                        sys.modules,
-                        {
-                            "classification.llm.ollama": backend,
-                            "yaml": yaml,
-                        },
-                    ),
-                    patch("builtins.open", mock_open()),
-                    self.assertRaises(type(failure)) as error,
-                ):
-                    main(["download_model", "requested:tag"])
-                self.assertIs(error.exception, failure)
-                context.__exit__.assert_called_once()
-                self.assertIs(context.__exit__.call_args.args[0], type(failure))
-                self.assertIs(context.__exit__.call_args.args[1], failure)
-
-    def test_argument_errors_do_not_dispatch(self):
-        cases = [
-            [],
-            ["unknown"],
-            ["evaluate"],
-            ["download_model"],
-            ["experiment"],
-            ["experiment", "unknown"],
-            ["experiment", "run"],
-            ["experiment", "unknown", "--config_file", "unused.yml"],
-        ]
-        cases += [
-            [command]
-            for command in (
-                "caption-images",
-                "merge-captions",
-                "convert-captions",
-                "generate-descriptions",
-                "build-db",
-                "finetune-embeddings",
-            )
-        ]
-        for argv in cases:
-            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
-                with (
-                    patch("classification.cli.download_model") as download,
-                    patch("classification.cli._run_experiment") as run,
-                    self.assertRaises(SystemExit) as error,
-                ):
-                    main(argv)
-                self.assertEqual(error.exception.code, 2)
-                download.assert_not_called()
-                run.assert_not_called()
-
-    def test_help_lists_supported_commands(self):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as error:
-            main(["--help"])
-        self.assertEqual(error.exception.code, 0)
-        for command in ("experiment", "download_model"):
-            self.assertIn(command, output.getvalue())
-        for command in (
-            "build-db",
-            "evaluate",
-            "caption-images",
-            "merge-captions",
-            "convert-captions",
-            "generate-descriptions",
-        ):
-            self.assertNotIn(command, output.getvalue())
-
-    def test_removed_retrieval_commands_are_invalid(self):
-        for command in ("build-db", "evaluate"):
-            output = io.StringIO()
-            with (
-                self.subTest(command=command),
-                contextlib.redirect_stderr(output),
-                self.assertRaises(SystemExit) as error,
-            ):
-                main([command, "--config_file", "unused.yml"])
-            self.assertEqual(error.exception.code, 2)
-            self.assertIn("invalid choice", output.getvalue())
-
-    def test_experiment_dispatch(self):
-        for stage, method in (
-            ("describe", "generate_descriptions"),
-            ("index", "build_vector_database"),
-            ("evaluate", "evaluate"),
-            ("run", "run"),
-        ):
-            with (
-                self.subTest(stage=stage),
-                patch("classification.cli.Experiment") as experiment,
-                patch(
-                    "builtins.open", mock_open(read_data="output_dir: synthetic")
-                ) as opened,
-            ):
-                main(["experiment", stage, "--config_file", "selected.yml"])
-            opened.assert_called_once_with("selected.yml", encoding="utf-8")
-            experiment.assert_called_once_with({"output_dir": "synthetic"}, tracker=ANY)
-            self.assertEqual(
-                experiment.return_value.method_calls, [getattr(call, method)()]
-            )
-
-    @unittest.skipUnless(
-        importlib.util.find_spec("yaml") is not None, "requires PyYAML"
-    )
-    def test_cli_dispatches_experiment_stages(self):
-        backend = SimpleNamespace()
-        experiment = backend.Experiment = MagicMock()
-        with tempfile.TemporaryDirectory() as directory:
-            config_path = Path(directory) / "config.yml"
-            config_path.write_text("k: 7")
-            for stage, method in [
-                ("index", "build_vector_database"),
-                ("describe", "generate_descriptions"),
-                ("evaluate", "evaluate"),
-                ("run", "run"),
-            ]:
-                with (
-                    self.subTest(stage=stage),
-                    patch("classification.cli.Experiment", experiment),
-                ):
-                    main(["experiment", stage, "--config_file", str(config_path)])
-                experiment.assert_called_once_with({"k": 7}, tracker=ANY)
-                getattr(experiment.return_value, method).assert_called_once_with()
-                experiment.reset_mock()
+from classification.cli import _load_config, main
+from classification.experiments.config import ExperimentConfig, OllamaConfig
 
 
-class ConfigOverrideTests(unittest.TestCase):
-    def setUp(self):
-        self.enterContext(patch("classification.cli.validate_config"))
-        self.enterContext(patch("classification.cli.wandb.init"))
-        self.enterContext(patch("classification.cli.Tracker"))
-        directory = self.enterContext(tempfile.TemporaryDirectory())
-        self.path = Path(directory) / "config.yml"
-        self.config = {
-            "ollama": {"llm": "original:tag", "host": "http://localhost:11434"},
-            "embedding": {"batch_size": 32},
-            "lancedb": {"uri": "assets/lancedb", "table": "fixture"},
-            "embed_images": True,
-            "n_imgs_per_class": None,
-            "k": 10,
-            "threshold": 0.5,
-            "labels": ["old"],
-            "optional": None,
-            "output_dir": "original",
-            "command": "a config key, not the subcommand",
-        }
-        self.content = yaml.safe_dump(self.config)
-        self.path.write_text(self.content)
-        self.experiment = self.enterContext(patch("classification.cli.Experiment"))
-
-    def invoke(self, *overrides, stage="run"):
-        main(["experiment", stage, "--config_file", str(self.path), *overrides])
-        self.assertEqual(self.path.read_text(), self.content)
-        return self.experiment.call_args.args[0]
-
-    def test_nested_overrides_reach_every_stage(self):
-        for stage, method in (
-            ("describe", "generate_descriptions"),
-            ("index", "build_vector_database"),
-            ("evaluate", "evaluate"),
-            ("run", "run"),
-        ):
-            with self.subTest(stage=stage):
-                self.experiment.reset_mock()
-                actual = self.invoke(
-                    "--set",
-                    "ollama.llm=gemma3:27b",
-                    "--set",
-                    "embedding.batch_size=16",
-                    "--set",
-                    "embed_images=false",
-                    "--set",
-                    "threshold=0.75",
-                    "--set",
-                    "lancedb.uri=assets/other",
-                    "--set",
-                    "lancedb.table=other_table",
-                    "--set",
-                    "output_dir=path with spaces",
-                    "--set",
-                    "command=literal",
-                    stage=stage,
-                )
-                self.assertIs(type(actual), dict)
-                self.assertIs(type(actual["embedding"]), dict)
-                self.assertEqual(actual["ollama"]["llm"], "gemma3:27b")
-                self.assertEqual(
-                    actual["ollama"]["host"], self.config["ollama"]["host"]
-                )
-                self.assertEqual(actual["embedding"]["batch_size"], 16)
-                self.assertIs(actual["embed_images"], False)
-                self.assertEqual(actual["threshold"], 0.75)
-                self.assertEqual(
-                    actual["lancedb"]["uri"], "assets/other"
-                )
-                self.assertEqual(actual["lancedb"]["table"], "other_table")
-                self.assertEqual(actual["output_dir"], "path with spaces")
-                self.assertEqual(actual["command"], "literal")
-                self.assertEqual(actual["k"], 10)
-                self.assertEqual(
-                    self.experiment.return_value.method_calls, [getattr(call, method)()]
-                )
-
-    def test_image_limit_overrides(self):
-        for raw, expected in (("20", 20), ("null", None)):
-            with self.subTest(raw=raw):
-                actual = self.invoke("--set", f"n_imgs_per_class={raw}")
-                self.assertEqual(actual["n_imgs_per_class"], expected)
-                self.assertIs(type(actual["n_imgs_per_class"]), type(expected))
-
-    def test_image_limit_override_requires_yaml_key(self):
-        del self.config["n_imgs_per_class"]
-        self.content = yaml.safe_dump(self.config)
-        self.path.write_text(self.content)
-        with self.assertRaises(SystemExit):
-            self.invoke("--set", "n_imgs_per_class=20")
-        self.experiment.assert_not_called()
-
-    def test_omitted_overrides_preserve_config(self):
-        self.assertEqual(self.invoke(), self.config)
-
-    def test_last_override_wins_and_values_can_contain_equals(self):
-        actual = self.invoke("--set", "k=3", "--set=k=7", "--set", "output_dir=a=b")
-        self.assertEqual(actual["k"], 7)
-        self.assertEqual(actual["output_dir"], "a=b")
-
-    def test_yaml_values_and_explicit_string_quotes(self):
-        for raw, expected in (
-            ("null", None),
-            ("[1, two]", [1, "two"]),
-            ("false", False),
-            ("9", 9),
-            ("1.5", 1.5),
-            ('"001"', "001"),
-            ('"false"', "false"),
-        ):
-            with self.subTest(raw=raw):
-                actual = self.invoke(
-                    "--set", "labels=[new, other]", "--set", f"optional={raw}"
-                )
-                self.assertEqual(actual["labels"], ["new", "other"])
-                self.assertEqual(actual["optional"], expected)
-                self.assertIs(type(actual["optional"]), type(expected))
-
-    def test_type_changes_reach_application_validation(self):
-        failure = ValueError("application validation failed")
-        self.experiment.side_effect = failure
-        with self.assertRaises(ValueError) as error:
-            self.invoke("--set", "embedding.batch_size=invalid")
-        self.assertIs(error.exception, failure)
-        self.assertEqual(
-            self.experiment.call_args.args[0]["embedding"]["batch_size"], "invalid"
-        )
-
-    def test_interpolations_resolve_before_dispatch(self):
-        actual = self.invoke("--set", "output_dir=${ollama.llm}")
-        self.assertEqual(actual["output_dir"], "original:tag")
-
-    def test_override_order_relative_to_stage_and_config(self):
-        for arguments in (
-            ["experiment", "--set", "k=5", "run", "--config_file", str(self.path)],
-            ["experiment", "--config_file", str(self.path), "--set", "k=5", "run"],
-            ["experiment", "run", "--set", "k=5", "--config_file", str(self.path)],
-        ):
-            with self.subTest(arguments=arguments):
-                main(arguments)
-                self.assertEqual(self.experiment.call_args.args[0]["k"], 5)
-
-    def test_invalid_overrides_fail_before_construction(self):
-        for overrides in (
-            ["--set", "ollama.lm=typo"],
-            ["--set", "new_key=1"],
-            ["--set", "qdrant.collection_prefix=old"],
-            ["--set", "k"],
-            ["--set", "=1"],
-            ["--set", " =1"],
-            ["--set"],
-            ["--set", "labels=["],
-            ["--ollama.llm", "old syntax"],
-            ["--se", "k=1"],
-        ):
-            with (
-                self.subTest(overrides=overrides),
-                contextlib.redirect_stderr(io.StringIO()),
-            ):
-                with self.assertRaises(SystemExit) as error:
-                    self.invoke(*overrides)
-                self.assertEqual(error.exception.code, 2)
-                self.experiment.assert_not_called()
-                self.assertEqual(self.path.read_text(), self.content)
-
-    def test_help_never_reads_config(self):
-        for arguments in (
-            ["experiment", "--help"],
-            ["experiment", "run", "--config_file", "nonexistent.yml", "--help"],
-        ):
-            output = io.StringIO()
-            with (
-                self.subTest(arguments=arguments),
-                patch("builtins.open") as opened,
-                contextlib.redirect_stdout(output),
-                self.assertRaises(SystemExit) as error,
-            ):
-                main(arguments)
-            self.assertEqual(error.exception.code, 0)
-            self.assertIn("--set PATH=VALUE", output.getvalue())
-            opened.assert_not_called()
-            self.experiment.assert_not_called()
-
-    def test_non_mapping_config_is_rejected(self):
-        self.path.write_text("[one, two]")
-        with self.assertRaisesRegex(ValueError, "YAML mapping"):
-            main(["experiment", "run", "--config_file", str(self.path)])
-        self.experiment.assert_not_called()
+@pytest.fixture
+def config_path(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text(yaml.safe_dump(config_data()))
+    return path
 
 
-@unittest.skipUnless(shutil.which("bash"), "requires bash")
+@pytest.mark.parametrize("command", [[], ["experiment"], ["download_model"]])
+def test_help_before_loading(command):
+    with patch("builtins.open", side_effect=AssertionError("file load")), pytest.raises(SystemExit) as error:
+        main([*command, "--help"])
+    assert error.value.code == 0
+
+
+@pytest.mark.parametrize("stage,method", [
+    ("describe", "generate_descriptions"), ("index", "build_vector_database"),
+    ("evaluate", "evaluate"), ("run", "run"),
+])
+def test_typed_dispatch_before_tracking(config_path, stage, method):
+    content = config_path.read_bytes()
+    with patch("classification.cli.Experiment") as experiment, patch("classification.cli.wandb.init") as initialize, patch("classification.cli.Tracker"):
+        def track(**kwargs):
+            assert kwargs["config"]["embedding"]["batch_size"] == 16
+            return MagicMock()
+        initialize.side_effect = track
+        main(["experiment", "--set", "embedding.batch_size=16", stage, "--config_file", str(config_path)])
+    config = experiment.call_args.args[0]
+    assert isinstance(config, ExperimentConfig)
+    assert config.embedding.batch_size == 16
+    experiment.assert_called_once_with(config, tracker=ANY)
+    assert experiment.return_value.method_calls == [getattr(call, method)()]
+    assert config_path.read_bytes() == content
+
+
+def test_overrides_defaults_order_and_mapping_merges(config_path):
+    result = _load_config(str(config_path), [
+        "embedding.vertex=null", "embedding.vertex.max_attempts=2",
+        "embedding={batch_size: 16, vertex: {project: test}}",
+        "embedding.vertex={classification_prompt: true}",
+        "k=3", "k=7", 'output_dir="a=b"', "n_imgs_per_class=2",
+    ])
+    assert result.k == 7 and result.output_dir == "a=b"
+    assert result.n_imgs_per_class == 2
+    assert result.embedding.batch_size == 16
+    assert result.embedding.vertex.project == "test"
+    assert result.embedding.vertex.max_attempts == 2
+    assert result.embedding.vertex.classification_prompt is True
+
+
+@pytest.mark.parametrize("assignment,field,value", [
+    ('output_dir="001"', "output_dir", "001"),
+    ("output_dir=path with spaces", "output_dir", "path with spaces"),
+    ("output_dir=a=b=c", "output_dir", "a=b=c"),
+    ("cache_validation_embeddings=false", "cache_validation_embeddings", False),
+    ("n_imgs_per_class=null", "n_imgs_per_class", None),
+])
+def test_yaml_values(config_path, assignment, field, value):
+    assert getattr(_load_config(str(config_path), [assignment]), field) == value
+
+
+def test_overrides_can_repair_invalid_yaml_values(config_path):
+    config_path.write_text(yaml.safe_dump(config_data(k="invalid")))
+    assert _load_config(str(config_path), ["k=5"]).k == 5
+
+
+@pytest.mark.parametrize("assignment", [
+    "k", "=1", " =1", "embedding..device=cpu", ".k=1",
+    "embedding.batch_size.value=2", "embedding.unknown=1", "unknown=1",
+    "embedding=[", "embedding={unknown: 1}", "k=true",
+    "cache_validation_embeddings=1", 'embedding.batch_size="32"',
+])
+def test_invalid_assignments_before_tracking(config_path, assignment):
+    with patch("classification.cli.wandb.init") as initialize, patch("classification.cli.Experiment") as experiment, pytest.raises(SystemExit) as error:
+        main(["experiment", "run", "--config_file", str(config_path), "--set", assignment])
+    assert error.value.code == 2
+    initialize.assert_not_called()
+    experiment.assert_not_called()
+
+
+@pytest.mark.parametrize("content", ["- sequence", "null", "embedding: [", "k: invalid"])
+def test_invalid_yaml_before_tracking(config_path, content):
+    config_path.write_text(content)
+    with patch("classification.cli.wandb.init") as initialize, pytest.raises(SystemExit) as error:
+        main(["experiment", "run", "--config_file", str(config_path)])
+    assert error.value.code == 2
+    initialize.assert_not_called()
+
+
+def test_missing_section_created(config_path):
+    settings = dict(binary_path="ollama", host="localhost:11434", startup_timeout=2, request_timeout=3)
+    overrides = [f"ollama.{key}={value}" for key, value in settings.items()]
+    result = _load_config(str(config_path), overrides)
+    assert result.ollama == OllamaConfig.model_validate(settings)
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("stage failed"), KeyboardInterrupt()])
+def test_stage_failures_propagate(config_path, failure):
+    with patch("classification.cli.wandb.init"), patch("classification.cli.Tracker"), patch("classification.cli.Experiment") as experiment, pytest.raises(type(failure)) as error:
+        experiment.return_value.run.side_effect = failure
+        main(["experiment", "run", "--config_file", str(config_path)])
+    assert error.value is failure
+
+
+@pytest.mark.parametrize("failure", [None, RuntimeError("pull failed"), KeyboardInterrupt()])
+def test_download_validates_only_ollama_section(failure):
+    settings = dict(binary_path="ollama", host="localhost:11434", startup_timeout=2, request_timeout=3)
+    with patch("builtins.open", mock_open(read_data=yaml.safe_dump(dict(ollama=settings, unrelated="legacy")))), patch("classification.llm.ollama.OllamaSession") as session:
+        session.return_value.__enter__.return_value.download_model.side_effect = failure
+        if failure is None:
+            main(["download_model", "requested:tag"])
+        else:
+            with pytest.raises(type(failure)):
+                main(["download_model", "requested:tag"])
+        session.assert_called_once_with(OllamaConfig.model_validate(settings))
+        session.return_value.__enter__.return_value.download_model.assert_called_once_with("requested:tag")
+        session.return_value.__exit__.assert_called_once()
+
+
+@pytest.mark.parametrize("args", [[], ["unknown"], ["evaluate"], ["experiment"], ["experiment", "unknown"], ["download_model"], ["experiment", "run"]])
+def test_invalid_commands(args):
+    with pytest.raises(SystemExit) as error:
+        main(args)
+    assert error.value.code == 2
+
 class SlurmOverrideTests(unittest.TestCase):
     def test_sweep_uses_separate_tables_and_outputs(self):
         root = Path(__file__).resolve().parents[1]

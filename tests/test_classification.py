@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from classification.experiments.classification import Experiment
 from classification.experiments.evaluation import extract_batch_metadata, prediction
-from classification.experiments.config import validate_config
+from classification.experiments.config import ExperimentConfig
+from config_helpers import config_data, updated
 from classification.schemas import Neighbor, PointRecord
 from classification.retrieval.lancedb import LanceDBIndex
 
@@ -64,46 +65,46 @@ class Contracts(unittest.TestCase):
     def test_reference_switch_combinations(self):
         keys = ('embed_images', 'embed_class_labels', 'embed_descriptions')
         for flags in itertools.product([False, True], repeat=3):
-            cfg = dict(zip(keys, flags), k=1)
+            cfg = config_data(**dict(zip(keys, flags), k=1))
             with self.subTest(flags=flags):
                 if any(flags):
-                    self.assertIs(validate_config(cfg), cfg)
+                    self.assertEqual(ExperimentConfig.model_validate(cfg).k, cfg["k"])
                 else:
                     with self.assertRaisesRegex(ValueError, 'at least one reference source'):
-                        validate_config(cfg)
+                        ExperimentConfig.model_validate(cfg)
                     with self.assertRaisesRegex(ValueError, 'at least one reference source'):
-                        Experiment(cfg)
+                        Experiment(ExperimentConfig.model_validate(cfg))
 
     def test_reference_switches_require_booleans(self):
         for key in ('embed_images', 'embed_class_labels', 'embed_descriptions'):
             for value in ('false', 0, 1, None):
-                cfg = dict(k=1, embed_images=False, embed_class_labels=True, embed_descriptions=False)
+                cfg = config_data(k=1, embed_images=False, embed_class_labels=True, embed_descriptions=False)
                 cfg[key] = value
                 with self.subTest(key=key, value=value):
                     with self.assertRaisesRegex(ValueError, key):
-                        validate_config(cfg)
+                        ExperimentConfig.model_validate(cfg)
                     with self.assertRaisesRegex(ValueError, key):
-                        Experiment(cfg)
+                        Experiment(ExperimentConfig.model_validate(cfg))
 
     def test_image_limit_validation(self):
         for enabled in (False, True):
-            cfg = dict(k=1, embed_images=enabled, embed_class_labels=True, embed_descriptions=False)
-            self.assertIs(validate_config(cfg), cfg)
+            cfg = config_data(k=1, embed_images=enabled, embed_class_labels=True, embed_descriptions=False)
+            self.assertEqual(ExperimentConfig.model_validate(cfg).k, cfg["k"])
             for limit in (None, 1, 20):
                 cfg['n_imgs_per_class'] = limit
-                self.assertIs(validate_config(cfg), cfg)
+                self.assertEqual(ExperimentConfig.model_validate(cfg).k, cfg["k"])
             for limit in (0, -1, True, False, '2', 1.0, [], {}):
                 cfg['n_imgs_per_class'] = limit
                 with self.subTest(enabled=enabled, limit=limit):
-                    with self.assertRaisesRegex(ValueError, 'n_imgs_per_class.*positive integer'):
-                        validate_config(cfg)
+                    with self.assertRaisesRegex(ValueError, 'n_imgs_per_class'):
+                        ExperimentConfig.model_validate(cfg)
 
     def test_output_cannot_be_inside_raw_data(self):
         with tempfile.TemporaryDirectory() as directory:
-            cfg = dict(k=1, embed_images=True, embed_class_labels=False, embed_descriptions=False,
-                       dataset={'root': directory}, output_dir=str(Path(directory) / 'derived'))
+            cfg = config_data(k=1, embed_images=True, embed_class_labels=False, embed_descriptions=False,
+                       dataset={'name': 'foodx251', 'root': directory}, output_dir=str(Path(directory) / 'derived'))
             with self.assertRaisesRegex(ValueError, 'separate from raw data'):
-                Experiment(cfg)
+                Experiment(ExperimentConfig.model_validate(cfg))
             self.assertFalse((Path(directory) / 'derived').exists())
 
 
@@ -201,10 +202,10 @@ class ExperimentTests(unittest.TestCase):
         with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
             with self.assertRaisesRegex(RuntimeError, 'partial'):
                 exp.build_vector_database()
-        name = exp.config['lancedb']['table']
+        name = exp.config.lancedb.table
         snapshot = self.client.open_table(name).schema.metadata
         self.assertEqual(json.loads(snapshot[b'classification.build'])['table_kind'], 'reference')
-        exp.config['embedding']['truncate_dim'] = 100
+        exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
         exp.build_vector_database()
         self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
         exp._embedder = None
@@ -220,7 +221,7 @@ class ExperimentTests(unittest.TestCase):
         document = json.loads(snapshot[b'classification.build'])
         self.assertEqual(document['table_kind'], 'validation')
         self.assertEqual(set(document['config']), {'dataset', 'embedding'})
-        exp.config['embedding']['truncate_dim'] = 100
+        exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
              patch('classification.experiments.index_builder.build_metadata', side_effect=AssertionError('snapshot')):
@@ -233,10 +234,10 @@ class ExperimentTests(unittest.TestCase):
         content = json.dumps({'descriptions': descriptions})
         path.write_text(content)
         for name in ('first', 'second'):
-            cfg = self.experiment((False, False, True), name).config
+            cfg = self.experiment((False, False, True), name).config.model_dump()
             cfg['descriptions_file'] = str(path)
-            exp = Experiment(cfg)
-            report = exp.run()
+            exp = Experiment(ExperimentConfig.model_validate(cfg))
+            report = exp.run().model_dump(mode="json")
             self.assertEqual(report['reference_source_counts'], {'generated_description': 2})
             self.assertEqual(report['metrics']['evaluated'], 2)
             self.assertFalse((exp.output / 'descriptions.json').exists())
@@ -246,9 +247,9 @@ class ExperimentTests(unittest.TestCase):
         self.describer_constructor.assert_not_called()
 
     def test_explicit_missing_descriptions_never_generate(self):
-        cfg = self.experiment((False, False, True)).config
+        cfg = self.experiment((False, False, True)).config.model_dump()
         cfg['descriptions_file'] = str(self.root / 'missing.json')
-        exp = Experiment(cfg)
+        exp = Experiment(ExperimentConfig.model_validate(cfg))
         exp.output.mkdir()
         (exp.output / 'descriptions.json').write_text(json.dumps({
             'descriptions': {'Apple': ['local'], 'Pear': ['local']}
@@ -262,18 +263,18 @@ class ExperimentTests(unittest.TestCase):
         self.client_constructor.assert_not_called()
 
     def test_null_descriptions_file_keeps_generation_in_output(self):
-        cfg = self.experiment((False, False, True)).config
+        cfg = self.experiment((False, False, True)).config.model_dump()
         cfg['descriptions_file'] = None
-        exp = Experiment(cfg)
+        exp = Experiment(ExperimentConfig.model_validate(cfg))
         descriptions = exp.generate_descriptions()
         self.assertEqual(
             json.loads((exp.output / 'descriptions.json').read_text())['descriptions'],
             descriptions,
         )
         self.describer_constructor.assert_called_once()
-        summary = exp.build_vector_database()
+        summary = exp.build_vector_database().model_dump(mode="json")
         self.assertEqual(summary['source_counts'], {'generated_description': 10})
-        self.assertEqual(exp.build_vector_database()['source_counts'], summary['source_counts'])
+        self.assertEqual(exp.build_vector_database().model_dump(mode="json")['source_counts'], summary['source_counts'])
         self.describer_constructor.assert_called_once()
         self.session_constructor.assert_called_once()
 
@@ -290,14 +291,14 @@ class ExperimentTests(unittest.TestCase):
     def test_constructor_loads_metadata_but_defers_backends(self):
         with patch.object(self.dataset, 'get_class_list', wraps=self.dataset.get_class_list) as classes:
             exp = self.experiment()
-            self.dataset_constructor.assert_called_once_with({})
+            self.dataset_constructor.assert_called_once_with(exp.config.dataset)
             classes.assert_called_once()
             self.assertFalse(exp.output.exists())
             self.assertIsNone(exp.generate_descriptions())
             exp.output.mkdir()
             descriptions = {'Apple': ['Apple stored'], 'Pear': ['Pear stored']}
             (exp.output / 'descriptions.json').write_text(json.dumps({'descriptions': descriptions}))
-            exp.config['embed_descriptions'] = True
+            exp.config = updated(exp.config, 'embed_descriptions', True)
             self.assertEqual(exp.generate_descriptions(), descriptions)
             self.embedder_constructor.assert_not_called()
             self.client_constructor.assert_not_called()
@@ -305,20 +306,20 @@ class ExperimentTests(unittest.TestCase):
             exp.run()
             exp.evaluate()
             classes.assert_called_once()
-            self.embedder_constructor.assert_called_once_with(batch_size=2)
+            self.embedder_constructor.assert_called_once_with(model_id="jinaai/jina-clip-v2", device="auto", truncate_dim=None, batch_size=2)
 
         self.dataset_constructor.side_effect = FileNotFoundError('annotations')
         with self.assertRaisesRegex(FileNotFoundError, 'annotations'):
             Experiment(exp.config)
 
     def test_default_batch_size_is_stored_once(self):
-        cfg = self.experiment().config
+        cfg = self.experiment().config.model_dump()
         del cfg['embedding']['batch_size']
-        exp = Experiment(cfg)
+        exp = Experiment(ExperimentConfig.model_validate(cfg))
         cfg['embedding']['batch_size'] = 7
         exp.build_vector_database()
         self.assertEqual(exp.batch_size, 32)
-        self.embedder_constructor.assert_called_once_with(batch_size=32)
+        self.embedder_constructor.assert_called_once_with(model_id="jinaai/jina-clip-v2", device="auto", truncate_dim=None, batch_size=32)
 
     def test_empty_index_is_rejected(self):
         exp = self.experiment((False, False, True))
@@ -332,10 +333,9 @@ class ExperimentTests(unittest.TestCase):
 
     def test_description_rejects_invalid_timeouts_before_session_construction(self):
         exp = self.experiment((False, False, True))
-        exp.config["ollama"]["startup_timeout"] = float("nan")
         with patch("classification.experiments.classification.OllamaSession") as session:
             with self.assertRaisesRegex(ValueError, "startup_timeout"):
-                exp.generate_descriptions()
+                updated(exp.config, "ollama.startup_timeout", float("nan"))
         session.assert_not_called()
         self.assertFalse(exp.output.exists())
 
@@ -356,7 +356,7 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment()
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
-        exp.config['lancedb']['table'] += '_new'
+        exp.config = updated(exp.config, 'lancedb.table', exp.config.lancedb.table + '_new')
         with patch('classification.experiments.artifacts.Path.replace', side_effect=OSError('replace failed')):
             with self.assertRaisesRegex(OSError, 'replace failed'):
                 exp.build_vector_database()
@@ -417,7 +417,7 @@ class ExperimentTests(unittest.TestCase):
     def test_image_insertion_rejects_mismatched_record_columns_before_encoding(self):
         exp = self.experiment((True, False, False))
         builder = exp._index_builder()
-        index = LanceDBIndex.create(self.db_path, exp.config['lancedb']['table'], 2)
+        index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
         for split in ('train', 'val'):
             for field in ('class', 'source_id', 'fname'):
                 with self.subTest(split=split, field=field):
@@ -459,7 +459,7 @@ class ExperimentTests(unittest.TestCase):
         ])
         exp = self.experiment((True, False, False))
         with patch.object(self.dataset, 'iter_dataset_batches', wraps=self.dataset.iter_dataset_batches) as batches:
-            artifact = exp.build_vector_database()
+            artifact = exp.build_vector_database().model_dump(mode="json")
         batches.assert_called_once()
         stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
         self.assertEqual(artifact['source_counts'], {'training_image': 3})
@@ -473,7 +473,7 @@ class ExperimentTests(unittest.TestCase):
         exp.batch_size = 1
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
-        exp.config['lancedb']['table'] += '_new'
+        exp.config = updated(exp.config, 'lancedb.table', exp.config.lancedb.table + '_new')
         append = LanceDBIndex.append
         calls = 0
 
@@ -493,10 +493,10 @@ class ExperimentTests(unittest.TestCase):
     def test_image_references_still_require_every_class(self):
         self.dataset.splits['train'] = self.dataset.splits['train'].select([0])
         exp = self.experiment((True, False, False))
-        exp.config['n_imgs_per_class'] = 1
+        exp.config = updated(exp.config, 'n_imgs_per_class', 1)
         with self.assertRaisesRegex(ValueError, 'Missing usable training references'):
             exp.build_vector_database()
-        self.assertFalse(LanceDBIndex.exists(self.db_path, exp.config['lancedb']['table']))
+        self.assertFalse(LanceDBIndex.exists(self.db_path, exp.config.lancedb.table))
         self.assertFalse((exp.output / 'index.json').exists())
 
     def test_artifact_formats_and_direct_loading_remain_compatible(self):
@@ -505,7 +505,7 @@ class ExperimentTests(unittest.TestCase):
         descriptions = {'Apple': ['Apple stored'], 'Pear': ['Pear stored']}
         (exp.output / 'descriptions.json').write_text(json.dumps({'descriptions': descriptions}))
         self.describer_constructor.side_effect = AssertionError('Cached descriptions regenerated')
-        report = exp.run()
+        report = exp.run().model_dump(mode="json")
         artifact = json.loads((exp.output / 'index.json').read_text())
         self.assertEqual(set(artifact), {'table', 'uri', 'source_counts', 'config'})
         self.assertEqual(set(report), {'config', 'predictions',
@@ -518,7 +518,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(set(report['metrics']), set(RetrievalMetrics.__annotations__))
         artifact['state'] = 'incomplete'
         (exp.output / 'index.json').write_text(json.dumps(artifact))
-        self.assertEqual(exp.evaluate()['metrics']['evaluated'], 2)
+        self.assertEqual(exp.evaluate().model_dump(mode="json")['metrics']['evaluated'], 2)
 
 
     def test_evaluation_depth_counts_and_empty_table_metrics(self):
@@ -527,23 +527,23 @@ class ExperimentTests(unittest.TestCase):
         from classification.schemas import PointRecord
 
         exp = self.experiment()
-        exp.config['k'] = 1
-        index = LanceDBIndex.create(self.db_path, exp.config['lancedb']['table'], 2)
+        exp.config = updated(exp.config, 'k', 1)
+        index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
         records = [PointRecord('Apple', 'description', str(i), '') for i in range(7)]
         index.append(records, np.tile([1., 0.], (7, 1)))
         with patch.object(exp, '_lancedb_adapter', return_value=index), \
              patch.object(index, 'class_counts', wraps=index.class_counts) as counts, \
              patch.object(index, 'query', wraps=index.query) as query:
-            report = exp.evaluate()
+            report = exp.evaluate().model_dump(mode="json")
         counts.assert_called_once_with()
         self.assertEqual([call.args[1] for call in query.call_args_list], [7, 5])
         self.assertEqual([len(row['neighbors']) for row in report['predictions']], [1, 1])
         for key in ('top5_hit_rate', 'retrieval_precision_at_k', 'mrr_at_k', 'ndcg_at_k', 'map_at_r'):
             self.assertEqual(report['metrics'][key], 0.5)
         self.assertEqual(report['predictions'][0]['retrieval_metrics']['relevant_reference_count'], 7)
-        exp.config['lancedb']['table'] = 'empty'
+        exp.config = updated(exp.config, 'lancedb.table', 'empty')
         LanceDBIndex.create(index.uri, 'empty', 2)
-        report = exp.evaluate()
+        report = exp.evaluate().model_dump(mode="json")
         self.assertEqual(report['metrics']['evaluated'], 2)
         self.assertEqual(report['metrics']['map_at_r'], 0)
         self.assertIsNone(report['metrics']['mean_support_cosine_similarity'])
@@ -597,10 +597,10 @@ class ExperimentTests(unittest.TestCase):
 
     def experiment(self, flags=(False, True, False), name='run'):
         cfg = dict(zip(('embed_images','embed_class_labels','embed_descriptions'), flags))
-        cfg.update(output_dir=str(self.root / name), embedding={'batch_size': 2},
-                   dataset={}, ollama={'llm':'fake', 'startup_timeout': 10, 'request_timeout': 30}, lancedb={'table': 'fixture_' + ''.join(c if c.isalnum() else '_' for c in name), 'uri': str(self.db_path)}, k=10,
+        cfg.update(output_dir=str(self.root / name), embedding={'model_id': 'jinaai/jina-clip-v2', 'batch_size': 2},
+                   dataset={'name': 'foodx251', 'root': str(self.root / 'raw')}, ollama={'binary_path': 'ollama', 'host': 'localhost:11434', 'llm':'fake', 'startup_timeout': 10, 'request_timeout': 30}, lancedb={'table': 'fixture_' + ''.join(c if c.isalnum() else '_' for c in name), 'uri': str(self.db_path)}, k=10,
                    description_count=5)
-        return Experiment(cfg)
+        return Experiment(ExperimentConfig.model_validate(cfg))
 
     def interleaved_training(self):
         from datasets import Dataset, Image as HFImage
@@ -661,8 +661,8 @@ class ExperimentTests(unittest.TestCase):
 
         rows = self.interleaved_training()
         exp = self.experiment((True, True, False), 'resume-filtered')
-        exp.config['n_imgs_per_class'] = 2
-        index = LanceDBIndex.create(self.db_path, exp.config['lancedb']['table'], 2)
+        exp.config = updated(exp.config, 'n_imgs_per_class', 2)
+        index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
         saved = [
             PointRecord(rows[i]['class'], 'training_image', rows[i]['source_id'], rows[i]['fname'])
             for i in (0, 1, 4)
@@ -675,7 +675,7 @@ class ExperimentTests(unittest.TestCase):
         builder = exp._index_builder()
         with patch.object(exp, '_index_builder', return_value=builder), \
              patch.object(builder, '_insert_references', wraps=builder._insert_references) as insert:
-            artifact = exp.build_vector_database()
+            artifact = exp.build_vector_database().model_dump(mode="json")
         image_dataset = insert.call_args.args[2]
         self.assertEqual(list(image_dataset['source_id']), [rows[2]['source_id']])
         self.assertEqual(artifact['source_counts'], {'training_image': 4, 'class_name': 2})
@@ -692,7 +692,7 @@ class ExperimentTests(unittest.TestCase):
         for limit, selected in [(None, [0, 1, 2, 3, 4]), (1, [0, 1]), (2, [0, 1, 2, 4]), (20, [0, 1, 2, 3, 4])]:
             with self.subTest(limit=limit):
                 exp = self.experiment((True, True, True), f'limit-{limit}')
-                exp.config['n_imgs_per_class'] = limit
+                exp.config = updated(exp.config, 'n_imgs_per_class', limit)
                 exp.batch_size = 3
                 exp.generate_descriptions()
                 seen = []
@@ -701,7 +701,7 @@ class ExperimentTests(unittest.TestCase):
                     seen.append([image.getpixel((0, 0))[1] for image in images])
                     return encode(images)
                 with patch.object(exp.embedder, 'encode_images', side_effect=record):
-                    artifact = exp.build_vector_database()
+                    artifact = exp.build_vector_database().model_dump(mode="json")
                 self.assertEqual(seen, [selected[start:start + 3] for start in range(0, len(selected), 3)])
                 self.assertEqual(artifact['source_counts'], {
                     'training_image': len(selected), 'class_name': 2, 'generated_description': 10,
@@ -713,7 +713,7 @@ class ExperimentTests(unittest.TestCase):
                     self.assertEqual(point['value'], rows[i]['fname'])
                     self.assertEqual(point['class'], rows[i]['class'])
                     self.assertEqual(point['vector'], [1., 0.] if rows[i]['class'] == 'Apple' else [0., 1.])
-                report = exp.evaluate()
+                report = exp.evaluate().model_dump(mode="json")
                 self.assertEqual(report['metrics']['evaluated'], len(self.dataset.test_set()))
                 self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1'])
                 self.assertEqual(report['config']['n_imgs_per_class'], limit)
@@ -747,13 +747,13 @@ class ExperimentTests(unittest.TestCase):
                 self.embedder_constructor.side_effect = None
                 self.embedder_constructor.return_value = model
                 exp = self.experiment((True, True, False), f'dim-{dimension}')
-                exp.config['embedding']['model_id'] = model_id
-                exp.config['embedding']['truncate_dim'] = truncate_dim
-                artifact = exp.build_vector_database()
+                exp.config = updated(exp.config, 'embedding.model_id', model_id)
+                exp.config = updated(exp.config, 'embedding.truncate_dim', truncate_dim)
+                artifact = exp.build_vector_database().model_dump(mode="json")
                 table = self.client.open_table(artifact['table'])
                 self.assertEqual(table.schema.field('vector').type.list_size, dimension)
                 self.assertEqual(table.count_rows(), 4)
-                report = exp.evaluate()
+                report = exp.evaluate().model_dump(mode="json")
                 self.assertEqual(report['metrics']['evaluated'], 2)
                 self.assertEqual(report['metrics']['majority_vote_accuracy'], 1.0)
                 self.assertEqual(report['metrics']['nearest_neighbor_accuracy'], 1.0)
@@ -764,8 +764,8 @@ class ExperimentTests(unittest.TestCase):
         Path(rows[2]['fname']).unlink()
         Path(rows[3]['fname']).write_bytes(b'corrupt')
         exp = self.experiment((True, False, False), 'excluded')
-        exp.config['n_imgs_per_class'] = 1
-        self.assertEqual(exp.build_vector_database()['source_counts'], {'training_image': 2})
+        exp.config = updated(exp.config, 'n_imgs_per_class', 1)
+        self.assertEqual(exp.build_vector_database().model_dump(mode="json")['source_counts'], {'training_image': 2})
         for i, corrupt in ((0, False), (1, True)):
             path = Path(rows[i]['fname'])
             original = path.read_bytes()
@@ -774,7 +774,7 @@ class ExperimentTests(unittest.TestCase):
             else:
                 path.unlink()
             exp = self.experiment((True, False, False), f'selected-{i}')
-            exp.config['n_imgs_per_class'] = 1
+            exp.config = updated(exp.config, 'n_imgs_per_class', 1)
             with self.assertRaises(OSError):
                 exp.build_vector_database()
             self.assertFalse((exp.output / 'index.json').exists())
@@ -782,11 +782,11 @@ class ExperimentTests(unittest.TestCase):
 
     def test_disabled_images_ignore_limit_and_preserve_text_counts(self):
         exp = self.experiment((False, True, True))
-        exp.config['n_imgs_per_class'] = 1
+        exp.config = updated(exp.config, 'n_imgs_per_class', 1)
         exp.generate_descriptions()
         with patch.object(self.dataset, 'train_set', side_effect=AssertionError('Read images')), \
              patch.object(self.dataset, 'iter_dataset_batches', side_effect=AssertionError('Batch images')):
-            artifact = exp.build_vector_database()
+            artifact = exp.build_vector_database().model_dump(mode="json")
         self.assertEqual(artifact['source_counts'], {'class_name': 2, 'generated_description': 10})
 
     def test_point_records_round_trip_through_lancedb(self):
@@ -811,23 +811,23 @@ class ExperimentTests(unittest.TestCase):
             if not any(flags): continue
             exp = self.experiment(flags, str(flags))
             exp.batch_size = 3
-            report = exp.run()
+            report = exp.run().model_dump(mode="json")
             expected = {kind: count for enabled, kind, count in zip(
                 flags, ('training_image', 'class_name', 'generated_description'), (2, 2, 10)
             ) if enabled}
             self.assertEqual(report['reference_source_counts'], expected)
             self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
             self.assertEqual((exp.output / 'descriptions.json').exists(), flags[2])
-            table = exp.config['lancedb']['table']
+            table = exp.config.lancedb.table
             self.assertEqual(report['table'], table)
-            self.assertEqual(exp.build_vector_database()['source_counts'], expected)
+            self.assertEqual(exp.build_vector_database().model_dump(mode="json")['source_counts'], expected)
             self.assertEqual(self.client.open_table(table).count_rows(), sum(expected.values()))
-            self.assertEqual(exp.run()['metrics']['evaluated'], 2)
+            self.assertEqual(exp.run().model_dump(mode="json")['metrics']['evaluated'], 2)
             self.assertEqual(self.client.open_table(table).count_rows(), sum(expected.values()))
 
     def test_complete_table_skips_embedding_and_retries_optimization(self):
         exp = self.experiment()
-        artifact = exp.build_vector_database()
+        artifact = exp.build_vector_database().model_dump(mode="json")
         previous = (exp.output / 'index.json').read_bytes()
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
              patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')), \
@@ -836,7 +836,7 @@ class ExperimentTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, 'optimize'):
                 exp.build_vector_database()
         self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
-        self.assertEqual(exp.build_vector_database(), artifact)
+        self.assertEqual(exp.build_vector_database().model_dump(mode="json"), artifact)
         self.assertIsNone(exp._embedder)
 
     def test_evaluation_uses_configured_table_with_stale_summary(self):
@@ -846,8 +846,8 @@ class ExperimentTests(unittest.TestCase):
         summary = json.loads(path.read_text())
         summary['table'] = 'unrelated_table'
         path.write_text(json.dumps(summary))
-        report = exp.evaluate()
-        self.assertEqual(report['table'], exp.config['lancedb']['table'])
+        report = exp.evaluate().model_dump(mode="json")
+        self.assertEqual(report['table'], exp.config.lancedb.table)
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
         self.assertNotIn('model', report)
         self.assertIsNone(report['reference_source_counts'])
@@ -859,11 +859,11 @@ class ExperimentTests(unittest.TestCase):
         summary = json.loads(path.read_text())
         summary['uri'] = str(self.root / 'other_database')
         path.write_text(json.dumps(summary))
-        self.assertIsNone(exp.evaluate()['reference_source_counts'])
+        self.assertIsNone(exp.evaluate().model_dump(mode="json")['reference_source_counts'])
 
     def test_evaluation_reads_read_only_database(self):
         exp = self.experiment()
-        artifact = exp.build_vector_database()
+        artifact = exp.build_vector_database().model_dump(mode="json")
         table = self.client.open_table(artifact['table'])
         version, rows = table.version, table.to_arrow()
         paths = [self.db_path, *self.db_path.rglob('*')]
@@ -873,7 +873,7 @@ class ExperimentTests(unittest.TestCase):
                 path.chmod(0o555 if path.is_dir() else 0o444)
             with patch.object(LanceDBIndex, 'create', side_effect=AssertionError('write')), \
                  patch.object(LanceDBIndex, 'append', side_effect=AssertionError('write')):
-                self.assertEqual(self.experiment().evaluate()['metrics']['evaluated'], 2)
+                self.assertEqual(self.experiment().evaluate().metrics['evaluated'], 2)
             reopened = self.client.open_table(artifact['table'])
             self.assertEqual(reopened.version, version)
             self.assertEqual(reopened.to_arrow(), rows)
@@ -884,7 +884,7 @@ class ExperimentTests(unittest.TestCase):
     def test_evaluation_missing_database_or_table_creates_nothing(self):
         exp = self.experiment()
         for uri in (self.root / 'absent', self.db_path):
-            exp.config['lancedb']['uri'] = str(uri)
+            exp.config = updated(exp.config, 'lancedb.uri', str(uri))
             before = sorted(self.root.rglob('*'))
             with self.assertRaises((FileNotFoundError, ValueError)):
                 exp.evaluate()
@@ -896,7 +896,7 @@ class ExperimentTests(unittest.TestCase):
         with patch.object(LanceDBIndex, 'exists', side_effect=ConnectionError('offline')) as exists:
             with self.assertRaisesRegex(ConnectionError, 'offline'):
                 exp.build_vector_database()
-        exists.assert_called_once_with(exp.config['lancedb']['uri'], exp.config['lancedb']['table'])
+        exists.assert_called_once_with(exp.config.lancedb.uri, exp.config.lancedb.table)
         self.embedder_constructor.assert_not_called()
         self.assertFalse(exp.output.exists())
 
@@ -935,7 +935,7 @@ class ExperimentTests(unittest.TestCase):
             with self.assertRaises(ValueError): exp.generate_descriptions()
         self.assertFalse((exp.output/'descriptions.json').exists())
         exp = self.experiment(name='valid')
-        artifact = exp.build_vector_database()
+        artifact = exp.build_vector_database().model_dump(mode="json")
         self.client.drop_table(artifact['table'])
         with self.assertRaises(Exception): exp.evaluate()
 
@@ -953,7 +953,7 @@ class ExperimentTests(unittest.TestCase):
     def test_empty_retrieval(self):
         exp = self.experiment(); exp.build_vector_database()
         with patch('classification.retrieval.lancedb.LanceDBIndex.query', return_value=[]):
-            report = exp.evaluate()
+            report = exp.evaluate().model_dump(mode="json")
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 0)
         self.assertTrue(all(p['prediction'] is None for p in report['predictions']))
 
@@ -969,7 +969,7 @@ class ExperimentTests(unittest.TestCase):
                 self.assertEqual(image.getpixel((0, 0))[0], int(source_id) * 100)
                 image.close()
         exp = self.experiment((True, False, False))
-        artifact = exp.build_vector_database()
+        artifact = exp.build_vector_database().model_dump(mode="json")
         stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
         self.assertEqual(len(stored), 2)
         for point in stored:
@@ -977,7 +977,7 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual({k: v for k, v in point.items() if k != 'vector'}, dict(id=point['id'], source_kind='training_image',
                 source_identity=row['source_id'], value=row['fname'], **{'class': row['class']}))
             self.assertEqual(point['vector'], [1., 0.] if row['class'] == 'Apple' else [0., 1.])
-        report = exp.evaluate()
+        report = exp.evaluate().model_dump(mode="json")
         self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1', '0'])
         self.assertEqual(report['metrics']['evaluated'], 3)
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
@@ -1023,6 +1023,6 @@ def test_deep_rankings_do_not_expand_voting_support():
 def test_k_requires_positive_nonboolean_integer():
     import pytest
     for k in (0, -1, True, False, None, '5', 1.5):
-        with pytest.raises(ValueError, match='k must be a positive integer'):
-            validate_config(dict(k=k, embed_images=True, embed_class_labels=False,
+        with pytest.raises(ValueError, match='k'):
+            ExperimentConfig.model_validate(config_data(k=k, embed_images=True, embed_class_labels=False,
                                  embed_descriptions=False))

@@ -1,58 +1,109 @@
-"""Shared experiment configuration validation."""
+"""Strict, immutable configuration for whole-image experiments."""
 
-from collections.abc import Mapping
-from math import isfinite
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Self
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+PositiveInt = Annotated[int, Field(gt=0)]
+NonemptyString = Annotated[str, Field(min_length=1)]
+PositiveSeconds = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
-def validate_ollama_config(settings: Mapping[str, Any]) -> None:
-    """Require finite, positive timeout seconds before opening an Ollama session."""
-    for name in ("startup_timeout", "request_timeout"):
-        value = settings[name]
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(value)
-            or value <= 0
-        ):
-            raise ValueError(f"ollama.{name} must be positive finite seconds")
+class ConfigModel(BaseModel):
+    """Reject unknown fields and coercion, including in default values."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True, validate_default=True)
 
 
-def validate_config(config: dict) -> dict:
-    """Check reference switches, retrieval limits, and output/cache destinations.
+class DatasetConfig(ConfigModel):
+    """Local FoodX251 annotation location."""
 
-    Require at least one reference source, a positive integer k, and a null or
-    positive integer image cap. Booleans are invalid for both integer settings.
-    Output must stay outside the raw dataset; enabled validation caching needs a
-    nonempty table name distinct from the references.
+    name: NonemptyString
+    root: NonemptyString
 
-    Returns:
-        The supplied configuration unchanged.
+    @field_validator("name")
+    @classmethod
+    def supported_dataset(cls, value: str) -> str:
+        if value.lower() != "foodx251":
+            raise ValueError("Only foodx251 is supported")
+        return value
 
-    Raises:
-        ValueError: A checked setting violates these constraints.
-        KeyError: A required setting is missing.
-    """
-    if type(config["k"]) is not int or config["k"] <= 0:
-        raise ValueError("k must be a positive integer")
-    sources = ("embed_images", "embed_class_labels", "embed_descriptions")
-    for key in sources:
-        if type(config[key]) is not bool:
-            raise ValueError(f"{key} must be a boolean")
-    if not any(config[key] for key in sources):
-        raise ValueError("Select at least one reference source")
-    limit = config.get("n_imgs_per_class")
-    if limit is not None and (type(limit) is not int or limit <= 0):
-        raise ValueError("n_imgs_per_class must be null or a positive integer")
-    # Reject output paths equal to or nested inside the resolved raw dataset directory.
-    raw = config.get("dataset", {}).get("root")
-    if raw:
-        output = Path(config["output_dir"]).expanduser().resolve()
-        if output.is_relative_to(Path(raw).expanduser().resolve()):
+
+class VertexConfig(ConfigModel):
+    """Cloud settings; project is required only when constructing the backend."""
+
+    project: NonemptyString | None = None
+    location: NonemptyString = "global"
+    max_concurrency: PositiveInt = 4
+    max_attempts: PositiveInt = 5
+    request_timeout: PositiveSeconds = 60.0
+    classification_prompt: bool = False
+
+
+class EmbeddingConfig(ConfigModel):
+    """Encoder selection and bounded input batches."""
+
+    model_id: NonemptyString
+    batch_size: PositiveInt = 32
+    device: NonemptyString = "auto"
+    truncate_dim: PositiveInt | None = None
+    vertex: VertexConfig = Field(default_factory=VertexConfig)
+
+
+class LanceDBConfig(ConfigModel):
+    """Reference and optional validation table destinations."""
+
+    uri: NonemptyString
+    table: NonemptyString
+    validation_table: str | None = None
+
+
+class OllamaConfig(ConfigModel):
+    """Owned server connection and process settings, also used for downloads."""
+
+    binary_path: NonemptyString
+    host: NonemptyString
+    startup_timeout: PositiveSeconds
+    request_timeout: PositiveSeconds
+    llm: NonemptyString | None = None
+
+    @field_validator("binary_path", "host", "llm")
+    @classmethod
+    def nonblank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("must be a nonempty string")
+        return value
+
+
+class ExperimentConfig(ConfigModel):
+    """Validated settings passed through every experiment stage."""
+
+    dataset: DatasetConfig
+    embedding: EmbeddingConfig
+    lancedb: LanceDBConfig
+    output_dir: NonemptyString
+    k: PositiveInt
+    embed_images: bool
+    embed_class_labels: bool
+    embed_descriptions: bool
+    n_imgs_per_class: PositiveInt | None = None
+    descriptions_file: str | None = None
+    cache_validation_embeddings: bool = False
+    ollama: OllamaConfig | None = None
+    description_count: PositiveInt | None = None
+
+    @model_validator(mode="after")
+    def experiment_constraints(self) -> Self:
+        if not any((self.embed_images, self.embed_class_labels, self.embed_descriptions)):
+            raise ValueError("Select at least one reference source")
+        output = Path(self.output_dir).expanduser().resolve()
+        if output.is_relative_to(Path(self.dataset.root).expanduser().resolve()):
             raise ValueError("Output directory must be separate from raw data")
-    if config.get("cache_validation_embeddings", False):
-        name = config["lancedb"].get("validation_table")
-        if not isinstance(name, str) or not name.strip() or name == config["lancedb"]["table"]:
-            raise ValueError("validation_table must be nonempty and distinct from reference table")
-    return config
+        if self.cache_validation_embeddings:
+            name = self.lancedb.validation_table
+            if not name or not name.strip() or name == self.lancedb.table:
+                raise ValueError(
+                    "lancedb.validation_table must be nonempty and distinct from reference table"
+                )
+        return self

@@ -12,6 +12,7 @@ import pytest
 import yaml
 from test_tracking import Artifact
 
+from classification.experiments.config import ExperimentConfig
 from classification import cli
 from classification.experiments import matryoshka as sweep
 from classification.experiments.classification import Experiment
@@ -39,7 +40,7 @@ def sources(tmp_path, monkeypatch):
             for i, (identity, vector, label) in enumerate(zip(identities, values, ['A', 'B'], strict=True))
         ])
     config = dict(
-        dataset={}, output_dir=str(tmp_path / 'output'), k=1,
+        dataset={'name': 'foodx251', 'root': str(tmp_path / 'raw')}, output_dir=str(tmp_path / 'output'), k=1,
         embed_images=True, embed_class_labels=False, embed_descriptions=False,
         n_imgs_per_class=1, cache_validation_embeddings=False,
         embedding=dict(model_id='google/ge-v2', batch_size=1, truncate_dim=None),
@@ -123,7 +124,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         for prediction in report['predictions']:
             assert prediction['prediction'] == winner
             assert prediction['neighbors'][0]['score'] == pytest.approx(float(max(scores)), abs=1e-6)
-        for source, destination in zip(('reference', 'validation'), sweep.table_names(config, dimension), strict=True):
+        for source, destination in zip(('reference', 'validation'), sweep.table_names(ExperimentConfig.model_validate(config), dimension), strict=True):
             table = connection.open_table(destination)
             assert table.schema.field('vector').type == pa.list_(pa.float32(), dimension)
             rows = table.to_arrow().to_pylist()
@@ -193,7 +194,7 @@ def test_missing_vector_has_no_embedding_or_summary(sources, runs):
     config, connection, _, _ = sources
     connection.open_table('validation').delete("source_identity = 'first'")
     with pytest.raises(KeyError, match='first'):
-        cli._run_experiment(config, 'matroyshka-sweep')
+        cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert len(runs) == 1
     Experiment._create_embedder.assert_not_called()
     assert not list(Path(config['output_dir']).rglob('report.json'))
@@ -205,13 +206,13 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     original = cli.evaluate_cached
 
     def evaluate(effective, tracker):
-        if effective['embedding']['truncate_dim'] == 1536:
+        if effective.embedding.truncate_dim == 1536:
             raise RuntimeError('later failure')
         return original(effective, tracker)
 
     monkeypatch.setattr(cli, 'evaluate_cached', evaluate)
     with pytest.raises(RuntimeError, match='later failure'):
-        cli._run_experiment(config, 'matroyshka-sweep')
+        cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert len(list(Path(config['output_dir']).rglob('report.json'))) == 1
     assert not list(Path(config['output_dir']).rglob('summary.json'))
     assert len(runs) == 2
@@ -223,7 +224,7 @@ def test_collisions_fail_before_tracking(sources, runs, validation):
     config, _, _, _ = sources
     config['lancedb']['validation_table'] = validation
     with pytest.raises(ValueError):
-        cli._run_experiment(config, 'matroyshka-sweep')
+        cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert runs == []
 
 
@@ -265,3 +266,38 @@ def test_native_stream_creation_error(sources, monkeypatch):
         sweep.prepare_table(connection, 'reference', 'broken_native', 768, 1)
     # No assertion about table durability or repair after a native storage failure.
     assert connection.open_table('reference').count_rows() == 2
+
+
+def test_sweep_variants_are_independent_validated_models(sources):
+    from classification.experiments.report_types import EvaluationReport
+    from classification.retrieval.metrics import metrics
+
+    raw, _, _, _ = sources
+    config = ExperimentConfig.model_validate(raw)
+    variants = []
+
+    def evaluate(effective):
+        assert isinstance(effective, ExperimentConfig)
+        variants.append(effective)
+        return EvaluationReport(
+            config=effective, table=effective.lancedb.table,
+            reference_source_counts=None, predictions=[], metrics=metrics([], ["A", "B"]),
+        ), "synthetic"
+
+    sweep.run_sweep(config, evaluate)
+    assert [variant.embedding.truncate_dim for variant in variants] == list(sweep.DIMENSIONS)
+    assert len({id(variant.embedding) for variant in variants}) == 3
+    assert config.model_dump() == ExperimentConfig.model_validate(raw).model_dump()
+    assert config.embedding.truncate_dim is None
+
+
+def test_sweep_revalidates_dimension_before_table_creation(sources, monkeypatch):
+    config, _, _, _ = sources
+    monkeypatch.setattr(sweep, "DIMENSIONS", (0,))
+    prepare = Mock()
+    evaluate = Mock()
+    monkeypatch.setattr(sweep, "prepare_table", prepare)
+    with pytest.raises(ValueError, match="truncate_dim"):
+        sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+    prepare.assert_not_called()
+    evaluate.assert_not_called()

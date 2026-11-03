@@ -15,7 +15,7 @@ encoding batches. Ordinary database operations use `retrieval`;
 | Query depth, voting, or reported metrics | [Retrieval contract](../../../docs/classification/retrieval.md) |
 | Progress bars or W&B publication | [Tracking](../../../docs/classification/tracking.md) |
 
-`config.py`, `artifacts.py`, and `batches.py` are the shared validation, JSON, and
+`config.py`, `artifacts.py`, and `batches.py` own immutable typed configuration, JSON, and
 ordered metadata/vector helpers. `descriptions.py` reads saved vocabularies and
 constructs ordered text references. Import concrete modules directly. Keep CLI
 parsing in `classification.cli`; package initializers remain free of backend imports.

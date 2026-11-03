@@ -8,7 +8,8 @@ run. Experiment and description loops own their progress bars.
 ## Run lifetime
 
 After parsing and shared validation, `_tracked_run()` enters W&B's native
-`wandb.init(...)` context with the resolved dictionary and stage as `job_type`.
+`wandb.init(...)` context with a JSON-compatible dump of the validated
+`ExperimentConfig` and stage as `job_type`.
 Configuration publication, `Experiment` construction, and stage execution all
 occur inside it. Native context exit handles success, exceptions, and interrupts,
 including cleanup failures. There is no application wrapper to preserve an earlier
@@ -26,7 +27,7 @@ untracked by default; their progress bars still work.
 
 | Publisher | Output and completion boundary |
 | --- | --- |
-| `Tracker.configuration(config)` | `configuration-<run.id>` artifact of type `configuration`, containing only `resolved_config.yaml`. SDK-managed `artifact.new_file(..., encoding="utf-8")` writes the effective dictionary. Source YAML, invocation metadata, and application-managed temporary files are excluded. |
+| `Tracker.configuration(config: ExperimentConfig)` | `configuration-<run.id>` artifact of type `configuration`, containing only `resolved_config.yaml`. SDK-managed `artifact.new_file(..., encoding="utf-8")` writes the effective model dump, including defaults. Source YAML, invocation metadata, and application-managed temporary files are excluded. |
 | `Tracker.reference_counts(counts)` | `reference_source_counts` in the run summary. A completed index build publishes counts after its local summary write; evaluation supplies matching summary counts or null. |
 | `Tracker.evaluation(report, report_path)` | Every aggregate metric under `evaluation/<key>`, a per-class W&B table, and an `evaluation-<run.id>` artifact of type `evaluation` containing `report.json`. Called only after a complete evaluation and successful local report write. |
 
