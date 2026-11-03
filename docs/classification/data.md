@@ -90,7 +90,11 @@ propagate without retries or partial description files. Progress semantics are i
 `binary_path`, `host`, `startup_timeout`, and `request_timeout` from the `ollama`
 section, with no environment fallback for those settings. Description generation
 also requires `ollama.llm`, read before entering the session; downloading uses the
-explicit requested model name. Timeouts must be positive. Startup validates an
+explicit requested model name. Timeouts must be positive finite numeric seconds, excluding booleans.
+`experiments.config.validate_ollama_config` owns these checks. Description generation
+and model downloads validate settings before constructing a session; cached and
+disabled description paths need no Ollama settings. Direct session callers must
+validate their settings through the same helper. Startup validates an
 executable before probing:
 bare names resolve through PATH; explicit paths expand `~` and resolve from the
 working directory. Installation or OS launch errors provide Ollama setup guidance;

@@ -288,6 +288,15 @@ class ExperimentTests(unittest.TestCase):
             exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
 
+    def test_description_rejects_invalid_timeouts_before_session_construction(self):
+        exp = self.experiment((False, False, True))
+        exp.config["ollama"]["startup_timeout"] = float("nan")
+        with patch("classification.experiments.classification.OllamaSession") as session:
+            with self.assertRaisesRegex(ValueError, "startup_timeout"):
+                exp.generate_descriptions()
+        session.assert_not_called()
+        self.assertFalse(exp.output.exists())
+
     def test_description_errors_and_interrupts_exit_context(self):
         for error in (RuntimeError('generation failed'), KeyboardInterrupt()):
             exp = self.experiment((False, False, True))
@@ -546,7 +555,7 @@ class ExperimentTests(unittest.TestCase):
     def experiment(self, flags=(False, True, False), name='run'):
         cfg = dict(zip(('embed_images','embed_class_labels','embed_descriptions'), flags))
         cfg.update(output_dir=str(self.root / name), embedding={'batch_size': 2},
-                   dataset={}, ollama={'llm':'fake'}, lancedb={'table': 'fixture_' + ''.join(c if c.isalnum() else '_' for c in name), 'uri': str(self.db_path)}, k=10,
+                   dataset={}, ollama={'llm':'fake', 'startup_timeout': 10, 'request_timeout': 30}, lancedb={'table': 'fixture_' + ''.join(c if c.isalnum() else '_' for c in name), 'uri': str(self.db_path)}, k=10,
                    description_count=5)
         return Experiment(cfg)
 

@@ -17,8 +17,6 @@ class OllamaSession:
         """Read required settings from the experiment's ollama configuration."""
         startup_timeout = config["startup_timeout"]
         request_timeout = config["request_timeout"]
-        if startup_timeout <= 0 or request_timeout <= 0:
-            raise ValueError("Timeouts must be positive")
         self.binary_path = config["binary_path"]
         self.host = config["host"]
         if "://" not in self.host:

@@ -1,6 +1,22 @@
 """Shared experiment configuration validation."""
 
+from collections.abc import Mapping
+from math import isfinite
 from pathlib import Path
+from typing import Any
+
+
+def validate_ollama_config(settings: Mapping[str, Any]) -> None:
+    """Require finite, positive timeout seconds before opening an Ollama session."""
+    for name in ("startup_timeout", "request_timeout"):
+        value = settings[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError(f"ollama.{name} must be positive finite seconds")
 
 
 # TODO: Review overly defensive config checks

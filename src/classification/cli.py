@@ -10,7 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
 from classification.experiments.classification import Experiment
-from classification.experiments.config import validate_config
+from classification.experiments.config import validate_config, validate_ollama_config
 from classification.experiments.matryoshka import evaluate_cached, run_sweep
 from classification.tracking import Tracker
 
@@ -22,6 +22,7 @@ def download_model(model_name: str) -> None:
 
     with open("cfg/experiment_config_internvl.yml", encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)
+    validate_ollama_config(cfg["ollama"])
     with OllamaSession(cfg["ollama"]) as session:
         session.download_model(model_name)
 

@@ -94,7 +94,8 @@ class CommandTests(unittest.TestCase):
         backend = SimpleNamespace()
         backend.OllamaSession = MagicMock()
         yaml = SimpleNamespace()
-        cfg = {"ollama": {"llm": "configured:tag", "host": "synthetic"}}
+        cfg = {"ollama": {"llm": "configured:tag", "host": "synthetic",
+                          "startup_timeout": 10, "request_timeout": 30}}
 
         def load(stream):
             self.assertEqual(stream.read(), content)
@@ -123,13 +124,27 @@ class CommandTests(unittest.TestCase):
                 os.chdir(previous)
             self.assertEqual(path.read_text(), content)
         backend.OllamaSession.assert_called_once_with(
-            {"llm": "configured:tag", "host": "synthetic"}
+            cfg["ollama"]
         )
         context = backend.OllamaSession.return_value
         context.__enter__.return_value.download_model.assert_called_once_with(
             "requested:exact-tag"
         )
         context.__exit__.assert_called_once_with(None, None, None)
+
+    def test_download_rejects_invalid_timeouts_before_session_construction(self):
+        for name in ("startup_timeout", "request_timeout"):
+            with self.subTest(name=name):
+                settings = {"startup_timeout": 10, "request_timeout": 30}
+                settings[name] = float("inf")
+                with (
+                    patch("builtins.open", mock_open()),
+                    patch("yaml.safe_load", return_value={"ollama": settings}),
+                    patch("classification.llm.ollama.OllamaSession") as session,
+                    self.assertRaisesRegex(ValueError, name),
+                ):
+                    main(["download_model", "fake"])
+                session.assert_not_called()
 
     def test_download_cleanup_on_failure_and_interrupt(self):
         for failure in (RuntimeError("pull failed"), KeyboardInterrupt()):
@@ -139,7 +154,9 @@ class CommandTests(unittest.TestCase):
                 context = backend.OllamaSession.return_value
                 context.__enter__.return_value.download_model.side_effect = failure
                 yaml = SimpleNamespace()
-                yaml.safe_load = Mock(return_value={"ollama": {"llm": "fake"}})
+                yaml.safe_load = Mock(return_value={"ollama": {
+                    "llm": "fake", "startup_timeout": 10, "request_timeout": 30,
+                }})
                 with (
                     patch.dict(
                         sys.modules,

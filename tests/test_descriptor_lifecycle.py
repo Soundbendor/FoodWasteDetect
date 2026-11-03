@@ -10,11 +10,32 @@ from unittest.mock import Mock, patch
 
 import httpx
 
+from classification.experiments.config import validate_ollama_config
 from classification.llm import generate_descriptors as descriptors
 from classification.llm import ollama
 
 
 ConnectError = httpx.ConnectError
+
+
+class OllamaConfigTests(unittest.TestCase):
+    def test_timeouts_must_be_positive_finite_numbers(self):
+        for name in ("startup_timeout", "request_timeout"):
+            for value in (0, -1, True, False, float("nan"), float("inf"), -float("inf"), "10", None):
+                with self.subTest(name=name, value=value):
+                    settings = {"startup_timeout": 10, "request_timeout": 30}
+                    settings[name] = value
+                    with self.assertRaisesRegex(ValueError, name):
+                        validate_ollama_config(settings)
+
+    def test_valid_timeouts_and_missing_keys(self):
+        for value in (1, 0.25):
+            validate_ollama_config({"startup_timeout": value, "request_timeout": value})
+        for name in ("startup_timeout", "request_timeout"):
+            settings = {"startup_timeout": 10, "request_timeout": 30}
+            del settings[name]
+            with self.assertRaises(KeyError):
+                validate_ollama_config(settings)
 
 
 class DescriptionTests(unittest.TestCase):

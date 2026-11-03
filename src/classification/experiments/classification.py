@@ -15,7 +15,7 @@ from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
 from classification.experiments.artifacts import write_json
 from classification.experiments.batches import EmbeddingBatch, cached_batches
-from classification.experiments.config import validate_config
+from classification.experiments.config import validate_config, validate_ollama_config
 from classification.experiments.descriptions import load_descriptions
 from classification.experiments.evaluation import evaluate_batches
 from classification.experiments.index_builder import IndexBuilder
@@ -104,6 +104,7 @@ class Experiment:
         if self.config.get("descriptions_file") is not None or path.exists():
             logging.info(f"Loading existing descriptions at {path}")
             return load_descriptions(path)
+        validate_ollama_config(self.config["ollama"])
         self.output.mkdir(parents=True, exist_ok=True)
         model = self.config["ollama"]["llm"]
         with OllamaSession(self.config["ollama"]) as session:
