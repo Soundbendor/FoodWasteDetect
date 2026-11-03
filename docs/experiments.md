@@ -1209,3 +1209,27 @@ Current-version fragments decreased from 32 to 1. Local p50/p95 query times were
 3.26/3.52 ms before and 1.95/2.13 ms after. This single warm-process measurement
 establishes neither production throughput nor HPC/shared-filesystem performance.
 The integration test separately checks preservation of vectors, IDs, and query results.
+
+## InternVL subpackage refactor verification (2026-11-02)
+
+The structural split puts encoders, retrieval, and experiment orchestration in
+separate subpackages. CLI command spelling and runtime behavior are retained;
+Python callers and mock targets use the new concrete module paths. No README,
+model settings, dependencies, or persistence protocols were changed.
+
+The existing modern CPU environment passed Ruff, scoped ty, and source/wheel
+builds. Wheel inspection confirmed all new subpackages and no removed flat
+modules. CLI help ran from an extracted wheel outside the source directory.
+The full synthetic suite returned 311 passed, 2 skipped, and 39 failed (including
+subtest failures). Every failing test also failed against unchanged HEAD in a
+temporary checkout. That baseline additionally failed two W&B subprocess smoke
+tests because its subprocess environment resolved the editable working tree
+instead of the temporary checkout. Those tests passed against the refactor.
+Existing failures include description/reference expectations and missing encoder
+compatibility guards; this structural change does not repair them.
+
+Inside the sandbox, the pre-refactor baseline stalled at local LanceDB connection
+creation. Completed suite runs used explicitly approved outside-sandbox execution,
+with CUDA hidden and Hugging Face offline mode. Inputs remained synthetic, with
+mocked model/cloud transports and temporary local databases. No real models,
+GPU workloads, live cloud requests, Ollama server, or research data were used.

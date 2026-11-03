@@ -8,63 +8,23 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
-import numpy as np
 from tqdm import tqdm
 
-from .embedder import Embedder
-from .embeddings import EmbeddingModel
-from .generate_descriptors import DescriberLLM
-from .image_dataset import load_dataset
+from ..encoders.base import Embedder
+from ..encoders.sentence_transformers import EmbeddingModel
+from ..generate_descriptors import DescriberLLM
+from ..image_dataset import load_dataset
+from ..retrieval.lancedb import LanceDBIndex
+from ..retrieval.metrics import metrics, ranking_metrics
+from ..retrieval.voting import classify
+from ..schemas import ImageMetadata, Neighbor, Prediction
+from ..tracking import Tracker
+from .artifacts import write_json
+from .batches import EmbeddingBatch, cached_batches
+from .config import validate_config
 from .index_builder import IndexBuilder
-from .retrieval import LanceDBIndex, classify, metrics, ranking_metrics
-from .schemas import ImageMetadata, Neighbor, Prediction
-from .tracking import Tracker
-
-type EmbeddingBatch = tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
-
-
-def _write_json(path: Path, value: Any) -> None:
-    """Safely clean and write JSON config or results file."""
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
-
-
-# TODO: Review overly defensive config checks
-def validate_config(config: dict) -> dict:
-    """Validate experiment config does not force exp pipeline into invalid state.
-
-    - Require that at least one modality (class labels, images, descriptions)
-        is used in training dataset
-    - Ensure that results output directory is not nested inside data directory.
-    """
-    if type(config["k"]) is not int or config["k"] <= 0:
-        raise ValueError("k must be a positive integer")
-    sources = ("embed_images", "embed_class_labels", "embed_descriptions")
-    for key in sources:
-        if type(config[key]) is not bool:
-            raise ValueError(f"{key} must be a boolean")
-    if not any(config[key] for key in sources):
-        raise ValueError("Select at least one reference source")
-    limit = config.get("n_imgs_per_class")
-    if limit is not None and (type(limit) is not int or limit <= 0):
-        raise ValueError("n_imgs_per_class must be null or a positive integer")
-    # Reject output paths equal to or nested inside the resolved raw dataset directory.
-    raw = config.get("dataset", {}).get("root")
-    if raw:
-        output = Path(config["output_dir"]).expanduser().resolve()
-        if output.is_relative_to(Path(raw).expanduser().resolve()):
-            raise ValueError("Output directory must be separate from raw data")
-    if config.get("cache_validation_embeddings", False):
-        name = config["lancedb"].get("validation_table")
-        if not isinstance(name, str) or not name.strip() or name == config["lancedb"]["table"]:
-            raise ValueError("validation_table must be nonempty and distinct from reference table")
-    return config
 
 
 def _extract_batch_metadata(batch: dict[str, list]) -> list[ImageMetadata]:
@@ -95,20 +55,6 @@ def _prediction(
         "neighbors": list(neighbors),
         "retrieval_metrics": ranking_metrics(ranked, record["class"], k, relevant_count),
     }
-
-
-def cached_batches(
-    cache: LanceDBIndex,
-    metadata_batches: Iterable[dict[str, list]],
-) -> Iterator[EmbeddingBatch]:
-    """Pair metadata with cached vectors in source identity order."""
-    for batch in metadata_batches:
-        yield (
-            batch,
-            cache.fetch_vectors(
-                [("validation_image", identity) for identity in batch["source_id"]]
-            ),
-        )
 
 
 class Experiment:
@@ -151,7 +97,7 @@ class Experiment:
     def _create_embedder(self) -> Embedder:
         options = self.config["embedding"]
         if options.get("model_id") == "google/ge-v2":
-            from .vertex_embeddings import VertexEmbeddingModel
+            from ..encoders.vertex import VertexEmbeddingModel
 
             return VertexEmbeddingModel(
                 truncate_dim=options.get("truncate_dim"),
@@ -197,7 +143,7 @@ class Experiment:
                 self.classes,
                 self.config["description_count"],
             )
-        _write_json(path, dict(descriptions=descriptions))
+        write_json(path, dict(descriptions=descriptions))
         return descriptions
 
     def _index_builder(self) -> IndexBuilder:
@@ -222,7 +168,7 @@ class Experiment:
             config=self.config,
         )
         self.output.mkdir(parents=True, exist_ok=True)
-        _write_json(self.output / "index.json", artifact)
+        write_json(self.output / "index.json", artifact)
         if self.tracker:
             self.tracker.reference_counts(dict(counts))
         return artifact
@@ -306,7 +252,7 @@ class Experiment:
         run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
         run_dir.mkdir(parents=True)
         report_path = run_dir / "report.json"
-        _write_json(report_path, report)
+        write_json(report_path, report)
         if self.tracker:
             self.tracker.evaluation(report, report_path)
         return report

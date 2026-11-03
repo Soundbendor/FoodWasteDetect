@@ -1,4 +1,4 @@
-"""Image-embedding experiments; whole-image experiments live in internvl.experiment."""
+"""Image-embedding experiments; whole-image experiments live in internvl.experiments.classification."""
 
 import logging
 

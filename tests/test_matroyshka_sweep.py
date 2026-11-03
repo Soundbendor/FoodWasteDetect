@@ -13,9 +13,9 @@ import yaml
 from test_tracking import Artifact
 
 from internvl import cli
-from internvl import matroyshka_sweep as sweep
-from internvl.experiment import Experiment
-from internvl.retrieval import LanceDBIndex
+from internvl.experiments import matryoshka as sweep
+from internvl.experiments.classification import Experiment
+from internvl.retrieval.lancedb import LanceDBIndex
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def sources(tmp_path, monkeypatch):
             yield dict(source_id=[identity], source_split=['val'], fname=[identity], **{'class': ['A']})
 
     dataset.iter_batches.side_effect = batches
-    monkeypatch.setattr('internvl.experiment.load_dataset', Mock(return_value=dataset))
+    monkeypatch.setattr('internvl.experiments.classification.load_dataset', Mock(return_value=dataset))
     monkeypatch.setattr(Experiment, '_create_embedder', Mock(side_effect=AssertionError('embedding forbidden')))
     return config, connection, vectors, query
 

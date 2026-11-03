@@ -72,9 +72,24 @@ The current implementation is a collection of offline experiments, not a complet
 implementation of this target. In particular, do not describe existing outputs as
 instance segmentation when they contain only boxes and class predictions.
 
+## InternVL package boundaries
+
+`internvl.encoders` contains the shared interface (`base`), local Sentence
+Transformers models (`sentence_transformers`), and Vertex models (`vertex`).
+`internvl.retrieval` separates database access (`lancedb`), voting (`voting`),
+and classification/ranking metrics (`metrics`). `internvl.experiments` owns
+classification orchestration, index building, Matryoshka sweeps, configuration
+validation, cached batches, and artifact writing. Shared record schemas, dataset
+loading, descriptions, tracking, and the CLI remain at the package root.
+Import concrete modules directly; package initializers do not load backends.
+The old flat encoder and experiment modules have no compatibility shims.
+CLI commands, including the `matroyshka-sweep` spelling, remain unchanged.
+Shared JSON writing is `experiments.artifacts.write_json`; shared validation
+is `experiments.config.validate_config`.
+
 ## Configurable whole-image classification (current)
 
-The separately authorized `internvl.experiment` runner supersedes the old BGE
+The separately authorized `internvl.experiments.classification` runner supersedes the old BGE
 text-retrieval/training commands. `workflows.py` and its legacy workflows have
 been deleted without a compatibility module. The
 `finetune-embeddings`, `internvl build-db`, and top-level `evaluate` CLI commands
@@ -89,7 +104,7 @@ The separate CLIP fine-tuning experiment and legacy image interfaces are unchang
 
 Use `python -m internvl experiment {describe,index,evaluate,run} --config_file
 cfg/classification.yml`. Parsing and YAML loading live in `internvl.cli`;
-`internvl.experiment` has no command-line entry point; use the shared CLI.
+`internvl.experiments.classification` has no command-line entry point; use the shared CLI.
 All four experiment stages accept repeatable `--set PATH=VALUE` overrides, such
 as `--set ollama.llm=gemma3:27b` and `--set embedding.batch_size=16`. The CLI uses
 one argparse pass, then loads the YAML with OmegaConf, requires a mapping,
@@ -355,7 +370,7 @@ version checks, scope, and the stale local CUDA installation.
 CPU verification includes fake model/Ollama backends, synthetic images, miniature
 FoodX251 fixtures, Hugging Face datasets, and real LanceDB databases in temporary
 directories.
-`internvl.embedder.Embedder` is the shared abstract base for `EmbeddingModel` and
+`internvl.encoders.base.Embedder` is the shared abstract base for `EmbeddingModel` and
 `VertexEmbeddingModel`. It declares an ordinary `dimension: int` attribute and
 abstract text/image encoding methods, with no shared constructor. Its `ImageInput`
 alias accepts strings, paths, and PIL images and is explicitly re-exported by
@@ -388,7 +403,7 @@ legacy source, and must not be attributed to the new experiment runner.
 ## Vertex Gemini Embedding 2 whole-image comparison
 
 `google/ge-v2` is an application alias for Vertex AI `gemini-embedding-2`,
-implemented separately in `internvl.vertex_embeddings.VertexEmbeddingModel`.
+implemented separately in `internvl.encoders.vertex.VertexEmbeddingModel`.
 `Experiment.embedder` constructs it lazily and reuses the wrapper. Local model IDs
 ignore the `embedding.vertex` section. The Vertex route does not construct a
 Sentence Transformer or use its preprocessing. The local Hugging Face dataset
@@ -817,7 +832,7 @@ or GPU kernels were run.
 
 `python -m internvl experiment matroyshka-sweep --config_file cfg/ge_v2.yml`
 uses the shared CLI and strict ordered `--set` overrides. The command spelling is
-`matroyshka-sweep`; implementation lives in `internvl.matroyshka_sweep`, with no
+`matroyshka-sweep`; implementation lives in `internvl.experiments.matryoshka`, with no
 separate parser or experiment subclass. It assumes the configured reference and
 validation tables contain complete Gemini 3072-dimensional embeddings. It does
 not verify compatibility or completeness and makes no embedding requests.

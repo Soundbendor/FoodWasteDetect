@@ -327,7 +327,7 @@ def publish(tracker, config):
         original_configuration(tracker, config)
 
 class Experiment:
-    from internvl.experiment import validate_config
+    from internvl.experiments.config import validate_config
     validate_config = staticmethod(validate_config)
 
     def __init__(self, config, *, tracker):
@@ -411,7 +411,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
     assert bar.disable  # Context exit closes the bar.
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
-        patch("internvl.experiment.LanceDBIndex.query", side_effect=[[], failure]),
+        patch("internvl.experiments.classification.LanceDBIndex.query", side_effect=[[], failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.evaluate()
@@ -478,7 +478,7 @@ def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_
     exp.batch_size = 1
     exp.tracker = Tracker(sdk)
     with (
-        patch("internvl.experiment.LanceDBIndex.append", side_effect=[None, failure]),
+        patch("internvl.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.build_vector_database()
@@ -510,7 +510,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     from sentence_transformers import SentenceTransformer
     from test_embeddings import SyntheticEncoder
 
-    from internvl.embeddings import EmbeddingModel
+    from internvl.encoders.sentence_transformers import EmbeddingModel
 
     exp = experiment_case.experiment((True, True, True), 'truncated-v4')
     exp.config['embedding'].update(
@@ -524,7 +524,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
         modules=[encoder], device='cpu', prompts={'passage': 'Passage: '},
     )
     backend.module_kwargs = {'0': ['task', 'truncate_dim']}
-    with patch('internvl.embeddings._load_backend', return_value=backend):
+    with patch('internvl.encoders.sentence_transformers._load_backend', return_value=backend):
         main(['experiment', 'run', '--config_file', str(path),
               '--set', 'embedding.truncate_dim=1024'])
     experiment_case.embedder_constructor.assert_called_once_with(

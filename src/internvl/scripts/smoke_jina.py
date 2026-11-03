@@ -66,7 +66,7 @@ def _worker() -> None:
     import numpy as np
     from PIL import Image
 
-    from internvl.embeddings import EmbeddingModel
+    from internvl.encoders.sentence_transformers import EmbeddingModel
 
     model = EmbeddingModel("jinaai/jina-clip-v2", device="cpu")
     with Image.new("RGB", (224, 224), color=(160, 80, 40)) as image:

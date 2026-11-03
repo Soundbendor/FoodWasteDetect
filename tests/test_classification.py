@@ -8,9 +8,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from internvl.experiment import Experiment, _extract_batch_metadata, _prediction, validate_config
+from internvl.experiments.classification import Experiment, _extract_batch_metadata, _prediction
+from internvl.experiments.config import validate_config
 from internvl.schemas import Neighbor, PointRecord
-from internvl.retrieval import LanceDBIndex
+from internvl.retrieval.lancedb import LanceDBIndex
 
 
 def available(*modules):
@@ -289,7 +290,7 @@ class ExperimentTests(unittest.TestCase):
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
         exp.config['lancedb']['table'] += '_new'
-        with patch('internvl.experiment.Path.replace', side_effect=OSError('replace failed')):
+        with patch('internvl.experiments.artifacts.Path.replace', side_effect=OSError('replace failed')):
             with self.assertRaisesRegex(OSError, 'replace failed'):
                 exp.build_vector_database()
         self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
@@ -305,7 +306,7 @@ class ExperimentTests(unittest.TestCase):
 
 
     def test_successful_processing_still_fails_if_report_write_fails(self):
-        from internvl.experiment import _write_json
+        from internvl.experiments.artifacts import write_json
         for stage in ('build_vector_database', 'evaluate'):
             with self.subTest(stage=stage):
                 exp = self.experiment(name=stage)
@@ -315,9 +316,9 @@ class ExperimentTests(unittest.TestCase):
                 def write(path, value):
                     if isinstance(value, dict):
                         raise OSError('report write failed')
-                    return _write_json(path, value)
+                    return write_json(path, value)
 
-                with patch('internvl.experiment._write_json', side_effect=write):
+                with patch('internvl.experiments.classification.write_json', side_effect=write):
                     with self.assertRaisesRegex(OSError, 'report write failed'):
                         getattr(exp, stage)()
 
@@ -445,7 +446,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual([p.name for p in folder.iterdir()], ['report.json'])
         self.assertEqual(json.loads((folder / 'report.json').read_text()), report)
         self.assertTrue(all('value' not in p for p in report['predictions']))
-        from internvl.retrieval import RetrievalMetrics
+        from internvl.retrieval.metrics import RetrievalMetrics
         self.assertEqual(set(report['metrics']), set(RetrievalMetrics.__annotations__))
         artifact['state'] = 'incomplete'
         (exp.output / 'index.json').write_text(json.dumps(artifact))
@@ -454,7 +455,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_evaluation_depth_counts_and_empty_table_metrics(self):
         import numpy as np
-        from internvl.retrieval import LanceDBIndex
+        from internvl.retrieval.lancedb import LanceDBIndex
         from internvl.schemas import PointRecord
 
         exp = self.experiment()
@@ -516,10 +517,10 @@ class ExperimentTests(unittest.TestCase):
             def __exit__(self, *args): pass
             def describe_class(self, label): return SimpleNamespace(description=label + ' description')
         self.Embedder, self.Describer = Embedder, Describer
-        self.dataset_constructor = self.enterContext(patch('internvl.experiment.load_dataset', return_value=self.dataset))
-        self.embedder_constructor = self.enterContext(patch('internvl.experiment.EmbeddingModel', side_effect=Embedder))
-        self.describer_constructor = self.enterContext(patch('internvl.experiment.DescriberLLM', side_effect=Describer))
-        self.client_constructor = self.enterContext(patch('internvl.retrieval.lancedb.connect', wraps=lancedb.connect))
+        self.dataset_constructor = self.enterContext(patch('internvl.experiments.classification.load_dataset', return_value=self.dataset))
+        self.embedder_constructor = self.enterContext(patch('internvl.experiments.classification.EmbeddingModel', side_effect=Embedder))
+        self.describer_constructor = self.enterContext(patch('internvl.experiments.classification.DescriberLLM', side_effect=Describer))
+        self.client_constructor = self.enterContext(patch('internvl.retrieval.lancedb.lancedb.connect', wraps=lancedb.connect))
 
     def experiment(self, flags=(False, True, False), name='run'):
         cfg = dict(zip(('embed_images','embed_class_labels','embed_descriptions'), flags))
@@ -647,7 +648,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_all_model_dimensions_index_and_evaluate(self):
         import numpy as np
-        from internvl.embeddings import EmbeddingModel
+        from internvl.encoders.sentence_transformers import EmbeddingModel
 
         for model_id, native, truncate_dim in [
             ("openai/clip-vit-base-patch32", 512, None),
@@ -668,7 +669,7 @@ class ExperimentTests(unittest.TestCase):
                         vectors[i, 0 if apple else 1] = 1
                     return vectors[:, :kwargs.get("truncate_dim", native)]
 
-                with patch('internvl.embeddings._load_backend') as loader:
+                with patch('internvl.encoders.sentence_transformers._load_backend') as loader:
                     loader.return_value.encode.side_effect = encode
                     model = EmbeddingModel(model_id, device='cpu', truncate_dim=truncate_dim)
                 self.embedder_constructor.side_effect = None
@@ -851,7 +852,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_query_failure_and_empty_evaluation(self):
         exp = self.experiment(); exp.build_vector_database()
-        with patch('internvl.retrieval.LanceDBIndex.query', side_effect=ConnectionError('offline')):
+        with patch('internvl.retrieval.lancedb.LanceDBIndex.query', side_effect=ConnectionError('offline')):
             with self.assertRaises(ConnectionError): exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
         self.dataset.splits['validation'] = self.dataset.splits['validation'].select([])
@@ -880,7 +881,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_empty_retrieval(self):
         exp = self.experiment(); exp.build_vector_database()
-        with patch('internvl.retrieval.LanceDBIndex.query', return_value=[]):
+        with patch('internvl.retrieval.lancedb.LanceDBIndex.query', return_value=[]):
             report = exp.evaluate()
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 0)
         self.assertTrue(all(p['prediction'] is None for p in report['predictions']))
@@ -934,7 +935,7 @@ if __name__ == '__main__': unittest.main()
 
 
 def test_deep_rankings_do_not_expand_voting_support():
-    from internvl.experiment import _prediction
+    from internvl.experiments.classification import _prediction
     from internvl.schemas import Neighbor
 
     row = dict(fname='x', source_id='x', source_split='val', **{'class': 'A'})

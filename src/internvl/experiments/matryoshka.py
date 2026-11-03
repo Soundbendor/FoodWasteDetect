@@ -12,9 +12,11 @@ import pyarrow as pa
 from lancedb.db import LanceDBConnection
 from lancedb.table import Table
 
-from .experiment import Experiment, _write_json, cached_batches
-from .retrieval import LanceDBIndex
-from .tracking import Tracker
+from ..retrieval.lancedb import LanceDBIndex
+from ..tracking import Tracker
+from .artifacts import write_json
+from .batches import cached_batches
+from .classification import Experiment
 
 DIMENSIONS = (768, 1536, 3072)
 
@@ -110,5 +112,5 @@ def run_sweep(config: dict, evaluate: Callable[[dict], tuple[dict, str]]) -> dic
         ))
     summary = {"results": results}
     output.mkdir(parents=True, exist_ok=True)
-    _write_json(output / "summary.json", summary)
+    write_json(output / "summary.json", summary)
     return summary

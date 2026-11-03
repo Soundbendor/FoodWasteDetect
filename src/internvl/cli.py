@@ -9,8 +9,8 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
-from .experiment import Experiment
-from .matroyshka_sweep import evaluate_cached, run_sweep
+from .experiments.classification import Experiment
+from .experiments.matryoshka import evaluate_cached, run_sweep
 from .tracking import Tracker
 
 

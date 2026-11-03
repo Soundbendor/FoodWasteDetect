@@ -13,7 +13,7 @@ from google.genai import types
 from numpy.typing import NDArray
 from PIL import Image
 
-from .embedder import Embedder, ImageInput
+from .base import Embedder, ImageInput
 
 _Input = TypeVar("_Input")
 _PREFIX = "task: classification | query: "

@@ -36,7 +36,7 @@ dependencies = [
 internvl = "internvl.cli:main"
 
 [tool.setuptools]
-packages = ["internvl", "internvl.scripts"]
+packages = ["internvl", "internvl.scripts", "internvl.encoders", "internvl.retrieval", "internvl.experiments"]
 package-dir = {internvl = "."}
 
 [tool.setuptools.package-data]
@@ -58,7 +58,7 @@ root = [".."]
 python-version = "3.13"
 
 [tool.ty.src]
-include = ["cli.py", "schemas.py", "tracking.py", "embedder.py", "vertex_embeddings.py", "experiment.py", "index_builder.py", "retrieval.py", "image_dataset.py", "matroyshka_sweep.py"]
+include = ["cli.py", "schemas.py", "tracking.py", "encoders/base.py", "encoders/vertex.py", "experiments", "retrieval", "image_dataset.py"]
 
 [dependency-groups]
 dev = [
