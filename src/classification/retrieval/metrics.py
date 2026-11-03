@@ -76,13 +76,16 @@ def metrics(predictions: Sequence[Prediction], classes: Iterable[str]) -> Retrie
         return (ratio(hits[label], predicted[label]), ratio(hits[label], support[label]),
                 ratio(2 * hits[label], predicted[label] + support[label]))
 
+    label_scores = {label: scores(label) for label in labels}
     per_class: dict[str, ClassMetrics] = {}
     for label in classes:
-        precision, recall, f1 = scores(label)
+        precision, recall, f1 = label_scores.get(label, (0.0, 0.0, 0.0))
         per_class[label] = dict(support=support[label], correct=hits[label],
                                 recall=recall if support[label] else None,
                                 precision=precision, f1=f1)
-    macro = [ratio(sum(scores(label)[i] for label in labels), len(labels)) for i in range(3)]
+    precision_macro = ratio(sum(precision for precision, _, _ in label_scores.values()), len(labels))
+    recall_macro = ratio(sum(recall for _, recall, _ in label_scores.values()), len(labels))
+    f1_macro = ratio(sum(f1 for _, _, f1 in label_scores.values()), len(labels))
     with_neighbors = [p["neighbors"] for p in predictions if p["neighbors"]]
 
     def ranking_mean(key: Literal[
@@ -97,7 +100,9 @@ def metrics(predictions: Sequence[Prediction], classes: Iterable[str]) -> Retrie
             sum(p["nearest"] == p["class"] for p in predictions) / evaluated if evaluated else None
         ),
         "per_class": per_class,
-        "precision_macro": macro[0], "recall_macro": macro[1], "f1_macro": macro[2],
+        "precision_macro": precision_macro,
+        "recall_macro": recall_macro,
+        "f1_macro": f1_macro,
         "precision_micro": ratio(correct, sum(predicted.values())),
         "recall_micro": ratio(correct, evaluated),
         "f1_micro": ratio(2 * correct, sum(predicted.values()) + evaluated),
