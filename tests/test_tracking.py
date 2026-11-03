@@ -241,8 +241,8 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
     # Resume reads metadata but never regenerates saved vectors.
     reused = Mock(id="reused", summary={})
     exp.tracker = Tracker(reused)
-    with patch.object(exp, '_save_text_batch', side_effect=AssertionError('encode')), \
-         patch.object(exp, '_save_image_batch', side_effect=AssertionError('encode')):
+    with patch.object(exp.embedder, 'encode_text', side_effect=AssertionError('encode')), \
+         patch.object(exp.embedder, 'encode_images', side_effect=AssertionError('encode')):
         exp.generate_descriptions()
         exp.build_vector_database()
     assert reused.summary == {'reference_source_counts': report['reference_source_counts']}

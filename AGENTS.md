@@ -432,8 +432,9 @@ recording and final-report-only evaluation still apply.
 ### Shared embedding resumption and batch persistence
 
 All backends now use `Experiment(config)`. `VertexExperiment`, `vertex_utils.py`,
-and the Vertex `on_embedding` callbacks are removed. `Experiment` owns selection,
-batching, resumption, and optional cache preparation. `LanceDBIndex` owns every
+and the Vertex `on_embedding` callbacks are removed. `IndexBuilder` owns reference
+selection, batching, resumption, and validation-cache preparation. `Experiment`
+owns summary publication and evaluation. `LanceDBIndex` owns every
 DB operation, including identity scans, ordered vector retrieval, and optimization.
 The CLI validates the shared config before W&B initialization. Backend construction
 remains lazy, with a local import for Vertex. Complete caches need no encoder.
@@ -454,6 +455,8 @@ including duplicate and extra stored rows. A build opens an existing table first
 selects the unbatched training split, validates class coverage and prepares text,
 then removes saved text references and training images before insertion. Training
 caps precede saved-identity exclusion; batching and image decoding follow it.
+New builds validate reference inputs before creating a table or loading an encoder;
+new and resumed builds use separate preparation paths and shared finalization.
 Selection leaves the original splits unchanged. `select_images()` and
 `iter_dataset_batches()` separate selection from batching; `iter_batches()` remains
 available for split-based callers. UUIDs and existing rows are preserved.

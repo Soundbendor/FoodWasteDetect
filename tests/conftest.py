@@ -22,5 +22,6 @@ def progress_bars(monkeypatch):
             return super().update(n)
 
     monkeypatch.setattr("internvl.experiment.tqdm", RecordingBar)
+    monkeypatch.setattr("internvl.index_builder.tqdm", RecordingBar)
     monkeypatch.setattr("internvl.generate_descriptors.tqdm", RecordingBar)
     return bars

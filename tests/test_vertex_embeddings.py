@@ -456,6 +456,27 @@ def resume_config(tmp_path):
     return config
 
 
+def test_index_builder_direct_build_and_complete_resume(transport, resume_config):
+    from internvl.experiment import Experiment
+
+    requests, _, _ = transport(lambda request: response())
+    experiment = Experiment(resume_config)
+    builder = experiment._index_builder()
+    index, counts = builder.build_reference_index()
+    assert counts == {"class_name": 1, "generated_description": 2, "training_image": 13}
+    cache = builder.build_validation_table(resume_config["lancedb"]["validation_table"])
+    assert len(cache.get_record_ids()) == 13
+    before = len(requests)
+    resumed = Experiment(resume_config)
+    resumed_builder = resumed._index_builder()
+    resumed_index, resumed_counts = resumed_builder.build_reference_index()
+    resumed_builder.build_validation_table(resume_config["lancedb"]["validation_table"])
+    assert resumed_index.name == index.name
+    assert resumed_counts == counts
+    assert len(requests) == before
+    assert resumed._embedder is None
+
+
 def test_resume_all_sources_and_complete_validation(transport, resume_config, monkeypatch):
     from internvl.retrieval import LanceDBIndex
     from internvl.schemas import PointRecord

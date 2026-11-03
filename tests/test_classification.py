@@ -212,7 +212,7 @@ class ExperimentTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             exp.run()
         with self.assertRaises(FileNotFoundError):
-            exp._get_text_inputs()
+            exp._index_builder()._get_text_inputs()
         self.describer_constructor.assert_not_called()
         self.embedder_constructor.assert_not_called()
         self.client_constructor.assert_not_called()
@@ -348,6 +348,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_image_insertion_rejects_mismatched_unused_metadata_before_encoding(self):
         exp = self.experiment((True, False, False))
+        builder = exp._index_builder()
         for split in ('train', 'val'):
             for field in ('source_split', 'extra'):
                 with self.subTest(split=split, field=field):
@@ -358,12 +359,14 @@ class ExperimentTests(unittest.TestCase):
                     }
                     batch[field].pop()
                     with patch.object(self.dataset, 'iter_dataset_batches', return_value=iter([batch])), \
-                         patch.object(exp, '_save_image_batch') as save:
+                         patch.object(exp.embedder, 'encode_images') as encode, \
+                         patch.object(LanceDBIndex, 'append') as append:
                         with self.assertRaisesRegex(ValueError, 'metadata column length mismatch'):
-                            exp._insert_image_records(
+                            builder._insert_image_records(
                                 exp._lancedb_adapter(), self.dataset.train_set(), split=split
                             )
-                        save.assert_not_called()
+                        encode.assert_not_called()
+                        append.assert_not_called()
 
     def test_database_failures_and_interrupts_propagate(self):
         for stage, method in [('build_vector_database', 'append'), ('evaluate', 'query')]:
@@ -596,7 +599,9 @@ class ExperimentTests(unittest.TestCase):
         Path(rows[0]['fname']).unlink()
         Path(rows[1]['fname']).write_bytes(b'corrupt')
         Path(rows[4]['fname']).unlink()
-        with patch.object(exp, '_insert_references', wraps=exp._insert_references) as insert:
+        builder = exp._index_builder()
+        with patch.object(exp, '_index_builder', return_value=builder), \
+             patch.object(builder, '_insert_references', wraps=builder._insert_references) as insert:
             artifact = exp.build_vector_database()
         image_dataset = insert.call_args.args[2]
         self.assertEqual(list(image_dataset['source_id']), [rows[2]['source_id']])

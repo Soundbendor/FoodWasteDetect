@@ -1,0 +1,182 @@
+"""Build training and validation embedding LanceDB tables."""
+
+import json
+import logging
+from collections import Counter
+from collections.abc import Callable
+from itertools import batched
+from pathlib import Path
+from typing import Literal
+
+from datasets import Dataset
+from tqdm import tqdm
+
+from .embedder import Embedder
+from .image_dataset import FoodX251ImageDataset
+from .retrieval import LanceDBIndex
+from .schemas import PointRecord
+
+
+class IndexBuilder:
+    def __init__(
+        self,
+        *,
+        get_embedder: Callable[[], Embedder],
+        dataset: FoodX251ImageDataset,
+        uri: str | Path,
+        table: str,
+        config: dict,
+        descriptions_path: Path,
+        classes: list[str],
+        batch_size: int,
+    ) -> None:
+        self._get_embedder = get_embedder
+        self.dataset = dataset
+        self.uri = uri
+        self.table = table
+        self.config = config
+        self.descriptions_path = descriptions_path
+        self.classes = classes
+        self.batch_size = batch_size
+
+    @property
+    def embedder(self) -> Embedder:
+        return self._get_embedder()
+
+    def _get_text_inputs(self) -> list[PointRecord]:
+        """Build text inputs in class order from names and descriptions captions.
+
+        Returns:
+            A list of PointRecords which contain class name and class descriptor captions
+                for each class in the label space.
+        """
+        records = []
+        # Append class labels to text dataset
+        if self.config["embed_class_labels"]:
+            records += [PointRecord(c, "class_name", c, c) for c in self.classes]
+        # Append generated class descriptor captions.
+        if self.config["embed_descriptions"]:
+            path = self.descriptions_path
+            if self.config.get("descriptions_file") is None or not path.exists():
+                raise ValueError("Descriptions file is invalid.")
+            data = json.loads(path.read_text(encoding="utf-8"))["descriptions"]
+            records += [
+                PointRecord(c, "generated_description", f"{c}:{i}", text)
+                for c in self.classes
+                for i, text in enumerate(data[c])
+            ]
+        return records
+
+    def _insert_text_records(
+        self,
+        index: LanceDBIndex,
+        records: list[PointRecord],
+    ) -> Counter[str]:
+        """Embed and save text references, reporting successfully inserted records."""
+        counts: Counter[str] = Counter()
+        with tqdm(
+            total=len(records), desc="Text references", unit="record", mininterval=5
+        ) as progress:
+            for batch in batched(records, self.batch_size, strict=False):
+                vectors = self.embedder.encode_text([record.value for record in batch])
+                index.append(batch, vectors)
+                counts.update(r.source_kind for r in batch)
+                progress.update(len(batch))
+        return counts
+
+    def _insert_image_records(
+        self,
+        index: LanceDBIndex,
+        dataset: Dataset,
+        *,
+        split: Literal["train", "val"],
+    ) -> Counter[str]:
+        """Decode and persist the prepared image dataset in batches."""
+        kind = "training_image" if split == "train" else "validation_image"
+        counts: Counter[str] = Counter()
+        description = "Image references" if split == "train" else "Validation embeddings"
+        with tqdm(desc=description, unit="image", mininterval=5) as progress:
+            for batch in self.dataset.iter_dataset_batches(dataset, self.batch_size):
+                records = [
+                    PointRecord(label, kind, source_id, fname)
+                    for label, source_id, fname in zip(
+                        batch["class"], batch["source_id"], batch["fname"], strict=True
+                    )
+                ]
+                vectors = self.embedder.encode_images(batch["image"])
+                index.append(records, vectors)
+                counts.update(record.source_kind for record in records)
+                progress.update(len(records))
+        return counts
+
+    def _prepare_reference_inputs(self) -> tuple[Dataset | None, list[PointRecord]]:
+        images = None
+        if self.config["embed_images"]:
+            images = self.dataset.select_images(
+                self.dataset.train_set(),
+                n_imgs_per_class=self.config.get("n_imgs_per_class"),
+            )
+            missing = set(self.classes) - set(images["class"])
+            if missing:
+                raise ValueError(f"Missing usable training references for {missing}")
+        return images, self._get_text_inputs()
+
+    def _prepare_new_reference_build(
+        self, index: LanceDBIndex
+    ) -> tuple[Dataset | None, list[PointRecord], Counter[str]]:
+        images, records = self._prepare_reference_inputs()
+        index.create(self.embedder.dimension)
+        return images, records, Counter()
+
+    def _prepare_resumed_reference_build(
+        self, index: LanceDBIndex
+    ) -> tuple[Dataset | None, list[PointRecord], Counter[str]]:
+        logging.info("Loading existing table...")
+        index.open()
+        images, records = self._prepare_reference_inputs()
+        vector_ids = index.get_record_ids()
+        existing_ids = frozenset(vector_ids)
+        # filter existing records from incoming data
+        records = [r for r in records if (r.source_kind, r.source_identity) not in existing_ids]
+        if images is not None:
+            excluded = {identity for kind, identity in existing_ids if kind == "training_image"}
+            images = self.dataset.select_images(images, excluded_source_ids=excluded)
+        return images, records, Counter(kind for kind, _ in vector_ids)
+
+    def build_reference_index(self) -> tuple[LanceDBIndex, Counter[str]]:
+        """Build or resume and optimize the reference table, returning it and its counts."""
+        index = LanceDBIndex(uri=self.uri, table=self.table)
+        if index.exists():
+            images, records, counts = self._prepare_resumed_reference_build(index)
+        else:
+            images, records, counts = self._prepare_new_reference_build(index)
+        counts.update(self._insert_references(index, records, images))
+        if not counts:
+            raise ValueError("No records inserted into LanceDB - check dataset and config.")
+        logging.info("Compressing LanceDB table...")
+        index.optimize()
+        return index, counts
+
+    def _insert_references(
+        self,
+        index: LanceDBIndex,
+        records: list[PointRecord],
+        images: Dataset | None,
+    ) -> Counter[str]:
+        counts = self._insert_text_records(index, records)
+        if images is not None:
+            counts.update(self._insert_image_records(index, images, split="train"))
+        return counts
+
+    def build_validation_table(self, table_name: str) -> LanceDBIndex:
+        cache = LanceDBIndex(uri=self.uri, table=table_name)
+        if cache.exists():
+            cache.open()
+        else:
+            cache.create(self.embedder.dimension)
+        excluded = {
+            identity for kind, identity in cache.get_record_ids() if kind == "validation_image"
+        }
+        images = self.dataset.select_images(self.dataset.test_set(), excluded_source_ids=excluded)
+        self._insert_image_records(cache, images, split="val")
+        return cache
