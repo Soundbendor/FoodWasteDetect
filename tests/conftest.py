@@ -21,7 +21,7 @@ def progress_bars(monkeypatch):
             self.updates.append(n)
             return super().update(n)
 
-    monkeypatch.setattr("classification.experiments.classification.tqdm", RecordingBar)
+    monkeypatch.setattr("classification.experiments.evaluation.tqdm", RecordingBar)
     monkeypatch.setattr("classification.experiments.index_builder.tqdm", RecordingBar)
     monkeypatch.setattr("classification.llm.generate_descriptors.tqdm", RecordingBar)
     return bars

@@ -50,9 +50,9 @@ Use the `build` task for packaging changes; it writes distributions under
 For the older extraction checks, the repository also supports
 `PYTHONPATH=src python -m unittest discover -s tests -v` when the required CPU
 dependencies are installed. Run focused checks appropriate to the change and
-report failures against the unchanged baseline. Existing description/reference
-expectations and removed encoder guards have caused failures; historical passing
-counts are not a claim that today's full suite passes.
+report failures against the unchanged baseline. Historical description/reference
+and removed-guard test failures were reconciled during the November 3 refactor;
+dated passing counts are not a claim that today's full suite passes.
 
 ## Evidence and acceptance
 

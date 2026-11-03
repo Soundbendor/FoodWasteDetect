@@ -834,10 +834,11 @@ def test_cli_selects_class_before_tracking(resume_config, stage, method, model, 
     events = []
     with (
         patch("classification.cli.Experiment") as chosen,
+        patch("classification.cli.validate_config") as validation,
         patch("classification.cli.wandb.init") as init,
         patch("classification.cli.Tracker"),
     ):
-        chosen.validate_config.side_effect = lambda config: events.append("validate")
+        validation.side_effect = lambda config: events.append("validate")
         init.side_effect = lambda **kwargs: events.append("init") or MockContext()
         chosen.side_effect = lambda *args, **kwargs: events.append("construct") or chosen.return_value
         _run_experiment(resume_config, stage)
@@ -877,13 +878,24 @@ def test_run_dispatches_shared_stages():
     assert [entry[0] for entry in calls.mock_calls] == ["describe", "build", "evaluate"]
 
 
-def test_base_import_does_not_load_vertex():
+def test_experiment_import_does_not_construct_backends():
     import subprocess
     import sys
 
     subprocess.run([sys.executable, "-c", """
-import sys
-import classification.experiments.classification
-assert 'classification.vertex_utils' not in sys.modules
-assert 'classification.encoders.vertex' not in sys.modules
+from unittest.mock import patch
+import google.genai
+import lancedb
+import ollama
+import sentence_transformers
+
+with (
+    patch("google.genai.Client") as vertex,
+    patch("lancedb.connect") as storage,
+    patch("ollama.Client") as ollama_client,
+    patch("sentence_transformers.SentenceTransformer") as local,
+):
+    import classification.experiments.classification
+    for constructor in (vertex, storage, ollama_client, local):
+        constructor.assert_not_called()
 """], check=True, timeout=60)

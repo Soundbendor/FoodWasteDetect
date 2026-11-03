@@ -15,8 +15,10 @@ selection and image ownership use [data](data.md); for scoring use
 
 | Module | Responsibility |
 | --- | --- |
-| `classification.py` | `Experiment`: configuration, lazy encoder, stages, predictions, summaries, and reports |
+| `classification.py` | `Experiment`: configuration, lazy encoder, stages, summaries, and report publication |
 | `index_builder.py` | `IndexBuilder`: input selection, reference resumption, encoding batches, and validation-cache preparation |
+| `descriptions.py` | Saved-vocabulary reading and ordered text-reference construction |
+| `evaluation.py` | Batch evaluation, metadata-row conversion, predictions, and completeness checks |
 | `config.py` | Shared `validate_config()` used before CLI tracking and during construction |
 | `batches.py` | `EmbeddingBatch` and ordered cache reads through `cached_batches()` |
 | `artifacts.py` | Shared `write_json()` |
@@ -59,13 +61,12 @@ For vocabulary paths, generation/cache behavior, and server lifecycle, read
 `DescriberLLM` owns the per-class generation loop; the experiment owns saved-file
 handling and the server context.
 
-**Current caveat:** `IndexBuilder._get_text_inputs()` requires an explicit,
-existing `descriptions_file` whenever description references are enabled. It
-rejects a null/omitted setting even if generation wrote the default output file.
-The earlier documented end-to-end fallback is therefore not implemented by the
-current builder. This mismatch is already present in the verification baseline;
-repair requires a separate code change. Use an explicit saved vocabulary for
-indexing and comparisons.
+`Experiment` resolves the vocabulary path once. Both generation and indexing read
+saved vocabularies through `descriptions.load_descriptions()`. Indexing accepts an
+existing explicit or default `output_dir/descriptions.json` file and never starts
+Ollama. A missing explicit file fails without fallback or generation. The
+`descriptions.text_references()` function builds class-name and description
+records from an in-memory mapping, preserving class and sentence order.
 
 ## Reference builds and resumption
 
@@ -137,8 +138,11 @@ match; otherwise `reference_source_counts` is null.
 
 `evaluate()` and `evaluate_from_batches()` share `_execute_evaluation()`. The
 latter accepts ordered supplied metadata/vector batches and lets the sweep reuse
-standard prediction and report logic. Evaluation covers the full labeled
-validation split (`source_split="val"`), with a nonempty split and exactly one
+standard prediction and report logic. `evaluation.evaluate_batches()` consumes
+these batches through a supplied query callable, owns progress and completeness
+checks, and returns predictions. It performs no report writes or tracking.
+`Experiment` assembles metrics and the report, writes it, then publishes it.
+Evaluation covers the full labeled validation split (`source_split="val"`), with a nonempty split and exactly one
 prediction per image required before saving. This is validation accuracy, not
 official test accuracy. Strict metadata/vector pairing is retained.
 
@@ -203,13 +207,15 @@ authorization; routine checks use synthetic CPU tables and mocked tracking.
 
 ## Verification
 
-For orchestration changes, use `tests/test_classification.py` with synthetic
-encoders/images, mocked Ollama, and temporary LanceDB tables. It covers selection,
+For evaluation computation, use `tests/test_evaluation.py` with synthetic batches
+and query callables. For saved-vocabulary/reference construction, use
+`tests/test_descriptions.py`. For orchestration changes, use
+`tests/test_classification.py` with synthetic encoders/images, mocked Ollama, and
+temporary LanceDB tables. It covers selection,
 pairing, partial/complete resumes, cache reuse, failures, and publication ordering.
 For sweep changes use `tests/test_matroyshka_sweep.py`; scoring is covered in
 `tests/test_retrieval.py`, tracking in `tests/test_tracking.py`.
 
 These tests establish neither real-checkpoint behavior nor cloud, GPU, HPC, or
 shared-storage compatibility. Consult the [verification log](../experiments.md)
-for known baseline failures, including description/reference expectations and
-removed encoder guards; distinguish those from new regressions.
+for dated test results and historical baseline failures.

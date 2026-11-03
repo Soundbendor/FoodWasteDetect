@@ -4,7 +4,8 @@ Read [description contracts](../../../docs/classification/data.md#class-descript
 before changing prompts, structured responses, generation, or Ollama lifecycle.
 For download command changes, also read [CLI downloads](../../../docs/classification/cli.md#ollama-downloads).
 
-`generate_descriptors.py` owns model requests and the Ollama process.
+`ollama.py` owns the Ollama client, server process, and downloads.
+`generate_descriptors.py` receives a client and model name for description requests.
 `experiments.classification` owns vocabulary selection and persistence; `cli`
 owns command dispatch. Keep those boundaries when extending generation.
 Import concrete modules directly and keep the package initializer lightweight.

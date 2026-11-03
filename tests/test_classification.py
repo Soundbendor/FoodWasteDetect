@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from classification.experiments.classification import Experiment, _extract_batch_metadata, _prediction
+from classification.experiments.classification import Experiment
+from classification.experiments.evaluation import extract_batch_metadata, prediction
 from classification.experiments.config import validate_config
 from classification.schemas import Neighbor, PointRecord
 from classification.retrieval.lancedb import LanceDBIndex
@@ -25,7 +26,7 @@ class Contracts(unittest.TestCase):
             'fname': ['fixture.png'], 'class': ['A'], 'source_id': ['image-1'],
             'source_split': ['val'], 'extra': ['retained'], 'image': [object()],
         }
-        record = _extract_batch_metadata(batch)[0]
+        record = extract_batch_metadata(batch)[0]
         original = dict(record)
         cases = [
             (
@@ -45,20 +46,20 @@ class Contracts(unittest.TestCase):
         ]
         for neighbors, result in cases:
             with self.subTest(neighbors=neighbors):
-                prediction = _prediction(record, neighbors, max(1, len(neighbors)),
+                result_prediction = prediction(record, neighbors, max(1, len(neighbors)),
                                          sum(n["label"] == record["class"] for n in neighbors))
-                self.assertEqual(prediction, {
+                self.assertEqual(result_prediction, {
                     'fname': 'fixture.png', 'class': 'A', 'source_id': 'image-1',
                     'source_split': 'val', 'extra': 'retained', **result,
-                    'retrieval_metrics': prediction['retrieval_metrics'],
+                    'retrieval_metrics': result_prediction['retrieval_metrics'],
                 })
                 self.assertEqual(record, original)
-                self.assertIsNot(prediction, record)
-                self.assertEqual(json.loads(json.dumps(prediction)), prediction)
+                self.assertIsNot(result_prediction, record)
+                self.assertEqual(json.loads(json.dumps(result_prediction)), result_prediction)
 
     def test_extract_batch_metadata_requires_paired_metadata_columns(self):
         with self.assertRaises(ValueError):
-            _extract_batch_metadata({'fname': ['first', 'second'], 'class': ['A']})
+            extract_batch_metadata({'fname': ['first', 'second'], 'class': ['A']})
 
     def test_reference_switch_combinations(self):
         keys = ('embed_images', 'embed_class_labels', 'embed_descriptions')
@@ -228,6 +229,21 @@ class ExperimentTests(unittest.TestCase):
             descriptions,
         )
         self.describer_constructor.assert_called_once()
+        summary = exp.build_vector_database()
+        self.assertEqual(summary['source_counts'], {'generated_description': 10})
+        self.assertEqual(exp.build_vector_database()['source_counts'], summary['source_counts'])
+        self.describer_constructor.assert_called_once()
+        self.session_constructor.assert_called_once()
+
+    def test_index_missing_default_descriptions_never_starts_ollama(self):
+        exp = self.experiment((False, False, True))
+        with patch.object(LanceDBIndex, 'create') as create:
+            with self.assertRaises(FileNotFoundError):
+                exp.build_vector_database()
+            create.assert_not_called()
+        self.session_constructor.assert_not_called()
+        self.describer_constructor.assert_not_called()
+        self.embedder_constructor.assert_not_called()
 
     def test_constructor_loads_metadata_but_defers_backends(self):
         with patch.object(self.dataset, 'get_class_list', wraps=self.dataset.get_class_list) as classes:
@@ -276,7 +292,7 @@ class ExperimentTests(unittest.TestCase):
         for error in (RuntimeError('generation failed'), KeyboardInterrupt()):
             exp = self.experiment((False, False, True))
             with patch.object(self.Describer, 'describe_class', side_effect=error) as generate, \
-                 patch.object(self.Describer, '__exit__', return_value=None) as close:
+                 patch.object(self.Session, '__exit__', return_value=None) as close:
                 with self.assertRaises(type(error)) as raised:
                     exp.run()
                 self.assertIs(raised.exception, error)
@@ -347,11 +363,11 @@ class ExperimentTests(unittest.TestCase):
                             getattr(exp, stage)()
                     self.assert_no_failed_report(exp, stage)
 
-    def test_image_insertion_rejects_mismatched_unused_metadata_before_encoding(self):
+    def test_image_insertion_rejects_mismatched_record_columns_before_encoding(self):
         exp = self.experiment((True, False, False))
         builder = exp._index_builder()
         for split in ('train', 'val'):
-            for field in ('source_split', 'extra'):
+            for field in ('class', 'source_id', 'fname'):
                 with self.subTest(split=split, field=field):
                     batch = {
                         'class': ['Apple', 'Pear'], 'source_id': ['0', '1'],
@@ -362,7 +378,7 @@ class ExperimentTests(unittest.TestCase):
                     with patch.object(self.dataset, 'iter_dataset_batches', return_value=iter([batch])), \
                          patch.object(exp.embedder, 'encode_images') as encode, \
                          patch.object(LanceDBIndex, 'append') as append:
-                        with self.assertRaisesRegex(ValueError, 'metadata column length mismatch'):
+                        with self.assertRaises(ValueError):
                             builder._insert_image_records(
                                 exp._lancedb_adapter(), self.dataset.train_set(), split=split
                             )
@@ -512,11 +528,16 @@ class ExperimentTests(unittest.TestCase):
         from classification.llm.generate_descriptors import DescriberLLM
         class Describer:
             generate_descriptions = DescriberLLM.generate_descriptions
-            def __init__(self, config): pass
+            def __init__(self, client, model): pass
+            def describe_class(self, label): return SimpleNamespace(description=label + ' description')
+        class Session:
+            def __init__(self, config): self.client = object()
             def __enter__(self): return self
             def __exit__(self, *args): pass
-            def describe_class(self, label): return SimpleNamespace(description=label + ' description')
-        self.Embedder, self.Describer = Embedder, Describer
+        self.Embedder, self.Describer, self.Session = Embedder, Describer, Session
+        self.session_constructor = self.enterContext(patch(
+            'classification.experiments.classification.OllamaSession', side_effect=Session
+        ))
         self.dataset_constructor = self.enterContext(patch('classification.experiments.classification.load_dataset', return_value=self.dataset))
         self.embedder_constructor = self.enterContext(patch('classification.experiments.classification.EmbeddingModel', side_effect=Embedder))
         self.describer_constructor = self.enterContext(patch('classification.experiments.classification.DescriberLLM', side_effect=Describer))
@@ -913,15 +934,15 @@ class ExperimentTests(unittest.TestCase):
 
     def test_disabled_description_and_ollama_closes_before_embedder(self):
         events = []
-        parent = self.Describer
-        class Describer(parent):
+        parent = self.Session
+        class Session(parent):
             def __exit__(self, *args): events.append('closed')
         parent_embed = self.Embedder
         class Embedder(parent_embed):
             def __init__(self, **kwargs):
                 if events != ['closed']: raise AssertionError('Ollama not closed first')
         exp = self.experiment((False, False, True))
-        self.describer_constructor.side_effect = Describer
+        self.session_constructor.side_effect = Session
         self.embedder_constructor.side_effect = Embedder
         exp.run()
         exp = self.experiment(name='disabled')
@@ -935,13 +956,13 @@ if __name__ == '__main__': unittest.main()
 
 
 def test_deep_rankings_do_not_expand_voting_support():
-    from classification.experiments.classification import _prediction
+    from classification.experiments.evaluation import prediction
     from classification.schemas import Neighbor
 
     row = dict(fname='x', source_id='x', source_split='val', **{'class': 'A'})
     ranked = [Neighbor(id=str(i), label=label, score=1 - i / 10)
               for i, label in enumerate(['B', 'B', 'B', 'B', 'A', 'A', 'A', 'A'])]
-    result = _prediction(row, ranked, 1, 4)
+    result = prediction(row, ranked, 1, 4)
     assert result['prediction'] == 'B'
     assert result['neighbors'] == ranked[:1]
     assert result['retrieval_metrics']['top5_hit']

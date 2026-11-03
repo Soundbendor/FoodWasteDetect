@@ -11,7 +11,8 @@ persistence is specified in [experiments](experiments.md), and vector storage in
 annotation files through pandas, independently of `data_wrappers.foodx251`.
 `FoodX251ImageDataset` exposes a typed Hugging Face `DatasetDict`: `train` holds
 training references and `validation` holds labeled validation images.
-`train_set()` returns the former; the legacy-named `test_set()` returns the latter.
+`train_set()` returns the former; `validation_set()` returns the latter.
+The legacy `test_set()` delegates to `validation_set()` for compatibility.
 `test_path` and `val_path` both point at validation images. Official test files are
 not read, and resulting accuracy is validation accuracy.
 
@@ -68,15 +69,16 @@ at evaluation.
 `embed_descriptions` returns without opening Ollama. A non-null `descriptions_file`
 selects a read-only JSON file resolved from the working directory with `~`
 expansion, independently of `output_dir`; a missing file fails without generation.
-Omitted/null selects `output_dir/descriptions.json` for generation or reuse by the
-description stage. The JSON has a `descriptions` mapping from labels to lists of
-sentences. The default classification YAML shares the existing vocabulary under
-`assets/classification/descriptions_v1/`. Read the [current indexing
-limitation](experiments.md#description-inputs) before using a generated vocabulary
-in `index` or `run`.
+Omitted/null selects `output_dir/descriptions.json` for generation or reuse.
+Indexing reads the same resolved path through `experiments.descriptions.load_descriptions`;
+it never generates missing descriptions. The JSON has a `descriptions` mapping
+from labels to lists of sentences. The default classification YAML shares the existing vocabulary under
+`assets/classification/descriptions_v1/`. Generation followed by indexing can use
+the default vocabulary path without an explicit `descriptions_file`.
 
 [`generate_descriptors.py`](../../src/classification/llm/generate_descriptors.py) owns the
-prompt and service process. `DescriberLLM.generate_descriptions(classes, count)`
+prompt and model requests. `DescriberLLM(client, model)` receives its client and
+model explicitly. `DescriberLLM.generate_descriptions(classes, count)`
 loops through classes and requests; `describe_class(label)` uses the shared visual
 prompt. Pydantic validates the `FoodDescriptor` response, the requested class label
 replaces the model's returned label, and asterisks are stripped from the sentence.
@@ -84,9 +86,12 @@ Empty or whitespace-only descriptions fail the stage. Errors and interrupts
 propagate without retries or partial description files. Progress semantics are in
 [tracking](tracking.md).
 
-The constructor requires `llm`, `binary_path`, `host`, `startup_timeout`, and
-`request_timeout` from the `ollama` section, with no environment fallback for those
-settings. Timeouts must be positive. Startup validates an executable before probing:
+`llm/ollama.py` owns the `OllamaSession` context manager, which requires
+`binary_path`, `host`, `startup_timeout`, and `request_timeout` from the `ollama`
+section, with no environment fallback for those settings. Description generation
+also requires `ollama.llm`, read before entering the session; downloading uses the
+explicit requested model name. Timeouts must be positive. Startup validates an
+executable before probing:
 bare names resolve through PATH; explicit paths expand `~` and resolve from the
 working directory. Installation or OS launch errors provide Ollama setup guidance;
 there is no automatic installation.

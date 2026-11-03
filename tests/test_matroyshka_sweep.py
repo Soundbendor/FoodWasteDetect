@@ -48,7 +48,7 @@ def sources(tmp_path, monkeypatch):
     )
     dataset = Mock()
     dataset.get_class_list.return_value = ['A', 'B']
-    dataset.test_set.return_value = [0, 1]
+    dataset.validation_set.return_value = [0, 1]
 
     def batches(split, batch_size, *, decode):
         assert (split, batch_size, decode) == ('val', 1, False)

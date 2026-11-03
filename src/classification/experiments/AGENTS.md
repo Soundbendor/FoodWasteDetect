@@ -1,8 +1,9 @@
 # Experiment orchestration
 
 This package runs the whole-image classification baseline. `Experiment` owns
-stage orchestration, evaluation, and publication; `IndexBuilder` owns reference
-selection and encoding batches. Ordinary database operations use `retrieval`;
+stage orchestration and report publication; `evaluation.py` owns batch prediction,
+progress, and completeness checks. `IndexBuilder` owns reference selection and
+encoding batches. Ordinary database operations use `retrieval`;
 `matryoshka.py` directly reads and creates the sweep's derived tables.
 
 | Task | Read before changing |
@@ -15,5 +16,6 @@ selection and encoding batches. Ordinary database operations use `retrieval`;
 | Progress bars or W&B publication | [Tracking](../../../docs/classification/tracking.md) |
 
 `config.py`, `artifacts.py`, and `batches.py` are the shared validation, JSON, and
-ordered metadata/vector helpers. Import concrete modules directly. Keep CLI
+ordered metadata/vector helpers. `descriptions.py` reads saved vocabularies and
+constructs ordered text references. Import concrete modules directly. Keep CLI
 parsing in `classification.cli`; package initializers remain free of backend imports.

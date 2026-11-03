@@ -44,19 +44,21 @@ rewritten. Reports, W&B config, and the configuration artifact retain this effec
 dictionary. Overrides do not automatically choose isolated artifact names or
 manage services.
 
-Shared experiment validation runs before W&B initialization. It is distinct from
-backend validation, which can fail later when the lazy encoder loads. Parsing and
-shared-validation errors create no run; constructor or stage errors occur within
-the native W&B context. See [tracking](tracking.md) for lifecycle ownership.
+The CLI calls `experiments.config.validate_config` before W&B initialization. This
+is distinct from backend validation, which can fail later when the lazy encoder
+loads. Parsing and shared-validation errors create no run; constructor or stage
+errors occur within the native W&B context. See [tracking](tracking.md) for
+lifecycle ownership.
 
 ## Ollama downloads
 
 `classification download_model MODEL_NAME` reads `cfg/experiment_config_internvl.yml`
 relative to the working directory; it has no config flag or experiment overrides.
-The wrapper passes its `ollama` section into `DescriberLLM`, opens the owned server
-context, and streams the requested model pull. It leaves `ollama.llm` and the YAML
-unchanged and creates no W&B run. Server ownership, executable validation, and
-cleanup are specified in [descriptions](data.md#class-descriptions-and-ollama).
+The wrapper passes its `ollama` section into `OllamaSession`, opens the owned server
+context, and streams the requested model pull. Downloads require the connection and
+process settings; the explicit model name makes `ollama.llm` unnecessary. The YAML
+stays unchanged and no W&B run is created. Server ownership, executable validation,
+and cleanup are specified in [descriptions](data.md#class-descriptions-and-ollama).
 
 ## Verification
 

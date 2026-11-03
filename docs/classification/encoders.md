@@ -18,8 +18,9 @@ nonzero vector of the selected dimension per input. Empty calls return shape
 stay open. Errors propagate; callers receive no partial result matrix.
 
 `Experiment.embedder` constructs its backend on first use and reuses it. The
-`google/ge-v2` alias selects `VertexEmbeddingModel` through a local import; other
-supported IDs select `EmbeddingModel`. Local models ignore `embedding.vertex`.
+`google/ge-v2` alias selects `VertexEmbeddingModel`; other supported IDs select
+`EmbeddingModel`. Backend modules are imported normally, while construction stays
+behind explicit calls. Local models ignore `embedding.vertex`.
 Complete caches can avoid backend construction entirely. Batch persistence and
 restart behavior are defined in [reference resumption](experiments.md#reference-builds-and-resumption)
 and [validation caching](experiments.md#validation-caching).
@@ -75,6 +76,10 @@ every modality and reference source. The library performs truncation; output
 validation, empty matrices, and the database schema use the selected dimension.
 Any valid dimension is accepted for all five models; quality must be measured.
 
+Output validation rejects rows whose components are all zero after float32
+conversion. It checks components directly so tiny finite nonzero vectors are not
+rejected because a float32 norm underflows. It does not rescale the vectors.
+
 For example, Jina v4 at 1024 dimensions uses
 `--set embedding.model_id=jinaai/jina-embeddings-v4 --set embedding.truncate_dim=1024`.
 Custom YAML must declare `embedding.truncate_dim` before a strict CLI override can
@@ -97,7 +102,6 @@ solve groups. Exact family pins and installed dependencies belong to
 classification YAML selects Jina CLIP v2, so choose its environment explicitly.
 
 Dependency-family and Jina v4 hardware guards are absent from the current loader.
-Their tests still expect removed helpers; restoring them is separate work.
 Environment and hardware selection remain manual. Target native BF16 hardware for
 v4 and A100/H100-class hardware for Qwen. Qwen has no hardware guard, precision
 adaptation, or batch-size fallback. Keep the modern dependency stack unchanged

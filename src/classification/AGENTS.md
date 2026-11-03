@@ -44,5 +44,6 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 the encoder loads on first use; `IndexBuilder` prepares and persists references or
 validation caches; `LanceDBIndex` performs ordinary storage operations. The cached
 dimension sweep accesses derived tables directly in `experiments.matryoshka`.
-Evaluation writes a complete local report before `Tracker` publishes it. Direct
+`experiments.evaluation` computes predictions from supplied batches; `Experiment`
+writes a complete local report before `Tracker` publishes it. Direct
 `Experiment(config)` calls have no W&B run unless a tracker is supplied.

@@ -1,6 +1,5 @@
 """Build training and validation embedding LanceDB tables."""
 
-import json
 import logging
 from collections import Counter
 from collections.abc import Callable
@@ -15,6 +14,7 @@ from ..encoders.base import Embedder
 from ..image_dataset import FoodX251ImageDataset
 from ..retrieval.lancedb import LanceDBIndex
 from ..schemas import PointRecord
+from .descriptions import load_descriptions, text_references
 
 
 class IndexBuilder:
@@ -44,28 +44,16 @@ class IndexBuilder:
         return self._get_embedder()
 
     def _get_text_inputs(self) -> list[PointRecord]:
-        """Build text inputs in class order from names and descriptions captions.
-
-        Returns:
-            A list of PointRecords which contain class name and class descriptor captions
-                for each class in the label space.
-        """
-        records = []
-        # Append class labels to text dataset
-        if self.config["embed_class_labels"]:
-            records += [PointRecord(c, "class_name", c, c) for c in self.classes]
-        # Append generated class descriptor captions.
-        if self.config["embed_descriptions"]:
-            path = self.descriptions_path
-            if self.config.get("descriptions_file") is None or not path.exists():
-                raise ValueError("Descriptions file is invalid.")
-            data = json.loads(path.read_text(encoding="utf-8"))["descriptions"]
-            records += [
-                PointRecord(c, "generated_description", f"{c}:{i}", text)
-                for c in self.classes
-                for i, text in enumerate(data[c])
-            ]
-        return records
+        """Read enabled descriptions and construct text references without generation."""
+        descriptions = (
+            load_descriptions(self.descriptions_path)
+            if self.config["embed_descriptions"] else None
+        )
+        return text_references(
+            self.classes,
+            include_class_labels=self.config["embed_class_labels"],
+            descriptions=descriptions,
+        )
 
     def _insert_text_records(
         self,
@@ -177,6 +165,6 @@ class IndexBuilder:
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"
         }
-        images = self.dataset.select_images(self.dataset.test_set(), excluded_source_ids=excluded)
+        images = self.dataset.select_images(self.dataset.validation_set(), excluded_source_ids=excluded)
         self._insert_image_records(cache, images, split="val")
         return cache

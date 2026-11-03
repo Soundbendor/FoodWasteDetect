@@ -5,56 +5,25 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
-
-from tqdm import tqdm
 
 from ..encoders.base import Embedder
 from ..encoders.sentence_transformers import EmbeddingModel
+from ..encoders.vertex import VertexEmbeddingModel
 from ..image_dataset import load_dataset
 from ..llm.generate_descriptors import DescriberLLM
+from ..llm.ollama import OllamaSession
 from ..retrieval.lancedb import LanceDBIndex
-from ..retrieval.metrics import metrics, ranking_metrics
-from ..retrieval.voting import classify
-from ..schemas import ImageMetadata, Neighbor, Prediction
+from ..retrieval.metrics import metrics
 from ..tracking import Tracker
 from .artifacts import write_json
 from .batches import EmbeddingBatch, cached_batches
 from .config import validate_config
+from .descriptions import load_descriptions
+from .evaluation import evaluate_batches
 from .index_builder import IndexBuilder
-
-
-def _extract_batch_metadata(batch: dict[str, list]) -> list[ImageMetadata]:
-    """Convert metadata columns into ordered report rows, omitting images."""
-    metadata = batch.copy()
-    metadata.pop("image", None)
-    return [
-        cast(ImageMetadata, dict(zip(metadata, values, strict=True)))
-        for values in zip(*metadata.values(), strict=True)
-    ]
-
-
-def _prediction(
-    record: ImageMetadata,
-    ranked: Sequence[Neighbor],
-    k: int,
-    relevant_count: int,
-) -> Prediction:
-    """Combine image metadata, the vote result, and retrieved neighbors."""
-    neighbors = ranked[:k]
-    label, fraction = classify(neighbors)
-    return {
-        # append image metadata into the result.
-        **record,
-        "prediction": label,
-        "vote_fraction": fraction,
-        "nearest": neighbors[0]["label"] if neighbors else None,
-        "neighbors": list(neighbors),
-        "retrieval_metrics": ranking_metrics(ranked, record["class"], k, relevant_count),
-    }
 
 
 class Experiment:
@@ -73,7 +42,7 @@ class Experiment:
     def __init__(self, config: dict, *, tracker: Tracker | None = None):
         self.tracker = tracker
         # Load dataset metadata and settings
-        self.config = self.validate_config(config)
+        self.config = validate_config(config)
         self.output = Path(config["output_dir"]).expanduser().resolve()
         descriptions_file = config.get("descriptions_file")
         self.descriptions_path = (
@@ -97,8 +66,6 @@ class Experiment:
     def _create_embedder(self) -> Embedder:
         options = self.config["embedding"]
         if options.get("model_id") == "google/ge-v2":
-            from ..encoders.vertex import VertexEmbeddingModel
-
             return VertexEmbeddingModel(
                 truncate_dim=options.get("truncate_dim"),
                 **options.get("vertex", {}),
@@ -136,9 +103,11 @@ class Experiment:
         path = self.descriptions_path
         if self.config.get("descriptions_file") is not None or path.exists():
             logging.info(f"Loading existing descriptions at {path}")
-            return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
+            return load_descriptions(path)
         self.output.mkdir(parents=True, exist_ok=True)
-        with DescriberLLM(self.config["ollama"]) as llm:
+        model = self.config["ollama"]["llm"]
+        with OllamaSession(self.config["ollama"]) as session:
+            llm = DescriberLLM(session.client, model)
             descriptions = llm.generate_descriptions(
                 self.classes,
                 self.config["description_count"],
@@ -149,9 +118,13 @@ class Experiment:
     def _index_builder(self) -> IndexBuilder:
         options = self.config["lancedb"]
         return IndexBuilder(
-            get_embedder=lambda: self.embedder, dataset=self.dataset,
-            uri=options["uri"], table=options["table"], config=self.config,
-            descriptions_path=self.descriptions_path, classes=self.classes,
+            get_embedder=lambda: self.embedder,
+            dataset=self.dataset,
+            uri=options["uri"],
+            table=options["table"],
+            config=self.config,
+            descriptions_path=self.descriptions_path,
+            classes=self.classes,
             batch_size=self.batch_size,
         )
 
@@ -223,25 +196,13 @@ class Experiment:
         artifact: dict,
         batches: Iterable[EmbeddingBatch],
     ) -> dict:
-        k = self.config["k"]
-        if type(k) is not int or k <= 0:
-            raise ValueError("k must be a positive integer")
-        counts = index.class_counts()
-        total = len(self.dataset.test_set())
-        predictions: list[Prediction] = []
-        with tqdm(total=total, desc="Evaluation", unit="image", mininterval=5) as progress:
-            for batch, vectors in batches:
-                rows = _extract_batch_metadata(batch)
-                for record, vector in zip(rows, vectors, strict=True):
-                    relevant_count = counts[record["class"]]
-                    ranked = index.query(vector, max(k, 5, relevant_count))
-                    predictions.append(_prediction(record, ranked, k, relevant_count))
-                progress.update(len(rows))
-        selected = len(self.dataset.test_set())
-        if not selected:
-            raise ValueError("No evaluation images; accuracy is undefined")
-        if selected != len(predictions):
-            raise ValueError("Incomplete evaluation: validation and prediction counts differ")
+        predictions = evaluate_batches(
+            batches,
+            query=index.query,
+            class_counts=index.class_counts(),
+            k=self.config["k"],
+            expected_count=len(self.dataset.validation_set()),
+        )
         report = dict(
             config=self.config,
             table=index.name,

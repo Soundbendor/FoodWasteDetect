@@ -13,10 +13,51 @@ The retired workflow is documented in [text history](history/internvl-text.md);
 legacy image findings live in the [CLIP review](clip/review.md).
 
 For the latest recorded package baseline, start with
-[subpackage refactor verification](#internvl-subpackage-refactor-verification-2026-11-02).
+[classification responsibility refactor](#classification-responsibility-refactor-2026-11-03).
 For hardware acceptance, read the [V100 procedure](#v100-kernel-check) together
 with the current encoder's hardware constraints. Procedures here retain the root
 guide's explicit authorization requirements.
+
+## Classification responsibility refactor (2026-11-03)
+
+The refactor separates owned Ollama sessions from description requests, shares
+saved-vocabulary loading and text-reference construction, and extracts batch
+evaluation from report publication. Indexing now accepts generated descriptions
+at the default output path. Internal callers use `validation_set()` while the
+legacy `test_set()` alias remains. Local encoders detect all-zero rows directly,
+preserving tiny finite vectors that could underflow a float32 norm.
+
+Pixi recreated the `default` and `jina-cpu` environments from the committed
+lockfile after detecting relocated environments. The old environments were
+preserved as `.before-refactor` backups. No manifest or lockfile changes were
+needed. Checks used:
+
+```sh
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default test -q
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default lint
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default typecheck
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default classification --help
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e jina-cpu test --no-cov -q tests/test_embeddings.py tests/test_refactor_contracts.py tests/test_embedder.py
+```
+
+The default suite passed 367 tests and 349 subtests, with two explicit skips and
+96% package coverage. Focused Jina CPU checks passed 63 tests and 137 subtests,
+with two dependency-family skips. Both runs reported the existing Sentence
+Transformers `Normalize` import deprecation warning. Ruff, scoped ty, CLI help,
+and whitespace checks passed.
+
+Test expectations were reconciled with current contracts: loader tests no longer
+patch retired guard helpers; three obsolete dependency/hardware-rejection tests
+were removed; insertion tests validate the three stored record columns; and the
+import test checks absent backend construction rather than forbidding dependency
+imports. New tests cover injected evaluation, description files and identities,
+generation followed by indexing/resume, validation aliases, and tiny/zero vectors.
+
+Both the earlier snapshot and refactored suite stalled inside LanceDB connection
+initialization in the sandbox. The full passing run used approved execution
+outside that sandbox, retaining the Pixi task's CPU/offline settings. All model
+loading and cloud transports remained mocked; no real Ollama service, model
+download, GPU, or cloud evaluation was run.
 
 ## Verification boundaries
 

@@ -144,8 +144,7 @@ class EmbeddingModel(Embedder):
             or not np.isfinite(values).all()
         ):
             raise ValueError("Invalid embedding shape or nonfinite values")
-        norms = np.linalg.norm(values, axis=1, keepdims=True)
-        if (norms == 0).any():
+        if not np.any(values != 0, axis=1).all():
             raise ValueError("Model returned zero-length embeddings.")
         return values
 

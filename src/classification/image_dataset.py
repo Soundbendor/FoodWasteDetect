@@ -85,9 +85,13 @@ class FoodX251ImageDataset:
     def train_set(self) -> Dataset:
         return self.splits["train"]
 
-    def test_set(self) -> Dataset:
+    def validation_set(self) -> Dataset:
         """Return the official labeled validation split used for evaluation."""
         return self.splits["validation"]
+
+    def test_set(self) -> Dataset:
+        """Compatibility alias for the labeled validation split."""
+        return self.validation_set()
 
     @staticmethod
     def select_images(

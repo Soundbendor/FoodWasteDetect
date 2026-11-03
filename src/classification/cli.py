@@ -10,6 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
 from .experiments.classification import Experiment
+from .experiments.config import validate_config
 from .experiments.matryoshka import evaluate_cached, run_sweep
 from .tracking import Tracker
 
@@ -17,12 +18,12 @@ from .tracking import Tracker
 def download_model(model_name: str) -> None:
     import yaml
 
-    from .llm.generate_descriptors import DescriberLLM
+    from .llm.ollama import OllamaSession
 
     with open("cfg/experiment_config_internvl.yml", encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)
-    with DescriberLLM(cfg["ollama"]) as llm:
-        llm.download_model(model_name)
+    with OllamaSession(cfg["ollama"]) as session:
+        session.download_model(model_name)
 
 
 def _override_assignment(value: str) -> str:
@@ -85,7 +86,7 @@ def _run_experiment(config: dict[str, Any], stage: str) -> None:
     if stage == "matroyshka-sweep":
         run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
         return
-    Experiment.validate_config(config)
+    validate_config(config)
 
     def execute(effective: dict, tracker: Tracker) -> Any:
         experiment = Experiment(effective, tracker=tracker)

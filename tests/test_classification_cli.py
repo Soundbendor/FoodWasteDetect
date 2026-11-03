@@ -21,7 +21,7 @@ from classification.cli import main
 class CommandTests(unittest.TestCase):
     def setUp(self):
         # Dispatch-only tests use minimal settings; tracking/validation have dedicated tests.
-        self.enterContext(patch("classification.cli.Experiment.validate_config"))
+        self.enterContext(patch("classification.cli.validate_config"))
         self.enterContext(patch("classification.cli.wandb.init"))
         self.enterContext(patch("classification.cli.Tracker"))
 
@@ -58,7 +58,7 @@ class CommandTests(unittest.TestCase):
                     patch("builtins.open", mock_open()) as opened,
                     patch(loader) as load,
                     patch("classification.cli.Experiment") as experiment,
-                    patch("classification.llm.generate_descriptors.DescriberLLM") as descriptors,
+                    patch("classification.llm.ollama.OllamaSession") as descriptors,
                     self.assertRaises(type(failure)) as error,
                 ):
                     if source == "open":
@@ -92,7 +92,7 @@ class CommandTests(unittest.TestCase):
 
     def test_download_reads_working_directory_config_and_exact_model(self):
         backend = SimpleNamespace()
-        backend.DescriberLLM = MagicMock()
+        backend.OllamaSession = MagicMock()
         yaml = SimpleNamespace()
         cfg = {"ollama": {"llm": "configured:tag", "host": "synthetic"}}
 
@@ -113,7 +113,7 @@ class CommandTests(unittest.TestCase):
                 with patch.dict(
                     sys.modules,
                     {
-                        "classification.llm.generate_descriptors": backend,
+                        "classification.llm.ollama": backend,
                         "yaml": yaml,
                         "util": None,
                     },
@@ -122,10 +122,10 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(previous)
             self.assertEqual(path.read_text(), content)
-        backend.DescriberLLM.assert_called_once_with(
+        backend.OllamaSession.assert_called_once_with(
             {"llm": "configured:tag", "host": "synthetic"}
         )
-        context = backend.DescriberLLM.return_value
+        context = backend.OllamaSession.return_value
         context.__enter__.return_value.download_model.assert_called_once_with(
             "requested:exact-tag"
         )
@@ -135,8 +135,8 @@ class CommandTests(unittest.TestCase):
         for failure in (RuntimeError("pull failed"), KeyboardInterrupt()):
             with self.subTest(failure=type(failure).__name__):
                 backend = SimpleNamespace()
-                backend.DescriberLLM = MagicMock()
-                context = backend.DescriberLLM.return_value
+                backend.OllamaSession = MagicMock()
+                context = backend.OllamaSession.return_value
                 context.__enter__.return_value.download_model.side_effect = failure
                 yaml = SimpleNamespace()
                 yaml.safe_load = Mock(return_value={"ollama": {"llm": "fake"}})
@@ -144,7 +144,7 @@ class CommandTests(unittest.TestCase):
                     patch.dict(
                         sys.modules,
                         {
-                            "classification.llm.generate_descriptors": backend,
+                            "classification.llm.ollama": backend,
                             "yaml": yaml,
                         },
                     ),
@@ -268,7 +268,7 @@ class CommandTests(unittest.TestCase):
 
 class ConfigOverrideTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch("classification.cli.Experiment.validate_config"))
+        self.enterContext(patch("classification.cli.validate_config"))
         self.enterContext(patch("classification.cli.wandb.init"))
         self.enterContext(patch("classification.cli.Tracker"))
         directory = self.enterContext(tempfile.TemporaryDirectory())
