@@ -130,9 +130,7 @@ class EmbeddingModel(Embedder):
         self.dimension = native_dimension if truncate_dim is None else truncate_dim
         self.model = _load_backend(model_id, device)
 
-    def _encode(
-        self, inputs: list[Any], **options: Any
-    ) -> NDArray[np.float32]:
+    def _encode(self, inputs: list[Any], **options: Any) -> NDArray[np.float32]:
         """Delegate batching and NumPy conversion to the library."""
         if not inputs:
             return np.empty((0, self.dimension), dtype=np.float32)
@@ -148,10 +146,7 @@ class EmbeddingModel(Embedder):
             **options,
         )
         values = np.asarray(values, dtype=np.float32)
-        if (
-            values.shape != (len(inputs), self.dimension)
-            or not np.isfinite(values).all()
-        ):
+        if values.shape != (len(inputs), self.dimension) or not np.isfinite(values).all():
             raise ValueError("Invalid embedding shape or nonfinite values")
         if not np.any(values != 0, axis=1).all():
             raise ValueError("Model returned zero-length embeddings.")

@@ -56,7 +56,10 @@ class DescriberLLM:
         """
         descriptions = {}
         with tqdm(
-            total=len(classes) * count, desc="Descriptions", unit="description", mininterval=5,
+            total=len(classes) * count,
+            desc="Descriptions",
+            unit="description",
+            mininterval=5,
         ) as progress:
             for label in classes:
                 descriptions[label] = []

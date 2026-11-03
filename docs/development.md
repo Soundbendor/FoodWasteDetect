@@ -34,6 +34,7 @@ Run from the repository root in an already prepared CPU environment:
 
 ```sh
 pixi run --manifest-path src/classification/pyproject.toml --as-is -e default lint
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default format-check
 pixi run --manifest-path src/classification/pyproject.toml --as-is -e default typecheck
 pixi run --manifest-path src/classification/pyproject.toml --as-is -e default test
 pixi run --manifest-path src/classification/pyproject.toml --as-is -e default classification --help

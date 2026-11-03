@@ -56,5 +56,3 @@ def validate_config(config: dict) -> dict:
         if not isinstance(name, str) or not name.strip() or name == config["lancedb"]["table"]:
             raise ValueError("validation_table must be nonempty and distinct from reference table")
     return config
-
-

@@ -21,7 +21,8 @@ def text_references(
     """Keep class names first, followed by descriptions in class and sentence order."""
     records = (
         [PointRecord(label, "class_name", label, label) for label in classes]
-        if include_class_labels else []
+        if include_class_labels
+        else []
     )
     if descriptions is not None:
         records.extend(

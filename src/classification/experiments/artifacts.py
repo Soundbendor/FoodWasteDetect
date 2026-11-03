@@ -18,5 +18,3 @@ def write_json(path: Path, value: Any) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
-
-

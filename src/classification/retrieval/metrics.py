@@ -37,7 +37,10 @@ class RetrievalMetrics(TypedDict):
 
 
 def ranking_metrics(
-    neighbors: Sequence[Neighbor], label: str, k: int, relevant_count: int,
+    neighbors: Sequence[Neighbor],
+    label: str,
+    k: int,
+    relevant_count: int,
 ) -> QueryRetrievalMetrics:
     """Score the ranked rows before discarding neighbors beyond the voting support."""
     relevance = [n["label"] == label for n in neighbors] if relevant_count else []
@@ -73,24 +76,39 @@ def metrics(predictions: Sequence[Prediction], classes: Iterable[str]) -> Retrie
         return numerator / denominator if denominator else 0.0
 
     def scores(label: str) -> tuple[float, float, float]:
-        return (ratio(hits[label], predicted[label]), ratio(hits[label], support[label]),
-                ratio(2 * hits[label], predicted[label] + support[label]))
+        return (
+            ratio(hits[label], predicted[label]),
+            ratio(hits[label], support[label]),
+            ratio(2 * hits[label], predicted[label] + support[label]),
+        )
 
     label_scores = {label: scores(label) for label in labels}
     per_class: dict[str, ClassMetrics] = {}
     for label in classes:
         precision, recall, f1 = label_scores.get(label, (0.0, 0.0, 0.0))
-        per_class[label] = dict(support=support[label], correct=hits[label],
-                                recall=recall if support[label] else None,
-                                precision=precision, f1=f1)
-    precision_macro = ratio(sum(precision for precision, _, _ in label_scores.values()), len(labels))
+        per_class[label] = dict(
+            support=support[label],
+            correct=hits[label],
+            recall=recall if support[label] else None,
+            precision=precision,
+            f1=f1,
+        )
+    precision_macro = ratio(
+        sum(precision for precision, _, _ in label_scores.values()), len(labels)
+    )
     recall_macro = ratio(sum(recall for _, recall, _ in label_scores.values()), len(labels))
     f1_macro = ratio(sum(f1 for _, _, f1 in label_scores.values()), len(labels))
     with_neighbors = [p["neighbors"] for p in predictions if p["neighbors"]]
 
-    def ranking_mean(key: Literal[
-        "top5_hit", "precision_at_k", "reciprocal_rank_at_k", "ndcg_at_k", "average_precision_at_r",
-    ]) -> float:
+    def ranking_mean(
+        key: Literal[
+            "top5_hit",
+            "precision_at_k",
+            "reciprocal_rank_at_k",
+            "ndcg_at_k",
+            "average_precision_at_r",
+        ],
+    ) -> float:
         return ratio(sum(p["retrieval_metrics"][key] for p in predictions), evaluated)
 
     return {
@@ -113,12 +131,13 @@ def metrics(predictions: Sequence[Prediction], classes: Iterable[str]) -> Retrie
         "map_at_r": ranking_mean("average_precision_at_r"),
         "mean_top1_cosine_similarity": (
             sum(n[0]["score"] for n in with_neighbors) / len(with_neighbors)
-            if with_neighbors else None
+            if with_neighbors
+            else None
         ),
         "mean_support_cosine_similarity": (
-            sum(sum(n["score"] for n in neighbors) / len(neighbors)
-                for neighbors in with_neighbors) / len(with_neighbors) if with_neighbors else None
+            sum(sum(n["score"] for n in neighbors) / len(neighbors) for neighbors in with_neighbors)
+            / len(with_neighbors)
+            if with_neighbors
+            else None
         ),
     }
-
-

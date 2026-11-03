@@ -108,7 +108,9 @@ def _run_experiment(config: dict[str, Any], stage: str) -> None:
 
 
 def _tracked_run(
-    config: dict, stage: str, execute: Callable[[dict, Tracker], Any],
+    config: dict,
+    stage: str,
+    execute: Callable[[dict, Tracker], Any],
 ) -> tuple[Any, str]:
     with wandb.init(
         config=config,

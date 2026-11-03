@@ -64,9 +64,7 @@ class FoodX251ImageDataset:
         table["class"] = table.pop("class_id").map(self.class_map.__getitem__)
         base = directory.resolve()
         paths = [(base / filename).resolve() for filename in table["fname"]]
-        table["source_id"] = [
-            f"foodx251:{split}:{path.relative_to(base)}" for path in paths
-        ]
+        table["source_id"] = [f"foodx251:{split}:{path.relative_to(base)}" for path in paths]
         if table["source_id"].duplicated().any():
             raise ValueError("Duplicate source identities")
         table["fname"] = pd.Series([str(path) for path in paths], dtype="string")
@@ -115,10 +113,13 @@ class FoodX251ImageDataset:
                     counts[label] += 1
             dataset = dataset.select(indices)
         if excluded_source_ids:
-            dataset = dataset.select([
-                i for i, source_id in enumerate(dataset["source_id"])
-                if source_id not in excluded_source_ids
-            ])
+            dataset = dataset.select(
+                [
+                    i
+                    for i, source_id in enumerate(dataset["source_id"])
+                    if source_id not in excluded_source_ids
+                ]
+            )
         return dataset
 
     @staticmethod

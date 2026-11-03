@@ -84,9 +84,7 @@ class LanceDBIndex:
 
     def get_record_ids(self) -> list[SourceIdentity]:
         """Scan all identity metadata without reading vectors."""
-        rows = self.table.search().select(
-            ["source_kind", "source_identity"]
-        ).limit(None).to_list()
+        rows = self.table.search().select(["source_kind", "source_identity"]).limit(None).to_list()
         return [(row["source_kind"], row["source_identity"]) for row in rows]
 
     def fetch_vectors(self, identities: Sequence[SourceIdentity]) -> NDArray[np.float32]:
@@ -105,9 +103,13 @@ class LanceDBIndex:
             f"(source_kind = {literal(kind)} AND source_identity = {literal(identity)})"
             for kind, identity in identities
         )
-        rows = self.table.search().where(predicate).select(
-            ["source_kind", "source_identity", "vector"]
-        ).limit(None).to_list()
+        rows = (
+            self.table.search()
+            .where(predicate)
+            .select(["source_kind", "source_identity", "vector"])
+            .limit(None)
+            .to_list()
+        )
         vectors = {(row["source_kind"], row["source_identity"]): row["vector"] for row in rows}
         return np.asarray([vectors[key] for key in identities], dtype=np.float32)
 

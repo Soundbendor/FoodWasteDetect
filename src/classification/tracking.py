@@ -32,18 +32,21 @@ class Tracker:
         """Publish completed metrics and the report already saved at ``report_path``."""
         metrics = report["metrics"]
         self.run.summary.update(
-            {
-                f"evaluation/{key}": value
-                for key, value in metrics.items() if key != "per_class"
-            }
+            {f"evaluation/{key}": value for key, value in metrics.items() if key != "per_class"}
         )
         self.run.log(
             {
                 "evaluation/per_class": wandb.Table(
                     columns=["class", "support", "correct", "recall", "precision", "f1"],
                     data=[
-                        [label, values["support"], values["correct"], values["recall"],
-                         values["precision"], values["f1"]]
+                        [
+                            label,
+                            values["support"],
+                            values["correct"],
+                            values["recall"],
+                            values["precision"],
+                            values["f1"],
+                        ]
                         for label, values in metrics["per_class"].items()
                     ],
                 )

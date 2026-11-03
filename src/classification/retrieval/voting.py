@@ -18,5 +18,3 @@ def classify(neighbors: Sequence[Neighbor]) -> tuple[str | None, float]:
         best[label] = max(best.get(label, score), score)
     winner = min(votes, key=lambda label: (-votes[label], -best[label], label))
     return winner, votes[winner] / len(neighbors)
-
-

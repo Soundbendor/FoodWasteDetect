@@ -122,7 +122,9 @@ class VertexEmbeddingModel(Embedder):
         return vector
 
     def _encode(
-        self, inputs: Iterable[_Input], prepare: Callable[[_Input], types.Content],
+        self,
+        inputs: Iterable[_Input],
+        prepare: Callable[[_Input], types.Content],
     ) -> NDArray[np.float32]:
         records = list(inputs)
         if not records:
@@ -150,7 +152,8 @@ class VertexEmbeddingModel(Embedder):
         return vectors
 
     def encode_text(
-        self, texts: Iterable[str],
+        self,
+        texts: Iterable[str],
     ) -> NDArray[np.float32]:
         """Encode class names or descriptions, preserving source order."""
 
@@ -162,7 +165,8 @@ class VertexEmbeddingModel(Embedder):
         return self._encode(texts, prepare)
 
     def encode_images(
-        self, images: Iterable[ImageInput],
+        self,
+        images: Iterable[ImageInput],
     ) -> NDArray[np.float32]:
         """Send RGB PNG pixels without labels, filenames, or resizing."""
 

@@ -21,5 +21,3 @@ def cached_batches(
                 [("validation_image", identity) for identity in batch["source_id"]]
             ),
         )
-
-

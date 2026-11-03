@@ -1,4 +1,5 @@
 """Records shared by experiment construction, retrieval, and reporting."""
+
 from dataclasses import dataclass, field
 from typing import TypedDict
 from uuid import uuid4
@@ -53,9 +54,9 @@ class PointRecord:
     def to_payload(self) -> dict[str, str]:
         """Return storage fields, mapping ``label`` to the reserved key ``class``."""
         return {
-            'id': self.id,
-            'class': self.label,
-            'source_kind': self.source_kind,
-            'source_identity': self.source_identity,
-            'value': self.value,
+            "id": self.id,
+            "class": self.label,
+            "source_kind": self.source_kind,
+            "source_identity": self.source_identity,
+            "value": self.value,
         }

@@ -52,8 +52,7 @@ class IndexBuilder:
     def _get_text_inputs(self) -> list[PointRecord]:
         """Read enabled descriptions and construct text references without generation."""
         descriptions = (
-            load_descriptions(self.descriptions_path)
-            if self.config["embed_descriptions"] else None
+            load_descriptions(self.descriptions_path) if self.config["embed_descriptions"] else None
         )
         return text_references(
             self.classes,
@@ -170,6 +169,8 @@ class IndexBuilder:
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"
         }
-        images = self.dataset.select_images(self.dataset.validation_set(), excluded_source_ids=excluded)
+        images = self.dataset.select_images(
+            self.dataset.validation_set(), excluded_source_ids=excluded
+        )
         self._insert_image_records(cache, images, split="val")
         return cache
