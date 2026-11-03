@@ -1,7 +1,7 @@
 """LanceDB storage and exact cosine retrieval."""
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Self
 
@@ -40,14 +40,22 @@ class LanceDBIndex:
         return cls(path, LanceDBConnection(path).open_table(table))
 
     @classmethod
-    def create(cls, uri: str | Path, table: str, dimension: int) -> Self:
-        """Create a typed table; the backend refuses existing names."""
+    def create(
+        cls,
+        uri: str | Path,
+        table: str,
+        dimension: int,
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> Self:
+        """Create a typed table with schema metadata; refuse existing names."""
         schema = pa.schema(
             [
                 pa.field(name, pa.string(), nullable=False)
                 for name in ("id", "class", "source_kind", "source_identity", "value")
             ]
-            + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)]
+            + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)],
+            metadata=metadata,
         )
         path = Path(uri).expanduser().resolve()
         opened = LanceDBConnection(path).create_table(

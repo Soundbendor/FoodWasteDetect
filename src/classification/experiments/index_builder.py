@@ -13,6 +13,7 @@ from tqdm import tqdm
 from classification.datasets.image_dataset import FoodX251ImageDataset
 from classification.encoders.base import Embedder
 from classification.experiments.descriptions import load_descriptions, text_references
+from classification.experiments.table_metadata import build_metadata, serialize_metadata
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.schemas import PointRecord
 
@@ -118,7 +119,13 @@ class IndexBuilder:
         self,
     ) -> tuple[LanceDBIndex, Dataset | None, list[PointRecord], Counter[str]]:
         images, records = self._prepare_reference_inputs()
-        index = LanceDBIndex.create(self.uri, self.table, self.embedder.dimension)
+        dimension = self.embedder.dimension
+        index = LanceDBIndex.create(
+            self.uri,
+            self.table,
+            dimension,
+            metadata=serialize_metadata(build_metadata(self.config, "reference", dimension)),
+        )
         return index, images, records, Counter()
 
     def _prepare_resumed_reference_build(
@@ -165,7 +172,13 @@ class IndexBuilder:
         if LanceDBIndex.exists(self.uri, table_name):
             cache = LanceDBIndex.open(self.uri, table_name)
         else:
-            cache = LanceDBIndex.create(self.uri, table_name, self.embedder.dimension)
+            dimension = self.embedder.dimension
+            cache = LanceDBIndex.create(
+                self.uri,
+                table_name,
+                dimension,
+                metadata=serialize_metadata(build_metadata(self.config, "validation", dimension)),
+            )
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"
         }

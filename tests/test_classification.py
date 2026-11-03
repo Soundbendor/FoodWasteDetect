@@ -185,6 +185,48 @@ class DatasetTests(unittest.TestCase):
 @unittest.skipUnless(available('lancedb', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, lancedb and CPU fixture dependencies')
 class ExperimentTests(unittest.TestCase):
 
+    def test_creation_metadata_survives_partial_and_changed_complete_resumes(self):
+        exp = self.experiment()
+        exp.batch_size = 1
+        original = LanceDBIndex.append
+        calls = 0
+
+        def fail_second(index, records, vectors):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError('partial')
+            original(index, records, vectors)
+
+        with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
+            with self.assertRaisesRegex(RuntimeError, 'partial'):
+                exp.build_vector_database()
+        name = exp.config['lancedb']['table']
+        snapshot = self.client.open_table(name).schema.metadata
+        self.assertEqual(json.loads(snapshot[b'classification.build'])['table_kind'], 'reference')
+        exp.config['embedding']['truncate_dim'] = 100
+        exp.build_vector_database()
+        self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch('classification.experiments.index_builder.build_metadata', side_effect=AssertionError('snapshot')):
+            exp.build_vector_database()
+        self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
+
+    def test_validation_creation_snapshot_and_lazy_resume(self):
+        exp = self.experiment()
+        cache = exp._index_builder().build_validation_table('cache')
+        snapshot = cache.table.schema.metadata
+        document = json.loads(snapshot[b'classification.build'])
+        self.assertEqual(document['table_kind'], 'validation')
+        self.assertEqual(set(document['config']), {'dataset', 'embedding'})
+        exp.config['embedding']['truncate_dim'] = 100
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch('classification.experiments.index_builder.build_metadata', side_effect=AssertionError('snapshot')):
+            resumed = exp._index_builder().build_validation_table('cache')
+        self.assertEqual(resumed.table.schema.metadata, snapshot)
+
     def test_shared_descriptions_are_read_only_across_runs(self):
         path = self.root / 'shared vocabulary.json'
         descriptions = {'Apple': ['Apple stored'], 'Pear': ['Pear stored']}

@@ -13,17 +13,18 @@ selection and image ownership use [data](data.md); for scoring use
 
 ## Ownership
 
-| Module | Responsibility |
-| --- | --- |
-| `classification.py` | `Experiment`: configuration, lazy encoder, stages, summaries, and report publication |
-| `index_builder.py` | `IndexBuilder`: input selection, reference resumption, encoding batches, and validation-cache preparation |
-| `descriptions.py` | Saved-vocabulary reading and ordered text-reference construction |
-| `evaluation.py` | Batch evaluation, metadata-row conversion, predictions, and completeness checks |
-| `config.py` | Shared `validate_config()` used before CLI tracking and during construction |
-| `batches.py` | `EmbeddingBatch` and ordered cache reads through `cached_batches()` |
-| `artifacts.py` | Shared `write_json()` |
-| `report_types.py` | Typed index summaries and evaluation reports; readers trust the complete summary shape |
-| `matryoshka.py` | Cached Gemini dimension sweep, table prefixes, and sweep summary |
+| Module              | Responsibility                                                                                            |
+| ------------------- | --------------------------------------------------------------------------------------------------------- |
+| `classification.py` | `Experiment`: configuration, lazy encoder, stages, summaries, and report publication                      |
+| `index_builder.py`  | `IndexBuilder`: input selection, reference resumption, encoding batches, and validation-cache preparation |
+| `descriptions.py`   | Saved-vocabulary reading and ordered text-reference construction                                          |
+| `evaluation.py`     | Batch evaluation, metadata-row conversion, predictions, and completeness checks                           |
+| `config.py`         | Shared `validate_config()` used before CLI tracking and during construction                               |
+| `batches.py`        | `EmbeddingBatch` and ordered cache reads through `cached_batches()`                                       |
+| `artifacts.py`      | Shared `write_json()`                                                                                     |
+| `table_metadata.py` | Pure construction, serialization, and derivation of table creation snapshots                              |
+| `report_types.py`   | Typed index summaries and evaluation reports; readers trust the complete summary shape                    |
+| `matryoshka.py`     | Cached Gemini dimension sweep, table prefixes, and sweep summary                                          |
 
 `LanceDBIndex` owns ordinary database operations. The sweep's streaming creation
 of derived tables is implemented directly in `matryoshka.py`. CLI parsing stays
@@ -46,10 +47,10 @@ default; [tracking](tracking.md) defines CLI run ownership.
 
 Shared validation requires a positive nonboolean integer `k`, boolean reference
 switches with at least one enabled, and null or a positive nonboolean integer
-`n_imgs_per_class`. The resolved output directory must be outside the raw dataset
-root. Cache validation follows the rules below. Other settings retain their
-backend checks and ordinary Python failures; preserve the existing validation
-scope rather than adding a configuration framework.
+`n_imgs_per_class`. The resolved output directory must be outside the raw
+dataset root. Cache validation follows the rules below. Other settings retain
+their backend checks and ordinary Python failures; preserve the existing
+validation scope rather than adding a configuration framework.
 
 `run()` calls `generate_descriptions()`, `build_vector_database()`, then
 `evaluate()`. The owned Ollama context closes before embedding begins. The
@@ -59,15 +60,16 @@ scope rather than adding a configuration framework.
 
 For vocabulary paths, generation/cache behavior, and server lifecycle, read
 [class descriptions and Ollama](data.md#class-descriptions-and-ollama).
-`DescriberLLM` owns the per-class generation loop; the experiment owns saved-file
-handling and the server context.
+`DescriberLLM` owns the per-class generation loop; the experiment owns
+saved-file handling and the server context.
 
-`Experiment` resolves the vocabulary path once. Both generation and indexing read
-saved vocabularies through `descriptions.load_descriptions()`. Indexing accepts an
-existing explicit or default `output_dir/descriptions.json` file and never starts
-Ollama. A missing explicit file fails without fallback or generation. The
-`descriptions.text_references()` function builds class-name and description
-records from an in-memory mapping, preserving class and sentence order.
+`Experiment` resolves the vocabulary path once. Both generation and indexing
+read saved vocabularies through `descriptions.load_descriptions()`. Indexing
+accepts an existing explicit or default `output_dir/descriptions.json` file and
+never starts Ollama. A missing explicit file fails without fallback or
+generation. The `descriptions.text_references()` function builds class-name and
+description records from an in-memory mapping, preserving class and sentence
+order.
 
 ## Reference builds and resumption
 
@@ -99,17 +101,24 @@ loading the encoder. Existing builds follow this sequence:
    index and counts to `Experiment` for summary publication.
 
 Image records are built directly from column-oriented batches, with strict
-pairing of `class`, `source_id`, and `fname` columns. `EmbeddingBatch` is an ordered
-metadata dictionary and vector matrix; row conversion belongs to evaluation and
-reporting. Keep final partial batches. The dataset and encoder
+pairing of `class`, `source_id`, and `fname` columns. `EmbeddingBatch` is an
+ordered metadata dictionary and vector matrix; row conversion belongs to
+evaluation and reporting. Keep final partial batches. The dataset and encoder
 [image ownership rules](data.md) apply.
 
 Successful batches survive later failures; failed encoding batches save no
 vectors. Storage failures propagate without write retries or rollback. Existing
-rows and UUIDs remain intact. Optimization failure preserves the previous summary;
-a rerun retries finalization without re-encoding saved inputs. Use one writer and
-finish building/optimization before concurrent readers. Shared jobs need a
-filesystem path visible to all nodes and separate evaluation output directories.
+rows and UUIDs remain intact. Optimization failure preserves the previous
+summary; a rerun retries finalization without re-encoding saved inputs. Use one
+writer and finish building/optimization before concurrent readers. Shared jobs
+need a filesystem path visible to all nodes and separate evaluation output
+directories.
+
+### Table creation metadata
+
+New reference and validation tables store UTF-8 JSON under the Arrow schema
+metadata key `classification.build`. For fields and defaults, read
+[`table_metadata.py`](../../src/classification/experiments/table_metadata.py).
 
 ## Validation caching
 
@@ -133,11 +142,12 @@ For paid backends, restarting can repeat requests from the unfinished batch;
 ## Artifact and failure contract
 
 `build_vector_database()` returns and writes `index.json` only after successful
-optimization. It contains `table`, resolved `uri`, `source_counts`, and effective
-`config`. Evaluation attaches counts from this file only when both URI and table
-match; otherwise `reference_source_counts` is null. Writers and readers share
-`IndexSummary`; loaded files are trusted to contain its required fields. An absent
-or mismatched summary is represented by None, with no runtime schema validation.
+optimization. It contains `table`, resolved `uri`, `source_counts`, and
+effective `config`. Evaluation attaches counts from this file only when both URI
+and table match; otherwise `reference_source_counts` is null. Writers and
+readers share `IndexSummary`; loaded files are trusted to contain its required
+fields. An absent or mismatched summary is represented by None, with no runtime
+schema validation.
 
 `evaluate()` and `evaluate_from_batches()` share `_execute_evaluation()`. The
 latter accepts ordered supplied metadata/vector batches and lets the sweep reuse
@@ -145,35 +155,37 @@ standard prediction and report logic. `evaluation.evaluate_batches()` consumes
 these batches through a supplied query callable, owns progress and completeness
 checks, and returns predictions. It performs no report writes or tracking.
 `Experiment` assembles metrics and the report, writes it, then publishes it.
-Evaluation covers the full labeled validation split (`source_split="val"`), with a nonempty split and exactly one
-prediction per image required before saving. This is validation accuracy, not
-official test accuracy. Strict metadata/vector pairing is retained.
+Evaluation covers the full labeled validation split (`source_split="val"`), with
+a nonempty split and exactly one prediction per image required before saving.
+This is validation accuracy, not official test accuracy. Strict metadata/vector
+pairing is retained.
 
-A successful evaluation writes only
-`evaluation_<UTC timestamp>/report.json`, containing `config`, `table`,
-`reference_source_counts`, `predictions`, and `metrics`. Predictions contain image
-metadata, majority-vote label, vote fraction, nearest label, first-k neighbors,
-and per-query retrieval metrics. [Retrieval](retrieval.md) defines the denominators
-and abstention behavior. Reports have no separate prediction/metric files,
-manifest, prediction `value`, status/error fields, or fixed retrieval settings.
+A successful evaluation writes only `evaluation_<UTC timestamp>/report.json`,
+containing `config`, `table`, `reference_source_counts`, `predictions`, and
+`metrics`. Predictions contain image metadata, majority-vote label, vote
+fraction, nearest label, first-k neighbors, and per-query retrieval metrics.
+[Retrieval](retrieval.md) defines the denominators and abstention behavior.
+Reports have no separate prediction/metric files, manifest, prediction `value`,
+status/error fields, or fixed retrieval settings.
 
-`write_json()` serializes finite JSON with a trailing newline to a sibling `.tmp`
-file and replaces the destination. Tracking uploads reports only after successful
-local writing. Loading, encoding, storage, and interruption failures propagate;
-there are no partial evaluation reports, exclusions, application-level retries,
-or cleanup of partial reference tables. Backend request retries are separately
-documented in [encoders](encoders.md). [Tracking](tracking.md) defines loop-owned
-progress bars and W&B lifecycle details.
+`write_json()` serializes finite JSON with a trailing newline to a sibling
+`.tmp` file and replaces the destination. Tracking uploads reports only after
+successful local writing. Loading, encoding, storage, and interruption failures
+propagate; there are no partial evaluation reports, exclusions,
+application-level retries, or cleanup of partial reference tables. Backend
+request retries are separately documented in [encoders](encoders.md).
+[Tracking](tracking.md) defines loop-owned progress bars and W&B lifecycle
+details.
 
 Keep the explicitly deferred scope: artifact compatibility checks, hashes,
 manifest/table-content validation, automatic table naming, migration, rollback,
-and Git/model/code revision, dependency-version, or timestamp provenance metadata
-are not implemented. This includes nested text-encoder revisions; UTC output
-directory names remain in use.
-Changing models, dimensions, prompts, descriptions, source inputs, or caps
-requires fresh tables and output directories with all enabled references rebuilt.
-Existing tables are reused by identity without verifying compatibility. Preserve
-historical data and collections; the separate CLIP/Qdrant experiment is unaffected.
+and Git/model/code revision, dependency-version, or timestamp provenance
+metadata are not implemented. This includes nested text-encoder revisions; UTC
+output directory names remain in use. Changing models, dimensions, prompts,
+descriptions, source inputs, or caps requires fresh tables and output
+directories with all enabled references rebuilt. Existing tables are reused by
+identity without verifying compatibility. Preserve historical data and
+collections; the separate CLIP/Qdrant experiment is unaffected.
 
 ## Cached Matryoshka sweep
 
@@ -186,10 +198,10 @@ The sweep evaluates 768, 1536, and 3072 dimensions with the configured `k` and
 batch size. All six reference/validation names must be distinct. The native
 dimension reads the original tables; smaller dimensions use `<source>_d768` and
 `<source>_d1536`. Each missing destination is created by one streaming
-`create_table()` call, with no query-result limit, retaining every row, UUID, and
-metadata value. Only vectors change to exact float32 prefixes and fixed-size
-Arrow types; no extra normalization is applied. Reference switches and image
-caps remain recorded but do not filter stored rows.
+`create_table()` call, with no query-result limit, retaining every row, UUID,
+and row metadata value. Only vectors change to exact float32 prefixes and
+fixed-size Arrow types; no extra normalization is applied. Reference switches
+and image caps remain recorded but do not filter stored rows.
 
 Existing destinations are reused if they open. Open/create/stream failures
 propagate without scan, repair, overwrite, or cleanup; this is not a crash
@@ -210,13 +222,13 @@ authorization; routine checks use synthetic CPU tables and mocked tracking.
 
 ## Verification
 
-For evaluation computation, use `tests/test_evaluation.py` with synthetic batches
-and query callables. For saved-vocabulary/reference construction, use
+For evaluation computation, use `tests/test_evaluation.py` with synthetic
+batches and query callables. For saved-vocabulary/reference construction, use
 `tests/test_descriptions.py`. For orchestration changes, use
-`tests/test_classification.py` with synthetic encoders/images, mocked Ollama, and
-temporary LanceDB tables. It covers selection,
-pairing, partial/complete resumes, cache reuse, failures, and publication ordering.
-For sweep changes use `tests/test_matroyshka_sweep.py`; scoring is covered in
+`tests/test_classification.py` with synthetic encoders/images, mocked Ollama,
+and temporary LanceDB tables. It covers selection, pairing, partial/complete
+resumes, cache reuse, failures, and publication ordering. For sweep changes use
+`tests/test_matroyshka_sweep.py`; scoring is covered in
 `tests/test_retrieval.py`, tracking in `tests/test_tracking.py`.
 
 These tests establish neither real-checkpoint behavior nor cloud, GPU, HPC, or

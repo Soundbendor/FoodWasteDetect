@@ -16,7 +16,7 @@ and publication; [tracking](tracking.md) owns W&B summaries and tables.
 `lancedb.uri` is a filesystem path resolved from the working directory with `~`
 expansion, independently of `output_dir`. `exists()` and `open()` do not create
 missing database directories. `LanceDBIndex.open(uri, table)` and
-`LanceDBIndex.create(uri, table, dimension)` return an index with an open
+`LanceDBIndex.create(uri, table, dimension, *, metadata=None)` return an index with an open
 `LanceTable`; `LanceDBIndex.exists(uri, table)` checks storage without constructing
 an index. Each factory uses the local `LanceDBConnection` directly. Index methods
 can therefore use their table without an unopened state or repeated guards.
@@ -53,6 +53,18 @@ Use one completed writer/build before concurrent readers, with a filesystem
 visible to every node. Concurrent writes to the same table are unsupported.
 The separate CLIP/YOLO Qdrant backend remains outside this package; rebuild new
 references instead of migrating or changing old Qdrant collections.
+
+Creation `metadata` attaches string pairs to the Arrow schema without adding row
+columns; appends, optimization, and reopening preserve it. For snapshot selection
+and lifecycle rules, read [table creation metadata](experiments.md#table-creation-metadata).
+Decode a snapshot from an open table with:
+
+```python
+import json
+
+encoded = (table.schema.metadata or {}).get(b"classification.build")
+snapshot = json.loads(encoded.decode("utf-8")) if encoded is not None else None
+```
 
 ## Exact retrieval and voting
 

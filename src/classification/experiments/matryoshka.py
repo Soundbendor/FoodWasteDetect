@@ -16,6 +16,7 @@ from classification.experiments.batches import cached_batches
 from classification.experiments.classification import Experiment
 from classification.experiments.config import validate_config as validate_experiment_config
 from classification.experiments.report_types import EvaluationReport
+from classification.experiments.table_metadata import derive_metadata
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.tracking import Tracker
 
@@ -73,9 +74,12 @@ def prepare_table(
     source = connection.open_table(source_name)
     schema = source.schema
     position = schema.get_field_index("vector")
+    metadata = derive_metadata(
+        schema.metadata, source_name, schema.field(position).type.list_size, dimension
+    )
     schema = schema.set(
         position, schema.field(position).with_type(pa.list_(pa.float32(), dimension))
-    )
+    ).with_metadata(metadata)
     reader = pa.RecordBatchReader.from_batches(
         schema,
         prefix_batches(source, schema, dimension, batch_size),
