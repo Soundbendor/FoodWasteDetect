@@ -1,4 +1,4 @@
-"""Valid synthetic configuration inputs and validated immutable replacements."""
+"""Valid synthetic configuration inputs and validated replacements."""
 
 from classification.experiments.config import ExperimentConfig
 

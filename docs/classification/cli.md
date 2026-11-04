@@ -31,17 +31,14 @@ commands or old flat-module import shims.
 ## Override semantics
 
 `_load_config()` reads a top-level mapping with `yaml.safe_load()`, applies ordered
-overrides, then returns a validated `ExperimentConfig`. See
-[configuration models](experiments.md#lifecycle-and-configuration) for the Python API
-and validation contract.
+overrides, then returns an `ExperimentConfig`. Field definitions and defaults live
+in [`config.py`](../../src/classification/experiments/config.py).
 
 Overrides form nested mappings from dotted paths, including fields omitted from
 YAML. Mapping values merge recursively; scalar/null values replace the old value.
-Pydantic validates field names and types in the completed mapping, with no schema
-inspection of individual assignments. The last assignment wins, and overrides can
-repair invalid input values. Values use YAML syntax; split occurs
-at the first equals sign, preserving additional equals signs. Quote strings that
-resemble other types: `--set 'output_dir="001"'`.
+The last assignment wins, and overrides can repair invalid input values. Values
+use YAML syntax; split occurs at the first equals sign, preserving additional
+equals signs. Quote strings that resemble other types: `--set 'output_dir="001"'`.
 
 OmegaConf and interpolation have been removed. Strings containing interpolation
 syntax receive ordinary YAML/string handling. Source YAML remains unchanged.

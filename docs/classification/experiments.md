@@ -19,11 +19,10 @@ selection and image ownership use [data](data.md); for scoring use
 | `index_builder.py`  | `IndexBuilder`: input selection, reference resumption, encoding batches, and validation-cache preparation |
 | `descriptions.py`   | Saved-vocabulary reading and ordered text-reference construction                                          |
 | `evaluation.py`     | Batch evaluation, metadata-row conversion, predictions, and completeness checks                           |
-| `config.py`         | Immutable Pydantic configuration models validated before CLI tracking                               |
+| `config.py`         | Experiment settings                                                                                      |
 | `batches.py`        | `EmbeddingBatch` and ordered cache reads through `cached_batches()`                                       |
 | `artifacts.py`      | Shared `write_json()`                                                                                     |
-| `table_metadata.py` | Pure construction, serialization, and derivation of table creation snapshots                              |
-| `report_types.py`   | Pydantic index summaries and evaluation reports with typed configuration                    |
+| `report_types.py`   | Index summary and evaluation report models                                                                |
 | `matryoshka.py`     | Cached Gemini dimension sweep, table prefixes, and sweep summary                                          |
 
 `LanceDBIndex` owns ordinary database operations. The sweep's streaming creation
@@ -37,24 +36,13 @@ The shared CLI exposes `experiment describe`, `index`, `evaluate`, `run`, and
 `matroyshka-sweep`. Preserve the existing sweep spelling. The old caption/BGE
 workflows and flat-module import paths have no compatibility shims.
 
-`Experiment(config, tracker=None)` requires a validated `ExperimentConfig`, resolves
-paths, loads dataset metadata and class names, and stores the configured batch size.
+`Experiment(config: ExperimentConfig, tracker=None)` resolves paths, loads dataset
+metadata and class names, and stores the configured batch size.
 Construction loads metadata even for disabled or cached description stages.
 It creates directories only during writing stages. The `embedder` property
 constructs one backend on first use and reuses it; complete stored references or
 validation caches can avoid construction. Direct Python use is untracked by
 default; [tracking](tracking.md) defines CLI run ownership.
-
-Construct settings with `ExperimentConfig.model_validate(mapping)` and access them
-through attributes. To change settings, modify a fresh `model_dump()` and validate
-a new model. Orchestration and sweep helpers accept validated models.
-
-`ExperimentConfig` and its nested models use strict field types, reject unknown
-fields, validate defaults, and freeze attributes. Dataset names accept FoodX251
-case-insensitively while preserving spelling. Positive integer constraints exclude
-booleans; timeouts must be positive finite numbers. Model validators require at
-least one reference source, output outside the raw dataset, and distinct nonempty
-validation/reference table names when caching is enabled.
 
 Field definitions and defaults live in
 [`config.py`](../../src/classification/experiments/config.py). Runtime data and
@@ -125,16 +113,14 @@ directories.
 
 ### Table creation metadata
 
-New reference and validation tables store UTF-8 JSON under the Arrow schema
-metadata key `classification.build`. For fields and defaults, read
-[`table_metadata.py`](../../src/classification/experiments/table_metadata.py).
-Snapshots select configuration fields explicitly and remain partial mappings,
-not complete `ExperimentConfig` models.
+New reference and validation tables store the full `ExperimentConfig` as JSON under
+the Arrow schema key `classification.build`, with `vector_dimension` set to the
+stored vector size. The snapshot records creation settings and remains unchanged
+on resume, even when the current configuration differs.
 
 ## Validation caching
 
-`cache_validation_embeddings` defaults to false when omitted and requires a strict
-boolean. Enabled caching requires a nonempty
+Enabled `cache_validation_embeddings` requires a nonempty
 `lancedb.validation_table` distinct from the reference table. All backends share
 this path. Cache records use `validation_image`; they never join reference
 searches.
@@ -154,11 +140,10 @@ For paid backends, restarting can repeat requests from the unfinished batch;
 
 `build_vector_database()` returns and writes `index.json` only after successful
 optimization. It contains `table`, resolved `uri`, `source_counts`, and
-effective `config`, including defaults. Evaluation attaches counts from this file only when both URI
-and table match; otherwise `reference_source_counts` is null. Writers return an `IndexSummary` Pydantic model with `config: ExperimentConfig`.
-Historical summaries are read only for URI/table matching and source counts;
-their configuration is never reconstructed or revalidated. An absent or
-mismatched summary is represented by None.
+effective `config`, including defaults. Evaluation attaches counts from this file
+only when both URI and table match; otherwise `reference_source_counts` is null.
+Writers return an `IndexSummary`. Historical summaries supply only URI/table
+matching and source counts.
 
 `evaluate()` and `evaluate_from_batches()` share `_execute_evaluation()`. The
 latter accepts ordered supplied metadata/vector batches and lets the sweep reuse
@@ -215,15 +200,18 @@ and row metadata value. Only vectors change to exact float32 prefixes and
 fixed-size Arrow types; no extra normalization is applied. Reference switches
 and image caps remain recorded but do not filter stored rows.
 
+Derived tables retain the source configuration with only `vector_dimension`
+changed. Other schema metadata is preserved; absent snapshots remain absent.
+
 Existing destinations are reused if they open. Open/create/stream failures
 propagate without scan, repair, overwrite, or cleanup; this is not a crash
 durability guarantee. The sweep reads undecoded validation metadata and fetches
 cached vectors by identity.
 
-Each dimension gets a freshly dumped and validated `ExperimentConfig`, selected dimension and
-table names, enabled caching, and an output directory under
-`<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`. The CLI owns one native W&B
-context per dimension, with no outer run, explicit identity/group settings, or
+Each dimension enables validation caching and uses its own table names and output
+directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`.
+The CLI owns one native W&B context per dimension, with no outer run, explicit
+identity/group settings, or
 resume checks. Standard reports have null reference counts unless a matching
 index summary exists in their output directory.
 

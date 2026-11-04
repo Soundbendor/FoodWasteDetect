@@ -536,10 +536,13 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     assert report['metrics']['evaluated'] == 2
     assert report['config']['embedding']['truncate_dim'] == 1024
     from classification.cli import wandb
-    assert wandb.init.call_args.kwargs['config'] == report['config']
+    initial_config = wandb.init.call_args.kwargs['config']
+    assert initial_config['vector_dimension'] is None
+    assert report['config']['vector_dimension'] == 1024
+    assert dict(initial_config, vector_dimension=1024) == report['config']
     artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
     config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
-    assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == report['config']
+    assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == initial_config
 
 
 def test_historical_counts_do_not_validate_historical_configuration(experiment_case):

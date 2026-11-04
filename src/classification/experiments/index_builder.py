@@ -14,7 +14,6 @@ from classification.datasets.image_dataset import FoodX251ImageDataset
 from classification.encoders.base import Embedder
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions, text_references
-from classification.experiments.table_metadata import build_metadata, serialize_metadata
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.schemas import PointRecord
 
@@ -121,11 +120,12 @@ class IndexBuilder:
     ) -> tuple[LanceDBIndex, Dataset | None, list[PointRecord], Counter[str]]:
         images, records = self._prepare_reference_inputs()
         dimension = self.embedder.dimension
+        self.config.vector_dimension = dimension
         index = LanceDBIndex.create(
             self.uri,
             self.table,
             dimension,
-            metadata=serialize_metadata(build_metadata(self.config, "reference", dimension)),
+            metadata={"classification.build": self.config.model_dump_json()},
         )
         return index, images, records, Counter()
 
@@ -174,11 +174,12 @@ class IndexBuilder:
             cache = LanceDBIndex.open(self.uri, table_name)
         else:
             dimension = self.embedder.dimension
+            self.config.vector_dimension = dimension
             cache = LanceDBIndex.create(
                 self.uri,
                 table_name,
                 dimension,
-                metadata=serialize_metadata(build_metadata(self.config, "validation", dimension)),
+                metadata={"classification.build": self.config.model_dump_json()},
             )
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"

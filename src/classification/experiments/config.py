@@ -1,4 +1,4 @@
-"""Strict, immutable configuration for whole-image experiments."""
+"""Mutable configuration validated at initialization for whole-image experiments."""
 
 from pathlib import Path
 from typing import Annotated, Self
@@ -11,9 +11,9 @@ PositiveSeconds = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
 class ConfigModel(BaseModel):
-    """Reject unknown fields and coercion, including in default values."""
+    """Reject unknown fields and coercion at initialization, including in defaults."""
 
-    model_config = ConfigDict(strict=True, extra="forbid", frozen=True, validate_default=True)
+    model_config = ConfigDict(strict=True, extra="forbid", validate_default=True)
 
 
 class DatasetConfig(ConfigModel):
@@ -87,6 +87,7 @@ class ExperimentConfig(ConfigModel):
     embed_images: bool
     embed_class_labels: bool
     embed_descriptions: bool
+    vector_dimension: PositiveInt | None = None
     n_imgs_per_class: PositiveInt | None = None
     descriptions_file: str | None = None
     cache_validation_embeddings: bool = False

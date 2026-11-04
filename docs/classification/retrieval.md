@@ -55,16 +55,8 @@ The separate CLIP/YOLO Qdrant backend remains outside this package; rebuild new
 references instead of migrating or changing old Qdrant collections.
 
 Creation `metadata` attaches string pairs to the Arrow schema without adding row
-columns; appends, optimization, and reopening preserve it. For snapshot selection
-and lifecycle rules, read [table creation metadata](experiments.md#table-creation-metadata).
-Decode a snapshot from an open table with:
-
-```python
-import json
-
-encoded = (table.schema.metadata or {}).get(b"classification.build")
-snapshot = json.loads(encoded.decode("utf-8")) if encoded is not None else None
-```
+columns; appends, optimization, and reopening preserve it. For experiment snapshots,
+read [table creation metadata](experiments.md#table-creation-metadata).
 
 ## Exact retrieval and voting
 

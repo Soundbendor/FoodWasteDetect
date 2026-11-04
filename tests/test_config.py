@@ -11,7 +11,7 @@ from classification.experiments.config import ExperimentConfig, OllamaConfig
 from classification.experiments.report_types import IndexSummary
 
 
-def test_defaults_spelling_and_frozen_nested_attributes():
+def test_defaults_spelling_and_mutable_nested_attributes():
     config = ExperimentConfig.model_validate(
         config_data(dataset={"name": "FoodX251", "root": "/raw"})
     )
@@ -29,11 +29,14 @@ def test_defaults_spelling_and_frozen_nested_attributes():
     }
     assert config.n_imgs_per_class is config.descriptions_file is config.ollama is None
     assert config.description_count is None
+    assert config.vector_dimension is None
     assert config.cache_validation_embeddings is False
-    with pytest.raises(ValidationError, match="frozen"):
-        config.k = 3
-    with pytest.raises(ValidationError, match="frozen"):
-        config.embedding.batch_size = 5
+    config.k = 3
+    config.embedding.batch_size = 5
+    config.vector_dimension = 2
+    assert config.k == 3
+    assert config.embedding.batch_size == 5
+    assert config.vector_dimension == 2
 
 
 @pytest.mark.parametrize(
@@ -81,6 +84,7 @@ def test_unknown_fields(section):
         "embedding.truncate_dim",
         "n_imgs_per_class",
         "description_count",
+        "vector_dimension",
         "embedding.vertex.max_attempts",
         "embedding.vertex.max_concurrency",
     ],

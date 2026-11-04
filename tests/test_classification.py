@@ -204,29 +204,83 @@ class ExperimentTests(unittest.TestCase):
                 exp.build_vector_database()
         name = exp.config.lancedb.table
         snapshot = self.client.open_table(name).schema.metadata
-        self.assertEqual(json.loads(snapshot[b'classification.build'])['table_kind'], 'reference')
+        document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
+        self.assertEqual(document, exp.config)
+        self.assertEqual(exp.config.vector_dimension, 2)
         exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
-        exp.build_vector_database()
+        with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
+            exp.build_vector_database()
         self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch('classification.experiments.index_builder.build_metadata', side_effect=AssertionError('snapshot')):
+             patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
             exp.build_vector_database()
         self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
 
     def test_validation_creation_snapshot_and_lazy_resume(self):
         exp = self.experiment()
-        cache = exp._index_builder().build_validation_table('cache')
-        snapshot = cache.table.schema.metadata
-        document = json.loads(snapshot[b'classification.build'])
-        self.assertEqual(document['table_kind'], 'validation')
-        self.assertEqual(set(document['config']), {'dataset', 'embedding'})
+        exp.batch_size = 1
+        original = LanceDBIndex.append
+        calls = 0
+
+        def fail_second(index, records, vectors):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError('partial')
+            original(index, records, vectors)
+
+        with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
+            with self.assertRaisesRegex(RuntimeError, 'partial'):
+                exp._index_builder().build_validation_table('cache')
+        snapshot = self.client.open_table('cache').schema.metadata
+        document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
+        self.assertEqual(document, exp.config)
+        self.assertEqual(exp.config.vector_dimension, 2)
         exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
+        with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
+            cache = exp._index_builder().build_validation_table('cache')
+        self.assertEqual(cache.table.schema.metadata, snapshot)
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch('classification.experiments.index_builder.build_metadata', side_effect=AssertionError('snapshot')):
+             patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
             resumed = exp._index_builder().build_validation_table('cache')
         self.assertEqual(resumed.table.schema.metadata, snapshot)
+
+    def test_malformed_snapshots_do_not_block_resumes(self):
+        import numpy as np
+
+        for payload in ('{}', '{broken'):
+            with self.subTest(payload=payload):
+                name = 'incomplete' if payload == '{}' else 'malformed'
+                exp = self.experiment(name=name)
+                reference = LanceDBIndex.create(
+                    self.db_path, exp.config.lancedb.table, 2,
+                    metadata={'classification.build': payload},
+                )
+                cache_name = name + '_cache'
+                cache = LanceDBIndex.create(
+                    self.db_path, cache_name, 2, metadata={'classification.build': payload},
+                )
+                reference.append([PointRecord('Apple', 'class_name', 'Apple', 'Apple')],
+                                 np.array([[1., 0.]]))
+                cache.append([PointRecord('Apple', 'validation_image', '0', self.rows[0]['fname'])],
+                             np.array([[1., 0.]]))
+                expected = {b'classification.build': payload.encode()}
+                with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
+                    exp.build_vector_database()
+                    exp._index_builder().build_validation_table(cache_name)
+                self.assertEqual(reference.table.schema.metadata, expected)
+                self.assertEqual(cache.table.schema.metadata, expected)
+                exp._embedder = None
+                with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+                     patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
+                    exp.build_vector_database()
+                    exp._index_builder().build_validation_table(cache_name)
+                for table in (exp.config.lancedb.table, cache_name):
+                    reopened = self.client.open_table(table)
+                    self.assertEqual(reopened.schema.metadata, expected)
+                    self.assertEqual(reopened.count_rows(), 2)
 
     def test_shared_descriptions_are_read_only_across_runs(self):
         path = self.root / 'shared vocabulary.json'

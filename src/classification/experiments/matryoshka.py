@@ -15,7 +15,6 @@ from classification.experiments.batches import cached_batches
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
-from classification.experiments.table_metadata import derive_metadata
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.tracking import Tracker
 
@@ -75,9 +74,12 @@ def prepare_table(
     source = connection.open_table(source_name)
     schema = source.schema
     position = schema.get_field_index("vector")
-    metadata = derive_metadata(
-        schema.metadata, source_name, schema.field(position).type.list_size, dimension
-    )
+    metadata = dict(schema.metadata or {})
+    encoded = metadata.get(b"classification.build")
+    if encoded is not None:
+        snapshot = ExperimentConfig.model_validate_json(encoded)
+        snapshot.vector_dimension = dimension
+        metadata[b"classification.build"] = snapshot.model_dump_json().encode("utf-8")
     schema = schema.set(
         position, schema.field(position).with_type(pa.list_(pa.float32(), dimension))
     ).with_metadata(metadata)
@@ -121,6 +123,7 @@ def run_sweep(
     results = []
     for dimension in DIMENSIONS:
         settings = config.model_dump()
+        settings["vector_dimension"] = dimension
         reference, validation = table_names(config, dimension)
         settings["embedding"]["truncate_dim"] = dimension
         settings["lancedb"].update(table=reference, validation_table=validation)

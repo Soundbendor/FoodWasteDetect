@@ -10,6 +10,7 @@ import numpy as np
 import pyarrow as pa
 import pytest
 import yaml
+from pydantic import ValidationError
 from test_tracking import Artifact
 
 from classification.experiments.config import ExperimentConfig
@@ -94,6 +95,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         effective = kwargs['config']
         assert effective['k'] == 1
         assert effective['embedding']['truncate_dim'] == dimension
+        assert effective['vector_dimension'] == dimension
         assert effective['cache_validation_embeddings'] is True
         assert effective['embed_images'] is True
         assert effective['n_imgs_per_class'] == 1
@@ -144,6 +146,37 @@ def test_reuse_has_no_writes_or_source_scan(sources, monkeypatch):
     sweep.prepare_table(wrapper, 'reference', 'reference_d768', 768, 1)
     wrapper.create_table.assert_not_called()
     wrapper.open_table.assert_called_once_with('reference_d768')
+
+
+@pytest.mark.parametrize('invalid', ['json', 'empty', 'partial', 'nested', 'dimension'])
+def test_invalid_snapshot_fails_before_destination_creation(sources, invalid):
+    config, connection, _, _ = sources
+    document = ExperimentConfig.model_validate(config).model_dump()
+    document['vector_dimension'] = 3072
+    if invalid == 'partial':
+        document = {'dataset': {'name': 'foodx251'}}
+    elif invalid == 'nested':
+        document['embedding']['batch_size'] = '1'
+    elif invalid == 'dimension':
+        document['vector_dimension'] = 0
+    encoded = '{broken' if invalid == 'json' else json.dumps(document)
+    if invalid == 'empty':
+        encoded = ''
+    source = LanceDBIndex.create(config['lancedb']['uri'], 'invalid', 3072,
+                                metadata={'classification.build': encoded})
+    wrapper = MagicMock(wraps=connection)
+    wrapper.__contains__.side_effect = lambda name: name in connection
+    with pytest.raises(ValidationError):
+        sweep.prepare_table(wrapper, 'invalid', 'destination', 768, 1)
+    wrapper.create_table.assert_not_called()
+    assert 'destination' not in connection
+    assert source.table.schema.metadata[b'classification.build'] == encoded.encode()
+
+    # A readable destination remains reusable without parsing its source snapshot.
+    sweep.prepare_table(connection, 'reference', 'destination', 768, 1)
+    version = connection.open_table('destination').version
+    sweep.prepare_table(connection, 'invalid', 'destination', 768, 1)
+    assert connection.open_table('destination').version == version
 
 
 @pytest.mark.parametrize('failure', [RuntimeError('stream failed'), KeyboardInterrupt()])
@@ -286,6 +319,7 @@ def test_sweep_variants_are_independent_validated_models(sources):
 
     sweep.run_sweep(config, evaluate)
     assert [variant.embedding.truncate_dim for variant in variants] == list(sweep.DIMENSIONS)
+    assert [variant.vector_dimension for variant in variants] == list(sweep.DIMENSIONS)
     assert len({id(variant.embedding) for variant in variants}) == 3
     assert config.model_dump() == ExperimentConfig.model_validate(raw).model_dump()
     assert config.embedding.truncate_dim is None
