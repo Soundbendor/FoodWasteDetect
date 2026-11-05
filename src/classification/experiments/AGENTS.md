@@ -1,7 +1,7 @@
 # Experiment orchestration
 
 This package runs the whole-image classification baseline. `Experiment` owns
-stage orchestration and report publication; `evaluation.py` owns batch prediction,
+stage orchestration, validation-batch preparation, and report publication; `evaluation.py` owns batch prediction,
 progress, and completeness checks. `IndexBuilder` owns reference selection and
 encoding batches. Ordinary database operations use `retrieval`;
 `matryoshka.py` directly reads and creates the sweep's derived tables.
@@ -14,3 +14,7 @@ encoding batches. Ordinary database operations use `retrieval`;
 | Cached dimension sweeps | [Matryoshka sweep](../../../docs/classification/experiments.md#cached-matryoshka-sweep) |
 | Query depth, voting, or reported metrics | [Retrieval contract](../../../docs/classification/retrieval.md) |
 | Progress bars or W&B publication | [Tracking](../../../docs/classification/tracking.md) |
+
+`Experiment.evaluate()` completes an enabled cache; `evaluate_cached()` reads existing
+vectors regardless of the cache flag. Cache setup is eager and vector fetching lazy.
+`batches.py` owns only the batch type.

@@ -30,8 +30,9 @@ choosing or extending a pipeline.
   belong here and in the linked docs.
 - Before changing a module, read its scoped guide and the task reference below.
   Keep each contract in its owning document; add every new `docs/` file to this
-  index. Use [development checks](docs/development.md) for dependencies,
-  packaging, tests, and documentation maintenance.
+  index, except files under `docs/plans/`, which are exempt. Use
+  [development checks](docs/development.md) for dependencies, packaging, tests,
+  and documentation maintenance.
 
 ## Pixi setup
 

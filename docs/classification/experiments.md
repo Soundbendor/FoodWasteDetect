@@ -20,7 +20,7 @@ selection and image ownership use [data](data.md); for scoring use
 | `descriptions.py`   | Saved-vocabulary reading and ordered text-reference construction                                          |
 | `evaluation.py`     | Batch evaluation, metadata-row conversion, predictions, and completeness checks                           |
 | `config.py`         | Experiment settings                                                                                      |
-| `batches.py`        | `EmbeddingBatch` and ordered cache reads through `cached_batches()`                                       |
+| `batches.py`        | `EmbeddingBatch` type alias                                       |
 | `artifacts.py`      | Shared `write_json()`                                                                                     |
 | `report_types.py`   | Index summary and evaluation report models                                                                |
 | `matryoshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
@@ -127,7 +127,7 @@ searches.
 
 Evaluation opens references first, creates or opens the cache, scans saved
 identities, and completes missing validation batches. It then fetches vectors in
-metadata order through `cached_batches()`. Complete caches need neither image
+metadata order through `Experiment`. Complete caches need neither image
 decoding nor a model/client. Disabled caching recomputes validation embeddings.
 Validation-cache preparation does not optimize tables; evaluation does not
 optimize or insert into reference tables.
@@ -145,9 +145,12 @@ only when both URI and table match; otherwise `reference_source_counts` is null.
 Writers return an `IndexSummary`. Historical summaries supply only URI/table
 matching and source counts.
 
-`evaluate()` and `evaluate_from_batches()` share `_execute_evaluation()`. The
-latter accepts ordered supplied metadata/vector batches and lets the sweep reuse
-standard prediction and report logic. `evaluation.evaluate_batches()` consumes
+`evaluate()` and `evaluate_cached()` share `_execute_evaluation()`. The latter
+reads existing cached vectors regardless of the cache flag, without completing or
+mutating the cache. `Experiment` prepares validation batches; it opens or completes
+the cache and constructs the metadata iterator eagerly, then fetches vectors lazily.
+Ordinary evaluation prepares references first; cached-only evaluation prepares the
+cache first. Missing vectors fail during consumption after reference preparation. `evaluation.evaluate_batches()` consumes
 these batches through a supplied query callable, owns progress and completeness
 checks, and returns predictions. It performs no report writes or tracking.
 `Experiment` assembles an `EvaluationReport` model with typed configuration,
@@ -211,8 +214,7 @@ changed. Other schema metadata is preserved; absent snapshots remain absent.
 
 Existing destinations are reused if they open. Open/create/stream failures
 propagate without scan, repair, overwrite, or cleanup; this is not a crash
-durability guarantee. The sweep reads undecoded validation metadata and fetches
-cached vectors by identity.
+durability guarantee. The sweep delegates cached validation preparation to `Experiment.evaluate_cached()`.
 
 Each dimension enables validation caching and uses its own table names and output
 directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`.

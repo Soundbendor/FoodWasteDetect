@@ -11,11 +11,9 @@ from lancedb.db import LanceDBConnection
 from lancedb.table import Table
 
 from classification.experiments.artifacts import write_json
-from classification.experiments.batches import cached_batches
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
-from classification.retrieval.lancedb import LanceDBIndex
 from classification.tracking import Tracker
 
 
@@ -104,16 +102,7 @@ def prepare_table(
 
 def evaluate_cached(config: ExperimentConfig, tracker: Tracker) -> EvaluationReport:
     """Evaluate cached vectors in validation order and publish the complete report."""
-    experiment = Experiment(config, tracker=tracker)
-    options = config.lancedb
-    assert options.validation_table is not None
-    cache = LanceDBIndex.open(options.uri, options.validation_table)
-    return experiment.evaluate_from_batches(
-        cached_batches(
-            cache,
-            experiment.dataset.iter_batches("val", experiment.batch_size, decode=False),
-        )
-    )
+    return Experiment(config, tracker=tracker).evaluate_cached()
 
 
 def run_sweep(
@@ -132,6 +121,7 @@ def run_sweep(
     validation_source = config.lancedb.validation_table
     if not validation_source or not validation_source.strip():
         raise ValueError("Reference and validation table names must be nonempty")
+    sources = (config.lancedb.table, validation_source)
     validation_vector_dim = vector_width(connection.open_table(validation_source))
     training_vector_dim = vector_width(connection.open_table(config.lancedb.table))
     if training_vector_dim != validation_vector_dim:

@@ -73,6 +73,6 @@ authorization boundaries and identify unrun checks explicitly.
 Keep durable behavior in the task-specific docs, scope and ownership in module
 `AGENTS.md` files, and dated verification in `docs/experiments.md`. Mark plans and
 handoffs with their status; they are evidence, not current implementation contracts.
-Every document under `docs/` must have a direct entry in the root documentation
-index with a task trigger. Update the owning document instead of appending a new
-copy of the same contract to the root guide.
+Documents under `docs/`, except those under `docs/plans/`, must have a direct entry
+in the root documentation index with a task trigger. Update the owning document
+instead of appending a new copy of the same contract to the root guide.

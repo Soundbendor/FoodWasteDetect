@@ -217,6 +217,20 @@ class ExperimentTests(unittest.TestCase):
             exp.build_vector_database()
         self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
 
+    def test_cached_evaluation_reuses_vectors_when_cache_flag_is_disabled(self):
+        exp = self.experiment()
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.build_vector_database()
+        exp._index_builder().build_validation_table('cache')
+        before = exp.config.model_dump()
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')):
+            report = exp.evaluate_cached()
+        self.assertEqual(report.metrics['evaluated'], 2)
+        self.assertEqual(exp.config.model_dump(), before)
+        self.assertFalse(exp.config.cache_validation_embeddings)
+
     def test_validation_creation_snapshot_and_lazy_resume(self):
         exp = self.experiment()
         exp.batch_size = 1

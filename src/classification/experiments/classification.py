@@ -15,7 +15,7 @@ from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
 from classification.experiments.artifacts import write_json
-from classification.experiments.batches import EmbeddingBatch, cached_batches
+from classification.experiments.batches import EmbeddingBatch
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions
 from classification.experiments.evaluation import evaluate_batches
@@ -163,27 +163,39 @@ class Experiment:
             self.tracker.reference_counts(dict(counts))
         return artifact
 
+    def _prepare_validation_batches(self, *, cached_only: bool) -> Iterator[EmbeddingBatch]:
+        if not cached_only and not self.config.cache_validation_embeddings:
+            return self._evaluation_batches()
+        options = self.config.lancedb
+        table = options.validation_table
+        if not table or not table.strip() or table == options.table:
+            raise ValueError(
+                "lancedb.validation_table must be nonempty and distinct from reference table"
+            )
+        if cached_only:
+            cache = LanceDBIndex.open(uri=options.uri, table=table)
+        else:
+            cache = self._index_builder().build_validation_table(table)
+        metadata = self.dataset.iter_batches("val", self.batch_size, decode=False)
+        return (
+            (
+                batch,
+                cache.fetch_vectors(
+                    [("validation_image", identity) for identity in batch["source_id"]]
+                ),
+            )
+            for batch in metadata
+        )
+
     def evaluate(self) -> EvaluationReport:
         """Complete optional validation caching, then classify the full split."""
         index, artifact = self._prepare_evaluation()
-        if self.config.cache_validation_embeddings:
-            assert self.config.lancedb.validation_table is not None
-            cache = self._index_builder().build_validation_table(
-                self.config.lancedb.validation_table
-            )
-            batches = cached_batches(
-                cache,
-                self.dataset.iter_batches("val", self.batch_size, decode=False),
-            )
-        else:
-            batches = self._evaluation_batches()
+        batches = self._prepare_validation_batches(cached_only=False)
         return self._execute_evaluation(index, artifact, batches)
 
-    def evaluate_from_batches(
-        self,
-        batches: Iterable[EmbeddingBatch],
-    ) -> EvaluationReport:
-        """Evaluate supplied, ordered metadata/vector batches through standard reporting."""
+    def evaluate_cached(self) -> EvaluationReport:
+        """Classify the validation split using existing cached vectors only."""
+        batches = self._prepare_validation_batches(cached_only=True)
         index, artifact = self._prepare_evaluation()
         return self._execute_evaluation(index, artifact, batches)
 
