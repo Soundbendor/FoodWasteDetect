@@ -46,6 +46,10 @@ YAML, override, and schema errors produce argparse errors with field paths befor
 W&B initialization or experiment construction, including sweep dispatch.
 Backend checks still occur when constructing the lazy encoder.
 
+For cached dimension sweeps, set an explicit ordered list in YAML or use, for
+example, `--set 'sweep_dimensions=[256,512,1024]'`. The field is required only
+for sweep execution. See the [sweep contract](experiments.md#cached-matryoshka-sweep).
+
 Overrides do not select isolated artifact names or manage services.
 
 ## Ollama downloads

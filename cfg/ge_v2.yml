@@ -32,5 +32,6 @@ lancedb:
   table: foodx251_ge_v2
   validation_table: foodx251_ge_v2_validation
 k: 10
+sweep_dimensions: [768, 1536, 3072]
 description_count: 5
 output_dir: assets/classification/ge_v2

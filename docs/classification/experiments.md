@@ -23,7 +23,7 @@ selection and image ownership use [data](data.md); for scoring use
 | `batches.py`        | `EmbeddingBatch` and ordered cache reads through `cached_batches()`                                       |
 | `artifacts.py`      | Shared `write_json()`                                                                                     |
 | `report_types.py`   | Index summary and evaluation report models                                                                |
-| `matryoshka.py`     | Cached Gemini dimension sweep, table prefixes, and sweep summary                                          |
+| `matryoshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
 
 `LanceDBIndex` owns ordinary database operations. The sweep's streaming creation
 of derived tables is implemented directly in `matryoshka.py`. CLI parsing stays
@@ -186,15 +186,21 @@ collections; the separate CLIP/Qdrant experiment is unaffected.
 
 ## Cached Matryoshka sweep
 
-`experiment matroyshka-sweep` assumes complete Gemini 3072-dimensional reference
-and validation tables configured for `google/ge-v2`. It makes no embedding
-requests and performs no compatibility/completeness validation. Missing cached
-vectors fail instead of being regenerated.
+`experiment matroyshka-sweep` evaluates cached vector prefixes for any model ID.
+This is a cached prefix experiment, not a guarantee of Matryoshka quality.
+Set `sweep_dimensions` to a nonempty list of unique positive integers in the
+order to evaluate them. Existing configurations must supply this field for the
+sweep; other stages and historical snapshots may omit it. The shipped Gemini
+configuration uses 768, 1536, and 3072. The source reference and validation
+vector fields must be fixed-size lists of the same positive width; all targets
+must fit that stored width, including when the sources are already truncated.
+The sweep makes no embedding requests and performs no completeness validation. Missing cached
+vectors fail instead of being regenerated. Evaluation uses the configured `k` and
+batch size.
 
-The sweep evaluates 768, 1536, and 3072 dimensions with the configured `k` and
-batch size. All six reference/validation names must be distinct. The native
-dimension reads the original tables; smaller dimensions use `<source>_d768` and
-`<source>_d1536`. Each missing destination is created by one streaming
+Both source names and all derived names must be distinct, even if the stored
+width is not requested. A target equal to the stored width uses the original
+tables; smaller targets use `<source>_d<dimension>`. Each missing destination is created by one streaming
 `create_table()` call, with no query-result limit, retaining every row, UUID,
 and row metadata value. Only vectors change to exact float32 prefixes and
 fixed-size Arrow types; no extra normalization is applied. Reference switches

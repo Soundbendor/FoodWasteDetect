@@ -43,7 +43,7 @@ def sources(tmp_path, monkeypatch):
     config = dict(
         dataset={'name': 'foodx251', 'root': str(tmp_path / 'raw')}, output_dir=str(tmp_path / 'output'), k=1,
         embed_images=True, embed_class_labels=False, embed_descriptions=False,
-        n_imgs_per_class=1, cache_validation_embeddings=False,
+        n_imgs_per_class=1, cache_validation_embeddings=False, sweep_dimensions=[768, 1536, 3072],
         embedding=dict(model_id='google/ge-v2', batch_size=1, truncate_dim=None),
         lancedb=dict(uri=str(uri), table='reference', validation_table='validation'),
     )
@@ -91,7 +91,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
     summary_path, = Path(config['output_dir']).glob('matroyshka_sweep_*/summary.json')
     summary = json.loads(summary_path.read_text())['results']
     assert len(summary) == len(runs) == 3
-    for dimension, result, (run, kwargs) in zip(sweep.DIMENSIONS, summary, runs, strict=True):
+    for dimension, result, (run, kwargs) in zip(config['sweep_dimensions'], summary, runs, strict=True):
         effective = kwargs['config']
         assert effective['k'] == 1
         assert effective['embedding']['truncate_dim'] == dimension
@@ -126,7 +126,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         for prediction in report['predictions']:
             assert prediction['prediction'] == winner
             assert prediction['neighbors'][0]['score'] == pytest.approx(float(max(scores)), abs=1e-6)
-        for source, destination in zip(('reference', 'validation'), sweep.table_names(ExperimentConfig.model_validate(config), dimension), strict=True):
+        for source, destination in zip(('reference', 'validation'), sweep.table_names(ExperimentConfig.model_validate(config), dimension, 3072), strict=True):
             table = connection.open_table(destination)
             assert table.schema.field('vector').type == pa.list_(pa.float32(), dimension)
             rows = table.to_arrow().to_pylist()
@@ -254,7 +254,9 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
 
 @pytest.mark.parametrize('validation', ['reference', 'reference_d768', 'reference_d1536', ''])
 def test_collisions_fail_before_tracking(sources, runs, validation):
-    config, _, _, _ = sources
+    config, connection, _, _ = sources
+    if validation and validation != 'reference':
+        sweep.prepare_table(connection, 'validation', validation, 3072, 1)
     config['lancedb']['validation_table'] = validation
     with pytest.raises(ValueError):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
@@ -318,20 +320,104 @@ def test_sweep_variants_are_independent_validated_models(sources):
         ), "synthetic"
 
     sweep.run_sweep(config, evaluate)
-    assert [variant.embedding.truncate_dim for variant in variants] == list(sweep.DIMENSIONS)
-    assert [variant.vector_dimension for variant in variants] == list(sweep.DIMENSIONS)
+    assert [variant.embedding.truncate_dim for variant in variants] == raw['sweep_dimensions']
+    assert [variant.vector_dimension for variant in variants] == raw['sweep_dimensions']
     assert len({id(variant.embedding) for variant in variants}) == 3
     assert config.model_dump() == ExperimentConfig.model_validate(raw).model_dump()
     assert config.embedding.truncate_dim is None
 
 
-def test_sweep_revalidates_dimension_before_table_creation(sources, monkeypatch):
+@pytest.mark.parametrize("dimensions", [[], [1, 1], [0], [-1], [1.5], [True], ["1"]])
+def test_invalid_dimensions_rejected(sources, dimensions):
     config, _, _, _ = sources
-    monkeypatch.setattr(sweep, "DIMENSIONS", (0,))
+    config["sweep_dimensions"] = dimensions
+    with pytest.raises(ValidationError):
+        ExperimentConfig.model_validate(config)
+
+
+def test_missing_and_oversized_dimensions_fail_before_writes(sources, monkeypatch):
+    config, _, _, _ = sources
     prepare = Mock()
     evaluate = Mock()
     monkeypatch.setattr(sweep, "prepare_table", prepare)
-    with pytest.raises(ValueError, match="truncate_dim"):
+    for dimensions in (None, [3073]):
+        config["sweep_dimensions"] = dimensions
+        with pytest.raises(ValueError):
+            sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+    prepare.assert_not_called()
+    evaluate.assert_not_called()
+
+
+def test_custom_non_gemini_order_and_truncated_sources(sources):
+    config, connection, _, _ = sources
+    sweep.prepare_table(connection, 'reference', 'short_ref', 16, 1)
+    sweep.prepare_table(connection, 'validation', 'short_val', 16, 1)
+    config['embedding']['model_id'] = 'example/custom'
+    config['lancedb'].update(table='short_ref', validation_table='short_val')
+    config['sweep_dimensions'] = [8, 16, 4]
+    variants = []
+    from classification.experiments.report_types import EvaluationReport
+    from classification.retrieval.metrics import metrics
+
+    def evaluate(effective):
+        variants.append(effective)
+        return EvaluationReport(config=effective, table=effective.lancedb.table,
+            reference_source_counts=None, predictions=[], metrics=metrics([], ['A', 'B'])), 'run'
+
+    result = sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+    assert [item['dimension'] for item in result['results']] == [8, 16, 4]
+    assert [item.lancedb.table for item in variants] == ['short_ref_d8', 'short_ref', 'short_ref_d4']
+    for width in (8, 4):
+        original = connection.open_table('short_ref').to_arrow().to_pylist()
+        actual = connection.open_table(f'short_ref_d{width}').to_arrow().to_pylist()
+        assert actual == [dict(row, vector=row['vector'][:width]) for row in original]
+    Experiment._create_embedder.assert_not_called()
+
+
+def test_mismatched_source_widths_fail_before_writes(sources, monkeypatch):
+    config, connection, _, _ = sources
+    sweep.prepare_table(connection, 'validation', 'short_val', 16, 1)
+    config['lancedb']['validation_table'] = 'short_val'
+    prepare, evaluate = Mock(), Mock()
+    monkeypatch.setattr(sweep, 'prepare_table', prepare)
+    with pytest.raises(ValueError, match='widths must match'):
+        sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+    prepare.assert_not_called()
+    evaluate.assert_not_called()
+
+
+@pytest.mark.parametrize('vector_type', [None, pa.list_(pa.float32()), pa.int32()])
+def test_malformed_source_schema(vector_type):
+    fields = [] if vector_type is None else [pa.field('vector', vector_type)]
+    table = Mock(schema=pa.schema(fields))
+    with pytest.raises(ValueError, match='fixed-size vector'):
+        sweep.vector_width(table)
+
+
+def test_cli_non_gemini_override_omits_source_width(sources, runs, tmp_path):
+    config, connection, _, _ = sources
+    config['embedding']['model_id'] = 'example/custom'
+    path = tmp_path / 'config.yml'
+    path.write_text(yaml.safe_dump(config))
+    cli.main(['experiment', 'matroyshka-sweep', '--config_file', str(path),
+              '--set', 'sweep_dimensions=[1536,768]'])
+    summary_path, = Path(config['output_dir']).glob('matroyshka_sweep_*/summary.json')
+    results = json.loads(summary_path.read_text())['results']
+    assert [item['dimension'] for item in results] == [1536, 768]
+    assert [item['table'] for item in results] == ['reference_d1536', 'reference_d768']
+    assert len(runs) == 2
+    assert connection.open_table('reference').schema.field('vector').type.list_size == 3072
+    Experiment._create_embedder.assert_not_called()
+
+
+def test_collision_when_source_width_omitted(sources, monkeypatch):
+    config, connection, _, _ = sources
+    sweep.prepare_table(connection, 'validation', 'reference_d768', 3072, 1)
+    config['lancedb']['validation_table'] = 'reference_d768'
+    config['sweep_dimensions'] = [768, 1536]
+    prepare, evaluate = Mock(), Mock()
+    monkeypatch.setattr(sweep, 'prepare_table', prepare)
+    with pytest.raises(ValueError, match='distinct'):
         sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
     prepare.assert_not_called()
     evaluate.assert_not_called()

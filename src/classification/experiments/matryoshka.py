@@ -1,4 +1,4 @@
-"""Evaluate cached Gemini embeddings at native and shorter prefix dimensions."""
+"""Evaluate cached embeddings at stored and shorter prefix dimensions."""
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -18,12 +18,10 @@ from classification.experiments.report_types import EvaluationReport
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.tracking import Tracker
 
-DIMENSIONS = (768, 1536, 3072)
 
-
-def table_names(config: ExperimentConfig, dimension: int) -> tuple[str, str]:
-    """Return reference/cache names, leaving native-dimension names unchanged."""
-    suffix = f"_d{dimension}" if dimension != 3072 else ""
+def table_names(config: ExperimentConfig, dimension: int, source_width: int) -> tuple[str, str]:
+    """Return reference/cache names, retaining names at the stored source width."""
+    suffix = f"_d{dimension}" if dimension != source_width else ""
     options = config.lancedb
     validation = options.validation_table
     if validation is None:
@@ -31,16 +29,30 @@ def table_names(config: ExperimentConfig, dimension: int) -> tuple[str, str]:
     return options.table + suffix, validation + suffix
 
 
-def validate_config(config: ExperimentConfig) -> None:
-    """Require Gemini source tables and distinct source/destination names."""
-    if config.embedding.model_id != "google/ge-v2":
-        raise ValueError("matroyshka-sweep requires google/ge-v2 source tables")
+def validate_config(config: ExperimentConfig, dimensions: list[int], source_width: int) -> None:
+    """Check target widths and distinct source and destination names."""
     names = [config.lancedb.table, config.lancedb.validation_table]
     if any(not isinstance(name, str) or not name.strip() for name in names):
         raise ValueError("Reference and validation table names must be nonempty")
-    all_names = [name for dimension in DIMENSIONS for name in table_names(config, dimension)]
+    if any(dimension > source_width for dimension in dimensions):
+        raise ValueError("Sweep dimensions must not exceed the source vector width")
+    all_names = list(names)
+    for dimension in dimensions:
+        if dimension != source_width:
+            all_names.extend(table_names(config, dimension, source_width))
     if len(set(all_names)) != len(all_names):
         raise ValueError("Sweep source and destination table names must be distinct")
+
+
+def vector_width(table: Table) -> int:
+    """Read the positive fixed-size vector width from a source schema."""
+    position = table.schema.get_field_index("vector")
+    if position < 0:
+        raise ValueError("Source table must have a fixed-size vector field")
+    vector_type = table.schema.field(position).type
+    if not pa.types.is_fixed_size_list(vector_type) or vector_type.list_size <= 0:
+        raise ValueError("Source table must have a positive fixed-size vector field")
+    return vector_type.list_size
 
 
 def prefix_batches(
@@ -109,28 +121,38 @@ def run_sweep(
     evaluate: Callable[[ExperimentConfig], tuple[EvaluationReport, str]],
 ) -> dict[str, list[dict[str, Any]]]:
     """Prepare each dimension and publish a combined summary only after all succeed."""
-    validate_config(config)
+    dimensions = config.sweep_dimensions
+    # TODO: refactor overly defensive checks
+    if dimensions is None:
+        raise ValueError("sweep_dimensions is required for sweeps")
     uri = Path(config.lancedb.uri).expanduser().resolve()
     if not uri.is_dir():
         raise FileNotFoundError(f"LanceDB database does not exist: {uri}")
     connection = LanceDBConnection(uri)
-    sources = table_names(config, 3072)
-    for name in sources:
-        connection.open_table(name)
+    validation_source = config.lancedb.validation_table
+    if not validation_source or not validation_source.strip():
+        raise ValueError("Reference and validation table names must be nonempty")
+    validation_vector_dim = vector_width(connection.open_table(validation_source))
+    training_vector_dim = vector_width(connection.open_table(config.lancedb.table))
+    if training_vector_dim != validation_vector_dim:
+        raise ValueError("Source vector widths must match")
+    source_width = training_vector_dim
+    validate_config(config, dimensions, source_width)
     output = Path(config.output_dir).expanduser().resolve() / datetime.now(UTC).strftime(
         "matroyshka_sweep_%Y%m%dT%H%M%S_%fZ"
     )
     results = []
-    for dimension in DIMENSIONS:
+    # TODO: review continues here
+    for dimension in dimensions:
         settings = config.model_dump()
         settings["vector_dimension"] = dimension
-        reference, validation = table_names(config, dimension)
+        reference, validation = table_names(config, dimension, source_width)
         settings["embedding"]["truncate_dim"] = dimension
         settings["lancedb"].update(table=reference, validation_table=validation)
         settings["cache_validation_embeddings"] = True
         settings["output_dir"] = str(output / f"d{dimension}")
         effective = ExperimentConfig.model_validate(settings)
-        if dimension != 3072:
+        if dimension != source_width:
             for source, destination in zip(sources, (reference, validation), strict=True):
                 prepare_table(
                     connection,

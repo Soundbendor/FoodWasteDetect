@@ -88,11 +88,19 @@ class ExperimentConfig(ConfigModel):
     embed_class_labels: bool
     embed_descriptions: bool
     vector_dimension: PositiveInt | None = None
+    sweep_dimensions: list[PositiveInt] | None = None
     n_imgs_per_class: PositiveInt | None = None
     descriptions_file: str | None = None
     cache_validation_embeddings: bool = False
     ollama: OllamaConfig | None = None
     description_count: PositiveInt | None = None
+
+    @field_validator("sweep_dimensions")
+    @classmethod
+    def unique_sweep_dimensions(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and (not value or len(set(value)) != len(value)):
+            raise ValueError("sweep_dimensions must be nonempty and unique")
+        return value
 
     @model_validator(mode="after")
     def experiment_constraints(self) -> Self:
