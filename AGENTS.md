@@ -64,6 +64,23 @@ its guide: [encoders](src/classification/encoders/AGENTS.md),
 [retrieval](src/classification/retrieval/AGENTS.md), or
 [scripts](src/classification/scripts/AGENTS.md).
 
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for Soundbendor/FoodWasteDetect.
+See [issue tracker](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Use the five default triage labels.
+See [label mapping](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Use a single-context layout: root `GLOSSARY.md` and `docs/adr/`.
+See [domain rules](docs/agents/domain.md).
+
 ## Documentation index
 
 Read the matching reference before working on its task. Current contracts live
@@ -74,6 +91,9 @@ state.
 | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Scope: select a pipeline or interpret branch history                               | [Project overview](docs/overview.md)                                         |
 | Development: change dependencies, packaging, tests, or documentation               | [Development and environment checks](docs/development.md)                    |
+| Issues: create, read, or update tracked work                                       | [Issue tracker](docs/agents/issue-tracker.md)                                |
+| Triage: classify issues or change their readiness                                 | [Triage labels](docs/agents/triage-labels.md)                                 |
+| Domain: explore terminology or architectural decisions                            | [Domain rules](docs/agents/domain.md)                                       |
 | CLIP design: extend localization, masks, crop retrieval, or evaluation             | [CLIP architecture](docs/clip/architecture.md)                               |
 | CLIP repairs: touch legacy annotations, crops, indexing, metrics, or training      | [Source review and correctness gaps](docs/clip/review.md)                    |
 | CLI: change parsing, overrides, command dispatch, or downloads                     | [CLI and configuration](docs/classification/cli.md)                          |
