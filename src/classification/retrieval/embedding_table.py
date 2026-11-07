@@ -41,6 +41,8 @@ _RESUME: dict[TableRole, str] = {
     "validation_cache": "evaluate with validation caching enabled to fill and mark it",
 }
 _RESUME_PREFIX = "rerun the sweep to recreate it from its complete source"
+# The only source kind a validation cache stores, and the one a reference table refuses.
+_VALIDATION_KIND = "validation_image"
 
 _STRING_COLUMNS = ("id", "class", "source_kind", "source_identity", "value")
 _VECTOR = "vector"
@@ -521,19 +523,42 @@ class EmbeddingTable:
     ) -> None:
         """Append records paired with vectors; malformed vectors fail backend validation.
 
+        The role guard keeps validation vectors out of reference searches: a reference
+        table refuses ``validation_image`` records, and a validation cache accepts
+        only them.
+
         Args:
             records: Records to store, in order.
             vectors: One vector per record, of the table's dimension.
 
         Raises:
             ValueError: If the record and vector counts differ; nothing is written.
+            EmbeddingTableError: If any record's source kind is forbidden for this
+                table's role; nothing is written.
         """
         if len(records) != len(vectors):
             raise ValueError("Record/vector count mismatch")
+        self._require_allowed_kinds(records)
         self._table.add(
             [_row(record, vector) for record, vector in zip(records, vectors, strict=True)],
             on_bad_vectors="error",
         )
+
+    def _require_allowed_kinds(self, records: Iterable[PointRecord]) -> None:
+        """Refuse source kinds this role forbids, naming them, before any write."""
+        cache = self.role == "validation_cache"
+        kinds = {record.source_kind for record in records}
+        refused = sorted(kinds - {_VALIDATION_KIND} if cache else kinds & {_VALIDATION_KIND})
+        if refused:
+            rule = (
+                f"a validation cache stores only {_VALIDATION_KIND!r} records"
+                if cache
+                else f"a reference table never stores {_VALIDATION_KIND!r} records"
+            )
+            raise EmbeddingTableError(
+                f"Cannot append to table {self.name!r}: {rule}, but the batch holds "
+                f"{', '.join(map(repr, refused))}; nothing was written"
+            )
 
     def mark_complete(self, expected: Iterable[SourceKey]) -> None:
         """Verify every expected source key, optimize reference tables, then mark complete.
@@ -617,9 +642,25 @@ class EmbeddingTable:
             Each absent key once, in first-request order, from one metadata-only
             scan that never reads vectors.
         """
-        rows = self._table.search().select(["source_kind", "source_identity"]).limit(None)
-        stored = frozenset((row["source_kind"], row["source_identity"]) for row in rows.to_list())
+        stored = frozenset(self._stored_keys())
         return [key for key in dict.fromkeys(keys) if key not in stored]
+
+    def duplicate_count(self) -> int:
+        """Count stored rows whose source key an earlier row already holds.
+
+        Duplicates are tolerated: they still count in ``source_counts()`` and
+        ``class_counts()``. A key stored three times contributes two.
+
+        Returns:
+            Stored rows minus distinct source keys, from one metadata-only scan that
+            never reads vectors.
+        """
+        keys = self._stored_keys()
+        return len(keys) - len(set(keys))
+
+    def _stored_keys(self) -> list[SourceKey]:
+        rows = self._table.search().select(["source_kind", "source_identity"]).limit(None)
+        return [(row["source_kind"], row["source_identity"]) for row in rows.to_list()]
 
     def rows(self) -> list[tuple[PointRecord, NDArray[np.float32]]]:
         """Read every stored record with its vector, in storage order.

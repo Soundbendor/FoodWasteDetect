@@ -7,7 +7,7 @@ follow the [glossary](../../GLOSSARY.md).
 
 | Module | Responsibility |
 | --- | --- |
-| `retrieval/embedding_table.py` | `EmbeddingTable`: headed table lifecycle, role checks, fingerprint and dimension compatibility, completion markers, build operations (open or create, missing keys, mark complete), appends, record and vector reads, counts, optimization, search, and prefix-table derivation |
+| `retrieval/embedding_table.py` | `EmbeddingTable`: headed table lifecycle, role checks, the append role guard, duplicate counts, fingerprint and dimension compatibility, completion markers, build operations (open or create, missing keys, mark complete), appends, record and vector reads, counts, optimization, search, and prefix-table derivation |
 | `retrieval/voting.py` | Pure `classify()` majority vote |
 | `retrieval/metrics.py` | Pure per-query ranking and aggregate classification/retrieval metrics |
 | `schemas.py` | `PointRecord`, `SourceKey`, neighbor, prediction, and retrieval-metric types |
@@ -108,11 +108,32 @@ Rows hold non-null strings `id`, `class`, `source_kind`, `source_identity`, and
 exposes `source_key`; it does not know column names. The module maps `label` to the
 stored `class`.
 
-`append()` checks record/vector counts, pairs rows strictly, and asks the backend
-to reject bad vectors. It adds completed batches without application write
+`append()` checks record/vector counts, applies the role guard, pairs rows
+strictly, and asks the backend to reject bad vectors. It adds completed batches without application write
 retries. Compatibility is checked when a table is opened, not per append;
 transaction and rollback guarantees are outside the current scope. Follow
 [experiment persistence](experiments.md#reference-builds-and-resumption).
+
+The **role guard** keeps validation vectors out of reference searches. A
+reference table refuses `validation_image` records; a validation cache accepts
+only `validation_image` records. A batch holding any forbidden source kind raises
+`EmbeddingTableError` naming those kinds, before anything is written, so the
+table's rows, version, and completion marker are unchanged. Every other source
+kind (`class_name`, `generated_description`, `training_image`) is accepted by
+reference tables. The guard checks only appends; tables are not scanned for
+forbidden rows when they are opened.
+
+### Duplicate source keys
+
+Duplicate source keys are tolerated and reported, never removed or refused. A
+table holding them opens normally, including through `open_complete()`.
+`duplicate_count()` performs one metadata-only scan and returns the stored row
+count minus the number of distinct source keys: a key stored three times
+contributes two, and a table without duplicates reports zero. `source_counts()`
+and `class_counts()` still count every stored row, duplicates included, and
+`missing()` and `mark_complete()` treat a duplicated key as present. The `index`
+stage logs a warning when the count is nonzero and records it in the
+[index summary](experiments.md#artifact-and-failure-contract).
 
 Builds resume and finish through two operations over expected source keys:
 
@@ -160,6 +181,7 @@ propagates instead.
 | --- | --- |
 | `class_counts()` | Stream only the class column without a result limit; every source kind and duplicate row counts |
 | `source_counts()` | Stream only the source-kind column without a result limit; every stored row, including duplicate source keys, counts |
+| `duplicate_count()` | Stream only the source-key columns without a result limit; stored rows minus distinct source keys ([duplicates](#duplicate-source-keys)) |
 | `rows()` | Every stored `PointRecord` with its float32 vector, in storage order; for inspection and small tables |
 | `fetch_vectors(keys)` | Validation caches only. Return float32 vectors in caller order, including repeated requests; missing keys raise `KeyError` |
 | `query(vector, k)` | Reference tables only. Exact cosine neighbours in backend order, as `id`, `label`, and similarity `score` |
@@ -309,7 +331,8 @@ an empty validation split before publishing a report.
 
 `tests/test_embedding_table.py` uses synthetic vectors and temporary real LanceDB
 tables through the `EmbeddingTable` interface. It checks header round trips,
-legacy refusal (including schema-version-1 headers), role checks, fingerprint
+legacy refusal (including schema-version-1 headers), role checks, the append role
+guard (refusal before any write, per role), duplicate counts, fingerprint
 round trips, inheritance, and mismatch refusal on resume and on open for
 evaluation, row preservation, bad-vector rejection, exact cosine
 ordering, negative scores, unlimited scans, ordered fetches, concurrent readers,
@@ -319,7 +342,9 @@ derivation: refusal of incomplete sources, row-count-verified completion, reuse
 without copying, recreation after a crash or later write, and refusal, without
 changes, of legacy, non-prefix, other-source, other-dimension, other-role, and
 other-fingerprint destinations. `tests/test_matroyshka_sweep.py` checks the
-same reuse, recreation, and refusal through the sweep entry point. `tests/test_retrieval.py` checks
+same reuse, recreation, and refusal through the sweep entry point.
+`tests/test_classification.py` checks the duplicate warning and the summary's
+`duplicate_count` through the `index` stage. `tests/test_retrieval.py` checks
 vote ties, abstentions, and hand-calculated ranking denominators.
 `tests/test_classification.py` checks that deeper rankings do not expand saved
 voting support. `tests/test_matroyshka_sweep.py` and `tests/test_tracking.py` cover

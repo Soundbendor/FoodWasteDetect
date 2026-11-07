@@ -18,6 +18,30 @@ For hardware acceptance, read the [V100 procedure](#v100-kernel-check) together
 with the current encoder's hardware constraints. Procedures here retain the root
 guide's explicit authorization requirements.
 
+## Append role guard and duplicate counts (2026-11-06)
+
+`EmbeddingTable.append()` now refuses `validation_image` records in a reference
+table and every other source kind in a validation cache, raising
+`EmbeddingTableError` before anything is written
+([rows and appends](classification/retrieval.md#rows-and-appends)).
+`duplicate_count()` reports stored rows minus distinct source keys; the `index`
+stage logs a warning when it is nonzero and writes `duplicate_count` into
+`index.json`, while source and class counts still include duplicate rows
+([duplicate source keys](classification/retrieval.md#duplicate-source-keys)).
+The header format and schema version are unchanged, so no rebuild is needed;
+`index.json` files written earlier lack the new field and are never read by
+evaluation.
+
+Checks used synthetic records and temporary local LanceDB 0.40.0 tables; the
+stage test created a duplicate by appending a stored record again and rerunning
+`index`. In the worktree's `default` and `jina-cpu` environments, installed from
+the committed lockfile, Ruff, the format check, scoped ty, and
+`classification --help` passed. The default suite passed 637 tests with two
+skips; the Jina suite passed 636 tests with three skips. Both reported the
+existing Sentence Transformers deprecation warning. The test task hid GPUs and
+set Hugging Face offline mode. No model or dataset downloads, GPU work, live
+cloud requests, or shared storage were used.
+
 ## Prefix-table recreation (2026-11-06)
 
 `derive_prefix()` now requires a complete source and marks a new prefix complete

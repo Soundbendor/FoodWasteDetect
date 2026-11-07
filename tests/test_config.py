@@ -206,7 +206,8 @@ def test_evaluation_reports_require_reference_source_counts():
 def test_optional_services_and_report_serialization():
     config = ExperimentConfig.model_validate(config_data())
     summary = IndexSummary(
-        table="references", uri="/db", dimension=2, source_counts={"class_name": 2}, config=config
+        table="references", uri="/db", dimension=2, source_counts={"class_name": 2},
+        duplicate_count=0, config=config,
     )
     assert summary.config is config
     assert summary.model_dump(mode="json")["config"] == config.model_dump(mode="json")

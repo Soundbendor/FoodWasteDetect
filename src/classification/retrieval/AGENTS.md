@@ -8,6 +8,7 @@ Experiment selection, resumption, and report publication belong to `experiments`
 | Task | Read before changing |
 | --- | --- |
 | Embedding tables, source-key scans, row counts, vector fetching, or optimization | [Embedding tables](../../../docs/classification/retrieval.md#embedding-tables) |
+| Append role guard or duplicate source-key counts | [Rows and appends](../../../docs/classification/retrieval.md#rows-and-appends); [Duplicate source keys](../../../docs/classification/retrieval.md#duplicate-source-keys) |
 | Header, roles, or legacy refusal | [Header](../../../docs/classification/retrieval.md#header); [ADR-0001](../../../docs/adr/0001-embedding-table-header.md) |
 | Fingerprints, `require_compatible()`, or incompatible-table refusal | [Fingerprints and compatibility](../../../docs/classification/retrieval.md#fingerprints-and-compatibility) |
 | Completion markers, `open_complete()`, or incomplete-table refusal | [Completion](../../../docs/classification/retrieval.md#completion) |

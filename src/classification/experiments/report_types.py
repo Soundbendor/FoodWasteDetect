@@ -13,12 +13,15 @@ class IndexSummary(BaseModel):
     Attributes:
         dimension: Stored vector width of the reference table.
         source_counts: Stored reference-table rows per source kind, duplicates included.
+        duplicate_count: Stored rows whose source key an earlier row already holds;
+            zero when every source key is stored once.
     """
 
     table: str
     uri: str
     dimension: int
     source_counts: dict[str, int]
+    duplicate_count: int
     config: ExperimentConfig
 
 

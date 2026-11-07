@@ -156,13 +156,25 @@ class Experiment:
         return self._publish_index(reference)
 
     def _publish_index(self, reference: EmbeddingTable) -> IndexSummary:
-        """Write index.json before publishing the table's source counts to the tracker."""
+        """Write index.json before publishing the table's source counts to the tracker.
+
+        Duplicate source keys are tolerated; a nonzero count is logged as a warning.
+        """
         counts = dict(reference.source_counts())
+        duplicates = reference.duplicate_count()
+        if duplicates:
+            logging.warning(
+                "Reference table %r holds %d duplicate source key rows; source and class "
+                "counts include them",
+                reference.name,
+                duplicates,
+            )
         artifact = IndexSummary(
             table=reference.name,
             uri=str(reference.uri),
             dimension=reference.dimension,
             source_counts=counts,
+            duplicate_count=duplicates,
             config=self.config,
         )
         self.output.mkdir(parents=True, exist_ok=True)

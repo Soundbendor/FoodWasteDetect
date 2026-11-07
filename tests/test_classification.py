@@ -581,7 +581,7 @@ class ExperimentTests(unittest.TestCase):
         self.describer_constructor.side_effect = AssertionError('Cached descriptions regenerated')
         report = exp.run().model_dump(mode="json")
         artifact = json.loads((exp.output / 'index.json').read_text())
-        self.assertEqual(set(artifact), {'table', 'uri', 'dimension', 'source_counts', 'config'})
+        self.assertEqual(set(artifact), {'table', 'uri', 'dimension', 'source_counts', 'duplicate_count', 'config'})
         self.assertEqual(set(report), {'config', 'predictions', 'table', 'dimension',
                                       'reference_source_counts', 'metrics'})
         folder = next(exp.output.glob('evaluation_*'))
@@ -939,6 +939,31 @@ class ExperimentTests(unittest.TestCase):
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
             self.assertEqual(exp.evaluate_cached().dimension, 2)
+
+    def test_index_summary_records_zero_duplicates_without_warning(self):
+        exp = self.experiment((True, True, False))
+        with self.assertNoLogs(level='WARNING'):
+            summary = exp.build_vector_database().model_dump(mode="json")
+        self.assertEqual(summary['duplicate_count'], 0)
+        self.assertEqual(json.loads((exp.output / 'index.json').read_text())['duplicate_count'], 0)
+
+    def test_index_warns_about_duplicate_source_keys_and_records_their_count(self):
+        import numpy as np
+        exp = self.experiment((False, True, False))
+        exp.build_vector_database()
+        name = exp.config.lancedb.table
+        table = EmbeddingTable.open(self.db_path, name, 'reference')
+        stored = [record for record, _ in table.rows()]
+        table.append(stored[:1], np.ones((1, 2), dtype=np.float32))
+
+        with self.assertLogs(level='WARNING') as logs:
+            summary = exp.build_vector_database().model_dump(mode="json")
+
+        self.assertIn(f"Reference table {name!r} holds 1 duplicate source key", '\n'.join(logs.output))
+        self.assertEqual(summary['duplicate_count'], 1)
+        self.assertEqual(json.loads((exp.output / 'index.json').read_text())['duplicate_count'], 1)
+        self.assertEqual(summary['source_counts'], {'class_name': 3})
+        self.assertEqual(exp.evaluate().model_dump(mode="json")['reference_source_counts'], {'class_name': 3})
 
     def test_lost_appends_fail_completion_with_missing_count(self):
         exp = self.experiment((True, True, False))

@@ -957,3 +957,57 @@ def test_storage_errors_propagate_without_cleanup(source, monkeypatch, operation
         source.derive_prefix("destination", 2, batch_size=1)
 
     drop.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("role", "refused"),
+    [
+        ("reference", "validation_image"),
+        ("validation_cache", "training_image"),
+        ("validation_cache", "class_name"),
+        ("validation_cache", "generated_description"),
+    ],
+)
+def test_append_refuses_a_source_kind_the_role_forbids_before_writing(tmp_path, role, refused):
+    table = EmbeddingTable.create(tmp_path, "guarded", role, 2, snapshot="", **fingerprints(role))
+    allowed = "training_image" if role == "reference" else "validation_image"
+    table.append([PointRecord("A", allowed, "kept", "")], np.ones((1, 2), dtype=np.float32))
+    table.mark_complete([(allowed, "kept")])
+    batch = [PointRecord("A", allowed, "new", ""), PointRecord("B", refused, "leak", "")]
+
+    with pytest.raises(EmbeddingTableError, match=refused):
+        table.append(batch, np.ones((2, 2), dtype=np.float32))
+
+    reopened = EmbeddingTable.open(tmp_path, "guarded", role)
+    assert [record.source_key for record, _ in reopened.rows()] == [(allowed, "kept")]
+    assert reopened.is_complete
+
+
+@pytest.mark.parametrize("kind", ["class_name", "generated_description", "training_image"])
+def test_reference_tables_accept_every_reference_source_kind(tmp_path, kind):
+    table = EmbeddingTable.create(tmp_path, "references", "reference", 2, snapshot="", **fingerprints("reference"))
+
+    table.append([PointRecord("A", kind, "0", "")], np.ones((1, 2), dtype=np.float32))
+
+    assert table.source_counts() == {kind: 1}
+
+
+def test_a_table_with_duplicate_source_keys_opens_and_reports_their_count(tmp_path):
+    table = EmbeddingTable.create(tmp_path, "duplicates", "reference", 2, snapshot="", **fingerprints("reference"))
+    assert table.duplicate_count() == 0
+    records = [PointRecord("A", "class_name", "0", ""), PointRecord("A", "training_image", "0", "")]
+    table.append(records, np.ones((2, 2), dtype=np.float32))
+    assert table.duplicate_count() == 0
+    repeats = [
+        PointRecord("A", "class_name", "0", ""),
+        PointRecord("B", "class_name", "0", ""),
+        PointRecord("A", "training_image", "0", ""),
+    ]
+
+    table.append(repeats, np.ones((3, 2), dtype=np.float32))
+    table.mark_complete([("class_name", "0"), ("training_image", "0")])
+
+    reopened = EmbeddingTable.open_complete(tmp_path, "duplicates", "reference")
+    assert reopened.duplicate_count() == 3
+    assert reopened.source_counts() == {"class_name": 3, "training_image": 2}
+    assert reopened.class_counts() == {"A": 4, "B": 1}
