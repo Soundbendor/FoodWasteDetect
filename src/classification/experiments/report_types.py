@@ -17,10 +17,14 @@ class IndexSummary(BaseModel):
 
 
 class EvaluationReport(BaseModel):
-    """Completed predictions and metrics written before tracker publication."""
+    """Completed predictions and metrics written before tracker publication.
+
+    ``reference_source_counts`` holds every stored row of the reference table by
+    source kind, read from the table itself.
+    """
 
     config: ExperimentConfig
     table: str
-    reference_source_counts: dict[str, int] | None
+    reference_source_counts: dict[str, int]
     predictions: list[Prediction]
     metrics: RetrievalMetrics

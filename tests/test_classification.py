@@ -907,27 +907,55 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(exp.build_vector_database().model_dump(mode="json"), artifact)
         self.assertIsNone(exp._embedder)
 
-    def test_evaluation_uses_configured_table_with_stale_summary(self):
+    def test_stale_or_mismatched_summaries_do_not_affect_reported_counts(self):
         exp = self.experiment()
         exp.build_vector_database()
         path = exp.output / 'index.json'
-        summary = json.loads(path.read_text())
-        summary['table'] = 'unrelated_table'
-        path.write_text(json.dumps(summary))
-        report = exp.evaluate().model_dump(mode="json")
-        self.assertEqual(report['table'], exp.config.lancedb.table)
-        self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
-        self.assertNotIn('model', report)
-        self.assertIsNone(report['reference_source_counts'])
+        valid = json.loads(path.read_text())
+        stale = [
+            json.dumps(dict(valid, table='unrelated_table', source_counts={'class_name': 99})),
+            json.dumps(dict(valid, uri=str(self.root / 'other_database'), source_counts={})),
+            json.dumps(dict(valid, source_counts={'training_image': 7})),
+            '{broken',
+        ]
+        for content in stale:
+            with self.subTest(content=content):
+                path.write_text(content)
+                report = exp.evaluate().model_dump(mode="json")
+                self.assertEqual(report['table'], exp.config.lancedb.table)
+                self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
+                self.assertNotIn('model', report)
+                self.assertEqual(report['reference_source_counts'], {'class_name': 2})
 
-    def test_summary_for_same_table_in_different_database_is_ignored(self):
-        exp = self.experiment()
+    def test_evaluation_counts_reference_table_without_index_summary(self):
+        exp = self.experiment((True, True, False))
         exp.build_vector_database()
-        path = exp.output / 'index.json'
-        summary = json.loads(path.read_text())
-        summary['uri'] = str(self.root / 'other_database')
-        path.write_text(json.dumps(summary))
-        self.assertIsNone(exp.evaluate().model_dump(mode="json")['reference_source_counts'])
+        (exp.output / 'index.json').unlink()
+        report = exp.evaluate().model_dump(mode="json")
+        self.assertEqual(report['reference_source_counts'], {'training_image': 2, 'class_name': 2})
+        self.assertFalse((exp.output / 'index.json').exists())
+
+    def test_evaluation_counts_every_row_of_a_resumed_reference_table(self):
+        exp = self.experiment((True, True, False))
+        exp.batch_size = 1
+        append = LanceDBIndex.append
+        calls = 0
+
+        def fail_second(index, records, vectors):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ConnectionError('second append failed')
+            return append(index, records, vectors)
+
+        with patch.object(LanceDBIndex, 'append', new=fail_second):
+            with self.assertRaisesRegex(ConnectionError, 'second append'):
+                exp.build_vector_database()
+        self.assertFalse((exp.output / 'index.json').exists())
+        exp.build_vector_database()
+        (exp.output / 'index.json').unlink()
+        report = exp.evaluate().model_dump(mode="json")
+        self.assertEqual(report['reference_source_counts'], {'training_image': 2, 'class_name': 2})
 
     def test_evaluation_reads_read_only_database(self):
         exp = self.experiment()

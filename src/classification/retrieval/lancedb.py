@@ -157,8 +157,18 @@ class LanceDBIndex:
 
     def class_counts(self) -> Counter[str]:
         """Stream all class metadata, counting every stored row without loading vectors."""
+        return self._column_counts("class")
+
+    def source_counts(self) -> Counter[str]:
+        """Count every stored row, including duplicate source keys, by source kind.
+
+        Streams only the ``source_kind`` column; vectors are never read.
+        """
+        return self._column_counts("source_kind")
+
+    def _column_counts(self, column: str) -> Counter[str]:
         counts: Counter[str] = Counter()
-        for batch in self.table.search().select(["class"]).limit(None).to_batches():
+        for batch in self.table.search().select([column]).limit(None).to_batches():
             counts.update(batch.column(0).to_pylist())
         return counts
 

@@ -140,10 +140,12 @@ For paid backends, restarting can repeat requests from the unfinished batch;
 
 `build_vector_database()` returns and writes `index.json` only after successful
 optimization. It contains `table`, resolved `uri`, `source_counts`, and
-effective `config`, including defaults. Evaluation attaches counts from this file
-only when both URI and table match; otherwise `reference_source_counts` is null.
-Writers return an `IndexSummary`. Historical summaries supply only URI/table
-matching and source counts.
+effective `config`, including defaults. Writers return an `IndexSummary`.
+Evaluation never reads `index.json`: a missing, stale, mismatched, or malformed
+summary has no effect on reports. Before evaluating, `evaluate()` and
+`evaluate_cached()` read `reference_source_counts` from the reference table with
+`LanceDBIndex.source_counts()`, which counts every stored row, duplicates included.
+The field is always present and never null.
 
 `evaluate()` and `evaluate_cached()` share `_execute_evaluation()`. The latter
 reads existing cached vectors regardless of the cache flag, without completing or
@@ -220,8 +222,9 @@ caching, and uses its own table names and output directory under `<output_dir>/m
 `embedding.truncate_dim` as configured, since the sweep embeds nothing.
 The CLI owns one native W&B context per dimension, with no outer run, explicit
 identity/group settings, or
-resume checks. Standard reports have null reference counts unless a matching
-index summary exists in their output directory.
+resume checks. Each dimension's report and W&B summary carry the source counts of
+that dimension's reference table, which a prefix table copies row for row from its
+source.
 
 Only complete success writes `summary.json`, with dimensions, tables, output
 directories, aggregate metrics, and returned W&B run IDs. Reports from earlier

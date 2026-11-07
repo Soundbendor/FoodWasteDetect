@@ -10,7 +10,8 @@ from pydantic import ValidationError
 
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig, OllamaConfig
-from classification.experiments.report_types import IndexSummary
+from classification.experiments.report_types import EvaluationReport, IndexSummary
+from classification.retrieval.metrics import metrics
 
 
 def test_defaults_spelling_and_mutable_nested_attributes():
@@ -187,6 +188,15 @@ def test_validation_table_optional_without_cache_or_sweep():
 def test_shipped_experiment_configurations_load(name):
     data = yaml.safe_load((Path("cfg") / name).read_text())
     assert ExperimentConfig.model_validate(data).model_dump(exclude_unset=True) == data
+
+
+def test_evaluation_reports_require_reference_source_counts():
+    config = ExperimentConfig.model_validate(config_data())
+    fields = dict(config=config, table="references", predictions=[], metrics=metrics([], ["A"]))
+    for missing in ({}, {"reference_source_counts": None}):
+        with pytest.raises(ValidationError, match="reference_source_counts"):
+            EvaluationReport(**fields, **missing)
+    assert EvaluationReport(**fields, reference_source_counts={}).reference_source_counts == {}
 
 
 def test_optional_services_and_report_serialization():

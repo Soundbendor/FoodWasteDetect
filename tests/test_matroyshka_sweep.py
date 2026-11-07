@@ -111,7 +111,8 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         assert report_artifact.files['report.json'] == report_path.read_bytes()
         report = json.loads(report_path.read_text())
         assert report['config'] == effective
-        assert report['reference_source_counts'] is None
+        assert report['reference_source_counts'] == {'class_name': 2}
+        assert run.summary['reference_source_counts'] == {'class_name': 2}
         assert report['metrics']['evaluated'] == 2
         for key, value in report['metrics'].items():
             if key != 'per_class':
@@ -199,7 +200,7 @@ def test_sweep_variants_are_independent_validated_models(sources):
         variants.append(effective)
         return EvaluationReport(
             config=effective, table=effective.lancedb.table,
-            reference_source_counts=None, predictions=[], metrics=metrics([], ["A", "B"]),
+            reference_source_counts={'class_name': 2}, predictions=[], metrics=metrics([], ["A", "B"]),
         ), "synthetic"
 
     sweep.run_sweep(config, evaluate)
@@ -245,7 +246,7 @@ def test_custom_non_gemini_order_and_truncated_sources(sources):
     def evaluate(effective):
         variants.append(effective)
         return EvaluationReport(config=effective, table=effective.lancedb.table,
-            reference_source_counts=None, predictions=[], metrics=metrics([], ['A', 'B'])), 'run'
+            reference_source_counts={'class_name': 2}, predictions=[], metrics=metrics([], ['A', 'B'])), 'run'
 
     result = sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
     assert [item['dimension'] for item in result['results']] == [8, 16, 4]

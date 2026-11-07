@@ -323,6 +323,18 @@ def test_class_counts_stream_all_rows_and_reference_types(tmp_path):
     assert index.class_counts() == {'A': 1650, 'B': 1650}
 
 
+def test_source_counts_stream_every_row_including_duplicate_source_keys(tmp_path):
+    index = LanceDBIndex.create(tmp_path, 'counts', 2)
+    assert index.source_counts() == {}
+    records = [PointRecord('A', kind, str(i), '')
+               for kind, total in (('class_name', 2), ('training_image', 1500)) for i in range(total)]
+    duplicates = [PointRecord('A', 'class_name', '0', ''), PointRecord('B', 'class_name', '0', '')]
+    index.append(records + duplicates, np.ones((len(records) + 2, 2), dtype=np.float32))
+    assert index.source_counts() == {'class_name': 4, 'training_image': 1500}
+    reopened = LanceDBIndex.open(tmp_path, 'counts')
+    assert reopened.source_counts() == {'class_name': 4, 'training_image': 1500}
+
+
 def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
     from classification.retrieval.lancedb import LanceDBIndex
     from classification.schemas import PointRecord

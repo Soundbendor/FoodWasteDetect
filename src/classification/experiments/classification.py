@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from classification.datasets.image_dataset import load_dataset
 from classification.encoders.base import Embedder
@@ -187,40 +185,28 @@ class Experiment:
 
     def evaluate(self) -> EvaluationReport:
         """Complete optional validation caching, then classify the full split."""
-        index, artifact = self._prepare_evaluation()
+        index, counts = self._prepare_evaluation()
         batches = self._prepare_validation_batches(cached_only=False)
-        return self._execute_evaluation(index, artifact, batches)
+        return self._execute_evaluation(index, counts, batches)
 
     def evaluate_cached(self) -> EvaluationReport:
         """Classify the validation split using existing cached vectors only."""
         batches = self._prepare_validation_batches(cached_only=True)
-        index, artifact = self._prepare_evaluation()
-        return self._execute_evaluation(index, artifact, batches)
+        index, counts = self._prepare_evaluation()
+        return self._execute_evaluation(index, counts, batches)
 
-    def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict[str, Any] | None]:
-        table = self.config.lancedb.table
+    def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict[str, int]]:
+        """Open the reference table and publish its stored source-kind counts."""
         index = self._lancedb_adapter()
-        artifact: dict[str, Any] | None = None
-        path = self.output / "index.json"
-        if path.exists():
-            logging.info("Loading index.json from checkpoint...")
-            summary: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-            # Only attach metadata identifying this database and table.
-            if (
-                summary["table"] == table
-                and Path(summary["uri"]).expanduser().resolve() == index.uri
-            ):
-                artifact = summary
+        counts = dict(index.source_counts())
         if self.tracker:
-            self.tracker.reference_counts(
-                artifact["source_counts"] if artifact is not None else None
-            )
-        return index, artifact
+            self.tracker.reference_counts(counts)
+        return index, counts
 
     def _execute_evaluation(
         self,
         index: LanceDBIndex,
-        artifact: dict[str, Any] | None,
+        reference_source_counts: dict[str, int],
         batches: Iterable[EmbeddingBatch],
     ) -> EvaluationReport:
         predictions = evaluate_batches(
@@ -233,7 +219,7 @@ class Experiment:
         report = EvaluationReport(
             config=self.config,
             table=index.name,
-            reference_source_counts=artifact["source_counts"] if artifact is not None else None,
+            reference_source_counts=reference_source_counts,
             predictions=predictions,
             metrics=metrics(predictions, self.classes),
         )

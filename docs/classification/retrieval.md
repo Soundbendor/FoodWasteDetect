@@ -34,6 +34,7 @@ current scope; follow [experiment persistence](experiments.md#reference-builds-a
 | --- | --- |
 | `get_record_ids()` | Unlimited metadata-only scan of `(source_kind, source_identity)`; includes every stored row |
 | `class_counts()` | Stream only the class column without a result limit; every source type and duplicate row counts |
+| `source_counts()` | Stream only the `source_kind` column without a result limit; every stored row, including duplicate source keys, counts. Evaluation reports take `reference_source_counts` from it |
 | `fetch_vectors(identities)` | Select requested identities and return float32 vectors in caller order, including repeated requests; missing identities fail |
 | `query(vector, k)` | Exact cosine neighbors in backend order, as `id`, `label`, and similarity `score` |
 
