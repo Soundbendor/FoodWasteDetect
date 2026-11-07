@@ -86,7 +86,12 @@ class Experiment:
 
     def _reference_table(self) -> EmbeddingTable:
         options = self.config.lancedb
-        return EmbeddingTable.open(options.uri, options.table, "reference")
+        return EmbeddingTable.open_complete(
+            options.uri,
+            options.table,
+            "reference",
+            expected=self._index_builder().expected_reference_keys,
+        )
 
     def _evaluation_batches(
         self,
@@ -170,7 +175,12 @@ class Experiment:
         if table is None:
             raise ValueError("lancedb.validation_table is required for cached evaluation")
         if cached_only:
-            cache = EmbeddingTable.open(options.uri, table, "validation_cache")
+            cache = EmbeddingTable.open_complete(
+                options.uri,
+                table,
+                "validation_cache",
+                expected=self._index_builder().validation_keys,
+            )
         else:
             cache = self._index_builder().build_validation_cache(table)
         metadata = self.dataset.iter_batches("val", self.batch_size, decode=False)

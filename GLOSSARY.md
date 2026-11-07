@@ -34,7 +34,8 @@ _Avoid_: build metadata, table config
 
 **Complete table**:
 An embedding table whose build has finished, so it holds every source key it is
-expected to hold.
+expected to hold. It carries a completion marker at its current version; any
+later write makes it incomplete again.
 _Avoid_: finished index, optimized table
 
 ### Records

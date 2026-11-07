@@ -7,7 +7,7 @@ follow the [glossary](../../GLOSSARY.md).
 
 | Module | Responsibility |
 | --- | --- |
-| `retrieval/embedding_table.py` | `EmbeddingTable`: headed table lifecycle, role checks, build operations (open or create, missing keys, mark complete), appends, record and vector reads, counts, optimization, search, and prefix-table derivation |
+| `retrieval/embedding_table.py` | `EmbeddingTable`: headed table lifecycle, role checks, completion markers, build operations (open or create, missing keys, mark complete), appends, record and vector reads, counts, optimization, search, and prefix-table derivation |
 | `retrieval/voting.py` | Pure `classify()` majority vote |
 | `retrieval/metrics.py` | Pure per-query ranking and aggregate classification/retrieval metrics |
 | `schemas.py` | `PointRecord`, `SourceKey`, neighbor, prediction, and retrieval-metric types |
@@ -27,6 +27,7 @@ expansion, independently of `output_dir`. `EmbeddingTable.exists(uri, name)` and
 | Factory | Contract |
 | --- | --- |
 | `open(uri, name, role)` | Open an existing table; a missing directory raises `FileNotFoundError`, a missing table propagates LanceDB's `ValueError` |
+| `open_complete(uri, name, role, *, expected)` | Open an existing table for reading, as `open()`, and require it to be [complete](#completion); `expected` is a callable invoked only for an incomplete table |
 | `create(uri, name, role, dimension, *, snapshot)` | Create an empty table with a header and the verbatim creation snapshot; an existing name is refused |
 | `open_or_create(uri, name, role, dimension, *, snapshot)` | Open an existing table under `role`, or create one; `dimension` is a callable invoked only when creating, and `snapshot` is ignored for an existing table |
 
@@ -51,8 +52,11 @@ Opening a table fails with `LegacyTableError` when the header is absent, malform
 records another schema version, lacks a creation snapshot, or disagrees with the
 stored columns or vector width. The message tells the researcher to rebuild under a
 new table name and cites ADR-0001; there is no migration. Opening a valid table under
-the other role fails with `EmbeddingTableError`. Both errors are `ValueError`
-subclasses, and `LegacyTableError` subclasses `EmbeddingTableError`.
+the other role fails with `EmbeddingTableError`. An incomplete table fails with
+`IncompleteTableError` where completion is required. All three are `ValueError`
+subclasses; `LegacyTableError` and `IncompleteTableError` subclass
+`EmbeddingTableError`. The completion marker is not part of the header, so it
+does not change the schema version.
 
 ### Rows and appends
 
@@ -70,10 +74,37 @@ Builds resume and finish through two operations over expected source keys:
 
 - `missing(keys)` performs one metadata-only scan and returns the requested keys
   that are absent, each once, in first-request order.
-- `mark_complete(expected)` raises `EmbeddingTableError` stating how many of the
-  expected keys are missing when any are absent, without optimizing. Extra stored
-  rows are allowed. After the check passes, reference tables call `optimize()`;
-  validation caches are never optimized. The role comes from the header.
+- `mark_complete(expected)` raises `IncompleteTableError` stating how many of the
+  expected keys are missing when any are absent, without optimizing or marking.
+  Extra stored rows are allowed. After the check passes, it removes any earlier
+  marker, reference tables call `optimize()`, and the
+  [completion marker](#completion) is persisted against the resulting version.
+  Validation caches are never optimized. The role comes from the header.
+
+### Completion
+
+A table is complete when its completion marker, a LanceDB version tag, points at
+the table's current version. `is_complete` reads this without scanning rows. Any
+later write, including `append()`, a delete, or an optimization that compacts
+files, moves the version past the marker, so a changed table is never reported
+complete. Tables written before completion markers existed have none: they open
+normally and are incomplete. Marking them complete needs no rebuild.
+
+What complete means per role:
+
+- **Reference table**: every expected source key (each prepared text record and
+  selected training image) is present, and the table was optimized before it was
+  marked.
+- **Validation cache**: every validation-split `validation_image` key is present.
+  Caches are marked without optimizing.
+- **Prefix table**: the streaming copy finished from a source that was complete
+  when the copy began. A prefix of an incomplete source stays incomplete.
+
+`open_complete(uri, name, role, *, expected)` opens a complete table without
+calling `expected` or scanning stored keys. For an incomplete table it calls
+`expected`, performs one `missing()` scan, and raises `IncompleteTableError`
+stating how many of the expected keys are missing; the count is zero when every
+key is stored but the build never reached `mark_complete()`.
 
 | Read operation | Contract |
 | --- | --- |
@@ -101,7 +132,8 @@ the same database:
   unchanged.
 - Otherwise one streaming `create_table()` call, with no query-result limit,
   retains every row, record ID, and row metadata value. Only vectors change to
-  exact float32 prefixes; no normalization is applied.
+  exact float32 prefixes; no normalization is applied. When the source is
+  complete, the new prefix is marked complete after the copy finishes.
 - The new header keeps the source's role, records the prefix dimension, and records
   the source table and source dimension. A prefix of a prefix records its immediate
   source. The creation snapshot is copied verbatim, so it is identical to the
@@ -111,12 +143,16 @@ Open, create, and stream failures propagate without scan, repair, overwrite, or
 cleanup; this is not a crash durability guarantee.
 
 `optimize()` delegates to LanceDB defaults. Reference builds invoke it only
-through `mark_complete()`; validation caches and evaluation never call it. The
+through `mark_complete()` of an incomplete table; validation caches, complete
+tables, and evaluation never call it. The
 recorded LanceDB 0.40.0 policy compacts files and retains seven days of historical
 versions with `delete_unverified=False`; the application supplies no custom policy.
 See the [verification log](../experiments.md#unified-experiment-pipeline-november-2-2026)
 for that version's observed behavior. Appends and optimization preserve the header
-and creation snapshot.
+and creation snapshot. LanceDB's cleanup refuses to remove a tagged version, so
+`mark_complete()` deletes a stale marker before optimizing; the
+[version-tag check](../experiments.md#completion-markers-2026-11-06) records the
+observed tag behavior.
 
 Use one completed writer/build before concurrent readers, with a filesystem
 visible to every node. Concurrent writes to the same table are unsupported.
@@ -204,7 +240,9 @@ an empty validation split before publishing a report.
 tables through the `EmbeddingTable` interface. It checks header round trips,
 legacy refusal, role checks, row preservation, bad-vector rejection, exact cosine
 ordering, negative scores, unlimited scans, ordered fetches, concurrent readers,
-completion, optimization, and prefix derivation. `tests/test_retrieval.py` checks
+completion markers (persistence across reopen, invalidation by appends, refusal
+with a missing count, tables without markers), optimization, and prefix
+derivation and completion. `tests/test_retrieval.py` checks
 vote ties, abstentions, and hand-calculated ranking denominators.
 `tests/test_classification.py` checks that deeper rankings do not expand saved
 voting support. `tests/test_matroyshka_sweep.py` and `tests/test_tracking.py` cover

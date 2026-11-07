@@ -19,6 +19,8 @@ source-dimension checks) and derives prefix tables through
 | Query depth, voting, or reported metrics | [Retrieval contract](../../../docs/classification/retrieval.md) |
 | Progress bars or W&B publication | [Tracking](../../../docs/classification/tracking.md) |
 
-`Experiment.evaluate()` completes an enabled cache; `evaluate_cached()` reads existing
-vectors regardless of the cache flag. Cache setup is eager and vector fetching lazy.
-`batches.py` owns only the batch type.
+`Experiment.evaluate()` completes and marks an enabled cache; `evaluate_cached()`
+reads existing vectors regardless of the cache flag. Evaluation opens tables with
+`EmbeddingTable.open_complete()`, supplying expected keys from `IndexBuilder`;
+builders return complete tables without scanning or encoding. Cache setup is eager
+and vector fetching lazy. `batches.py` owns only the batch type.

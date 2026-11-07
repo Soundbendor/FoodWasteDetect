@@ -84,8 +84,8 @@ It affects images only. Every class must have a selected training reference when
 images are enabled; selected image decoding can still fail later. Compare
 complete retrieval strategies: changing sources changes reference counts.
 
-`IndexBuilder.build_reference_table()` sequences three `EmbeddingTable`
-operations on a reference table; it makes no other storage calls and never mutates the experiment
+`IndexBuilder.build_reference_table()` sequences `EmbeddingTable` operations on a
+reference table; it makes no other storage calls and never mutates the experiment
 configuration. New and resumed builds follow one flow:
 
 1. Prepare and validate inputs: the capped unbatched training selection, class
@@ -98,17 +98,22 @@ configuration. New and resumed builds follow one flow:
    validation cache under the reference name, fails. The dimension is supplied
    lazily as `embedder.dimension` and computed only when creating, so resuming
    never constructs the encoder for that reason.
-3. `missing()` scans all source keys once, without
+3. A table already [complete](retrieval.md#completion) is returned after this
+   verification: no missing-key scan, no optimization, no encoder, and no write.
+4. Otherwise `missing()` scans all source keys once, without
    a result limit, and returns the expected keys that are absent. Only those text
    records and images are embedded, preserving the original dataset splits and
    order. Caps apply before filtering by missing keys. A table with no missing
    keys never constructs the encoder.
-4. Encode each text/image batch and append its strictly paired records/vectors
+5. Encode each text/image batch and append its strictly paired records/vectors
    once. Advance progress only after a successful append.
-5. `mark_complete(expected)` verifies that every expected key is present,
-   failing with the number of missing keys otherwise, and only then optimizes
-   the reference table. A no-work resume is verified and optimized again.
-   The builder returns the table to `Experiment` for summary publication.
+6. `mark_complete(expected)` verifies that every expected key is present,
+   failing with `IncompleteTableError` and the number of missing keys otherwise,
+   then optimizes the reference table and marks it complete. A resume with no
+   missing keys, such as a table written before completion markers existed or one
+   whose optimization failed, is verified, optimized, and marked without
+   re-encoding. The builder returns the table to `Experiment` for summary
+   publication.
 
 Image records are built directly from column-oriented batches, with strict
 pairing of `class`, `source_id`, and `fname` columns. `EmbeddingBatch` is an
@@ -119,7 +124,8 @@ evaluation and reporting. Keep final partial batches. The dataset and encoder
 Successful batches survive later failures; failed encoding batches save no
 vectors. Storage failures propagate without write retries or rollback. Existing
 rows and UUIDs remain intact. Completion or optimization failure preserves the
-previous summary; a rerun retries finalization without re-encoding saved inputs. Use one
+previous summary and leaves the table incomplete; a rerun retries finalization
+without re-encoding saved inputs. Use one
 writer and finish building/optimization before concurrent readers. Shared jobs
 need a filesystem path visible to all nodes and separate evaluation output
 directories.
@@ -142,14 +148,18 @@ configuration enforces the [validation-table rule](cli.md#validation-table) at
 load time. All backends share this path. Cache records use `validation_image`;
 they never join reference searches.
 
-Evaluation opens the reference table first, then calls
+Evaluation opens the complete reference table first, then calls
 `IndexBuilder.build_validation_cache()`. It uses the same operations as a
 reference build on a validation cache: `open_or_create(..., "validation_cache",
-...)` with a lazy dimension, `missing()` over every validation-split
-`validation_image` key, appends of the missing batches, and
-`mark_complete(expected)`, which never optimizes a validation cache. Completion fails with the number of
-missing keys before any vectors are fetched. `Experiment` then fetches vectors in
-metadata order. Complete caches need neither image decoding nor a model/client.
+...)` with a lazy dimension; an already complete cache is returned without a
+scan. Otherwise it runs `missing()` over every validation-split
+`validation_image` key, appends the missing batches, and calls
+`mark_complete(expected)`, which marks the cache complete and never optimizes it.
+Completion fails with the number of missing keys before any vectors are fetched.
+Evaluation with caching enabled therefore leaves a complete cache that later
+cached evaluations and sweeps can open; it also completes a filled cache written
+before completion markers existed without re-encoding. `Experiment` then fetches
+vectors in metadata order. Complete caches need neither image decoding nor a model/client.
 Disabled caching recomputes validation embeddings. Validation caches are never
 optimized; evaluation does not optimize or insert into reference tables.
 
@@ -172,12 +182,22 @@ The field is always present and never null.
 
 `evaluate()` and `evaluate_cached()` share `_execute_evaluation()`. The latter
 reads existing cached vectors regardless of the cache flag, without completing or
-mutating the cache. `Experiment` prepares validation batches; it opens or completes
+mutating the cache.
+
+Both open the reference table with `EmbeddingTable.open_complete()`. An
+incomplete reference table, such as one left by an interrupted `index` run, fails
+with `IncompleteTableError` stating how many expected reference source keys are
+missing; the expected keys come from `IndexBuilder.expected_reference_keys()`,
+which prepares reference inputs without decoding images or constructing the
+encoder. Rerun `index` to resume and mark it. `evaluate_cached()` opens the
+validation cache the same way, against `IndexBuilder.validation_keys()`, before
+it prepares the reference table or fetches any vector. Fill an incomplete cache
+by evaluating with `cache_validation_embeddings` enabled. `Experiment` prepares validation batches; it opens or completes
 the cache and constructs the metadata iterator eagerly, then fetches vectors lazily.
 Evaluation opens the reference table with role `reference` and the cache with role
 `validation_cache`, so a table opened under the wrong role fails. Ordinary
 evaluation prepares references first; cached-only evaluation prepares the cache
-first. Missing vectors fail during consumption after reference preparation. `evaluation.evaluate_batches()` consumes
+first. `evaluation.evaluate_batches()` consumes
 these batches through a supplied query callable, owns progress and completeness
 checks, and returns predictions. It performs no report writes or tracking.
 `Experiment` assembles an `EvaluationReport` model with typed configuration,
@@ -227,8 +247,12 @@ configuration uses 768, 1536, and 3072. The sweep opens the reference table
 and the validation cache under their roles and requires their header dimensions to
 match before anything is derived; all targets must fit
 that stored width, including when the sources are already truncated.
-The sweep makes no embedding requests and performs no completeness validation. Missing cached
-vectors fail instead of being regenerated. Evaluation uses the configured `k` and
+The sweep makes no embedding requests. Each per-dimension cached evaluation
+requires its reference table and validation cache to be
+[complete](retrieval.md#completion); an incomplete table fails with its missing
+count instead of being regenerated. Prefix tables of complete sources are marked
+complete when derived, so a source changed after completion yields incomplete
+prefixes that evaluation refuses. Evaluation uses the configured `k` and
 batch size.
 
 Configured `sweep_dimensions` require a validation table under the
@@ -269,7 +293,8 @@ batches and query callables. For saved-vocabulary/reference construction, use
 `tests/test_descriptions.py`. For orchestration changes, use
 `tests/test_classification.py` with synthetic encoders/images, mocked Ollama,
 and temporary LanceDB tables. It covers selection, pairing, partial/complete
-resumes, cache reuse, failures, and publication ordering. For sweep changes use
+resumes, completion refusal and marking per role, cache reuse, failures, and
+publication ordering. For sweep changes use
 `tests/test_matroyshka_sweep.py`; embedding table behavior is covered in
 `tests/test_embedding_table.py`, scoring in `tests/test_retrieval.py`, and
 tracking in `tests/test_tracking.py`.

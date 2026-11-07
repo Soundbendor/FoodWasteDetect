@@ -108,6 +108,24 @@ class IndexBuilder:
                 raise ValueError(f"Missing usable training references for {missing}")
         return images, self._get_text_inputs()
 
+    def expected_reference_keys(self) -> list[SourceKey]:
+        """Return the source keys a complete reference table holds under this configuration.
+
+        Reads enabled descriptions and selects training images without decoding them
+        or constructing the encoder.
+
+        Raises:
+            ValueError: If selected training images do not cover every class.
+        """
+        return _reference_keys(*self._prepare_reference_inputs())
+
+    def validation_keys(self) -> list[SourceKey]:
+        """Return the source keys of every validation-split image, in split order."""
+        return [
+            ("validation_image", identity)
+            for identity in self.dataset.validation_set()["source_id"]
+        ]
+
     def _open_or_create(self, table: str, role: TableRole) -> EmbeddingTable:
         """Open the named table, creating it with the encoder width only when absent."""
         return EmbeddingTable.open_or_create(
@@ -125,25 +143,29 @@ class IndexBuilder:
         return self.dataset.select_images(images, excluded_source_ids=saved)
 
     def build_reference_table(self) -> EmbeddingTable:
-        """Build or resume the reference table, then mark it complete and optimized.
+        """Build or resume the reference table, then optimize it and mark it complete.
 
         Reference inputs are validated before the table is opened or the encoder is
-        constructed. Only missing source keys are embedded.
+        constructed. A table already marked complete is returned without a
+        missing-key scan, optimization, or encoder. Otherwise only missing source
+        keys are embedded.
 
         Returns:
             The complete, optimized reference table.
 
         Raises:
-            ValueError: If no reference inputs are selected, or if expected source
-                keys are still missing after insertion.
+            ValueError: If no reference inputs are selected.
+            IncompleteTableError: If expected source keys are still missing after
+                insertion.
         """
         images, records = self._prepare_reference_inputs()
-        expected = [record.source_key for record in records]
-        if images is not None:
-            expected.extend(("training_image", identity) for identity in images["source_id"])
+        expected = _reference_keys(images, records)
         if not expected:
             raise ValueError("No reference records selected - check dataset and config.")
         table = self._open_or_create(self.table, "reference")
+        if table.is_complete:
+            logging.info("Reference table %r is already complete", table.name)
+            return table
         absent = table.missing(expected)
         pending = frozenset(absent)
         records = [r for r in records if r.source_key in pending]
@@ -165,7 +187,10 @@ class IndexBuilder:
             self._insert_image_records(table, images, split="train")
 
     def build_validation_cache(self, table_name: str) -> EmbeddingTable:
-        """Complete missing validation embeddings and return the unoptimized cache.
+        """Complete missing validation embeddings, then mark the unoptimized cache complete.
+
+        A cache already marked complete is returned without a missing-key scan or
+        encoder.
 
         Args:
             table_name: Validation-cache table name.
@@ -174,12 +199,22 @@ class IndexBuilder:
             The complete validation cache, never optimized.
 
         Raises:
-            ValueError: If validation source keys are still missing after insertion.
+            IncompleteTableError: If validation source keys are still missing after
+                insertion.
         """
-        validation = self.dataset.validation_set()
-        expected = [("validation_image", identity) for identity in validation["source_id"]]
         cache = self._open_or_create(table_name, "validation_cache")
+        if cache.is_complete:
+            return cache
+        validation = self.dataset.validation_set()
+        expected = self.validation_keys()
         images = self._pending_images(validation, "validation_image", cache.missing(expected))
         self._insert_image_records(cache, images, split="val")
         cache.mark_complete(expected)
         return cache
+
+
+def _reference_keys(images: Dataset | None, records: list[PointRecord]) -> list[SourceKey]:
+    keys = [record.source_key for record in records]
+    if images is not None:
+        keys.extend(("training_image", identity) for identity in images["source_id"])
+    return keys

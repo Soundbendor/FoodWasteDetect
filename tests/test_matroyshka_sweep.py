@@ -9,6 +9,7 @@ import lancedb
 import numpy as np
 import pytest
 import yaml
+from datasets import Dataset
 from pydantic import ValidationError
 from test_tracking import Artifact
 
@@ -16,7 +17,11 @@ from classification.experiments.config import ExperimentConfig
 from classification import cli
 from classification.experiments import matryoshka as sweep
 from classification.experiments.classification import Experiment
-from classification.retrieval.embedding_table import EmbeddingTable, PrefixSource
+from classification.retrieval.embedding_table import (
+    EmbeddingTable,
+    IncompleteTableError,
+    PrefixSource,
+)
 from classification.schemas import PointRecord
 
 ROLES = {'reference': 'reference', 'validation': 'validation_cache'}
@@ -57,7 +62,7 @@ def sources(tmp_path, monkeypatch):
     )
     dataset = Mock()
     dataset.get_class_list.return_value = ['A', 'B']
-    dataset.validation_set.return_value = [0, 1]
+    dataset.validation_set.return_value = Dataset.from_dict({'source_id': ['first', 'second']})
 
     def batches(split, batch_size, *, decode):
         assert (split, batch_size, decode) == ('val', 1, False)
@@ -154,10 +159,10 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         np.testing.assert_array_equal([v for _, v in after], [v for _, v in snapshot])
 
 
-def test_missing_vector_has_no_embedding_or_summary(sources, runs):
+def test_modified_validation_cache_is_refused_without_embedding_or_summary(sources, runs):
     config, connection, _, _ = sources
     connection.open_table('validation').delete("source_identity = 'first'")
-    with pytest.raises(KeyError, match='first'):
+    with pytest.raises(IncompleteTableError, match="'validation_d768' is incomplete: missing 1 of 2"):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert len(runs) == 1
     Experiment._create_embedder.assert_not_called()

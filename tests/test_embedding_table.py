@@ -12,6 +12,7 @@ from lancedb.db import LanceDBConnection
 from classification.retrieval.embedding_table import (
     EmbeddingTable,
     EmbeddingTableError,
+    IncompleteTableError,
     LegacyTableError,
     PrefixSource,
 )
@@ -361,10 +362,13 @@ def test_mark_complete_states_the_missing_count_before_optimizing(tmp_path, role
     expected = keys + [(keys[0][0], "absent"), ("training_image", "0"), (keys[0][0], "absent")]
 
     with patch.object(table, "optimize") as optimize, \
-         pytest.raises(EmbeddingTableError, match="missing 2 of 6 expected source keys"):
+         pytest.raises(IncompleteTableError, match="missing 2 of 6 expected source keys") as error:
         table.mark_complete(expected)
 
     optimize.assert_not_called()
+    assert isinstance(error.value, EmbeddingTableError)
+    assert isinstance(error.value, ValueError)
+    assert not EmbeddingTable.open(table.uri, "table", role).is_complete
 
 
 @pytest.mark.parametrize(("role", "optimized"), [("reference", True), ("validation_cache", False)])
@@ -378,6 +382,70 @@ def test_mark_complete_optimizes_only_reference_tables(tmp_path, role, optimized
     assert optimize.called is optimized
     assert sorted(records_of(table), key=lambda r: r.id) == sorted(
         [r for r, _ in before], key=lambda r: r.id)
+
+
+@pytest.mark.parametrize("role", ["reference", "validation_cache"])
+def test_marking_complete_persists_across_reopen(tmp_path, role):
+    table, keys = four_rows(tmp_path, role)
+    assert not table.is_complete
+
+    table.mark_complete(keys)
+
+    assert table.is_complete
+    assert EmbeddingTable.open(table.uri, "table", role).is_complete
+
+
+@pytest.mark.parametrize("role", ["reference", "validation_cache"])
+def test_appending_to_a_complete_table_makes_it_incomplete(tmp_path, role):
+    table, keys = four_rows(tmp_path, role)
+    table.mark_complete(keys)
+
+    table.append([PointRecord("B", keys[0][0], "late", "late")], np.ones((1, 2)))
+
+    assert not table.is_complete
+    reopened = EmbeddingTable.open(table.uri, "table", role)
+    assert not reopened.is_complete
+    reopened.mark_complete(keys)
+    assert EmbeddingTable.open(table.uri, "table", role).is_complete
+
+
+@pytest.mark.parametrize("role", ["reference", "validation_cache"])
+def test_opening_an_incomplete_table_for_reading_states_the_missing_count(tmp_path, role):
+    table, keys = four_rows(tmp_path, role)
+    expected = Mock(return_value=keys + [(keys[0][0], "absent"), (keys[0][0], "absent")])
+
+    with pytest.raises(IncompleteTableError, match="'table' is incomplete: missing 1 of 5"):
+        EmbeddingTable.open_complete(table.uri, "table", role, expected=expected)
+
+    table.mark_complete(keys)
+    table.append([PointRecord("B", keys[0][0], "absent", "")], np.ones((1, 2)))
+    with pytest.raises(IncompleteTableError, match="missing 0 of 5"):
+        EmbeddingTable.open_complete(table.uri, "table", role, expected=expected)
+
+
+@pytest.mark.parametrize("role", ["reference", "validation_cache"])
+def test_opening_a_complete_table_for_reading_skips_the_key_scan(tmp_path, role):
+    table, keys = four_rows(tmp_path, role)
+    table.mark_complete(keys)
+    expected = Mock(side_effect=AssertionError("expected keys"))
+
+    with patch.object(EmbeddingTable, "missing", side_effect=AssertionError("scan")):
+        opened = EmbeddingTable.open_complete(table.uri, "table", role, expected=expected)
+
+    assert (opened.role, opened.is_complete, len(opened.rows())) == (role, True, 4)
+
+
+def test_tables_written_before_completion_markers_open_as_incomplete(tmp_path):
+    table, keys = four_rows(tmp_path, "reference")
+    table.optimize()  # Earlier code optimized complete tables without marking them.
+
+    reopened = EmbeddingTable.open(table.uri, "table", "reference")
+    assert not reopened.is_complete
+    with pytest.raises(IncompleteTableError, match="missing 0 of 4"):
+        EmbeddingTable.open_complete(table.uri, "table", "reference", expected=lambda: keys)
+
+    reopened.mark_complete(keys)
+    assert EmbeddingTable.open_complete(table.uri, "table", "reference", expected=list).is_complete
 
 
 # Prefix tables
@@ -436,6 +504,21 @@ def test_prefix_of_a_validation_cache_is_a_validation_cache(tmp_path):
 
     assert EmbeddingTable.open(cache.uri, "cache_d3", "validation_cache").role == "validation_cache"
     np.testing.assert_array_equal(derived.fetch_vectors(keys[::-1]), PREFIX_VECTORS[::-1, :3])
+
+
+def test_prefix_of_a_complete_source_is_complete(source):
+    source.mark_complete(record.source_key for record in PREFIX_ROWS)
+
+    source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert EmbeddingTable.open(source.uri, "source_d2", "reference").is_complete
+    assert source.is_complete
+
+
+def test_prefix_of_an_incomplete_source_is_incomplete(source):
+    source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert not EmbeddingTable.open(source.uri, "source_d2", "reference").is_complete
 
 
 def test_prefix_wider_than_source_fails_before_writing(source):

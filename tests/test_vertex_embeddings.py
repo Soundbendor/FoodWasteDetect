@@ -686,9 +686,8 @@ def test_progress_and_storage_failure_resume(transport, resume_config, progress_
     experiment.evaluate()
     progress_bars.clear()
     experiment.evaluate()
-    assert [(bar.desc, bar.n) for bar in progress_bars] == [
-        ("Validation embeddings", 0), ("Evaluation", 13),
-    ]
+    # The complete cache is reused without a missing-key scan or insertion progress.
+    assert [(bar.desc, bar.n) for bar in progress_bars] == [("Evaluation", 13)]
     tracker.progress.assert_not_called()
 
 

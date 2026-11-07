@@ -13,7 +13,7 @@ from classification.experiments.evaluation import extract_batch_metadata, predic
 from classification.experiments.config import ExperimentConfig
 from config_helpers import config_data, updated
 from classification.schemas import Neighbor, PointRecord
-from classification.retrieval.embedding_table import EmbeddingTable
+from classification.retrieval.embedding_table import EmbeddingTable, IncompleteTableError
 
 
 def available(*modules):
@@ -879,19 +879,31 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(exp.run().model_dump(mode="json")['metrics']['evaluated'], 2)
             self.assertEqual(self.client.open_table(table).count_rows(), sum(expected.values()))
 
-    def test_complete_table_skips_embedding_and_retries_optimization(self):
-        exp = self.experiment()
+    def test_index_on_a_complete_table_only_verifies_it(self):
+        exp = self.experiment((True, True, False))
         artifact = exp.build_vector_database().model_dump(mode="json")
-        previous = (exp.output / 'index.json').read_bytes()
+        version = self.client.open_table(exp.config.lancedb.table).version
+        exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch.object(EmbeddingTable, 'missing', side_effect=AssertionError('scan')), \
              patch.object(EmbeddingTable, 'append', side_effect=AssertionError('append')), \
-             patch.object(EmbeddingTable, 'optimize', side_effect=OSError('optimize')):
-            exp._embedder = None
+             patch.object(EmbeddingTable, 'optimize', side_effect=AssertionError('optimize')):
+            self.assertEqual(exp.build_vector_database().model_dump(mode="json"), artifact)
+        self.assertIsNone(exp._embedder)
+        self.assertEqual(self.client.open_table(exp.config.lancedb.table).version, version)
+
+    def test_failed_optimization_leaves_the_table_incomplete_until_index_reruns(self):
+        exp = self.experiment()
+        with patch.object(EmbeddingTable, 'optimize', side_effect=OSError('optimize')):
             with self.assertRaisesRegex(OSError, 'optimize'):
                 exp.build_vector_database()
-        self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
-        self.assertEqual(exp.build_vector_database().model_dump(mode="json"), artifact)
-        self.assertIsNone(exp._embedder)
+        self.assertFalse((exp.output / 'index.json').exists())
+        with self.assertRaisesRegex(IncompleteTableError, 'missing 0 of 2'):
+            exp.evaluate()
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
+            exp.build_vector_database()
+        self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
 
     def test_summary_and_report_record_the_table_dimension_without_mutating_config(self):
         exp = self.experiment()
@@ -976,6 +988,83 @@ class ExperimentTests(unittest.TestCase):
         (exp.output / 'index.json').unlink()
         report = exp.evaluate().model_dump(mode="json")
         self.assertEqual(report['reference_source_counts'], {'training_image': 2, 'class_name': 2})
+
+    def interrupt_second_append(self, build):
+        append = EmbeddingTable.append
+        calls = 0
+
+        def fail_second(table, records, vectors):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ConnectionError('second append failed')
+            return append(table, records, vectors)
+
+        with patch.object(EmbeddingTable, 'append', new=fail_second):
+            with self.assertRaisesRegex(ConnectionError, 'second append'):
+                build()
+
+    def test_interrupted_index_makes_evaluation_fail_until_index_completes(self):
+        exp = self.experiment((True, True, False))
+        exp.batch_size = 1
+        self.interrupt_second_append(exp.build_vector_database)
+        with patch.object(EmbeddingTable, 'query', side_effect=AssertionError('query')):
+            with self.assertRaisesRegex(IncompleteTableError, 'missing 3 of 4 expected source keys'):
+                exp.evaluate()
+        self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
+        exp.build_vector_database()
+        self.assertTrue(EmbeddingTable.open(self.db_path, exp.config.lancedb.table, 'reference').is_complete)
+        self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
+
+    def test_cached_evaluation_refuses_an_incomplete_cache_before_preparing_references(self):
+        exp = self.experiment()
+        exp.batch_size = 1
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.build_vector_database()
+        self.interrupt_second_append(lambda: exp._index_builder().build_validation_cache('cache'))
+        with patch.object(exp, '_reference_table', side_effect=AssertionError('reference')), \
+             patch.object(EmbeddingTable, 'fetch_vectors', side_effect=AssertionError('fetch')):
+            with self.assertRaisesRegex(IncompleteTableError, "'cache' is incomplete: missing 1 of 2"):
+                exp.evaluate_cached()
+        self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
+
+    def test_caching_evaluation_completes_the_cache_for_later_cached_evaluation(self):
+        exp = self.experiment()
+        exp.batch_size = 1
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.config = updated(exp.config, 'cache_validation_embeddings', True)
+        exp.build_vector_database()
+        self.interrupt_second_append(exp.evaluate)
+        self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
+        self.assertTrue(EmbeddingTable.open(self.db_path, 'cache', 'validation_cache').is_complete)
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch.object(EmbeddingTable, 'missing', side_effect=AssertionError('scan')):
+            self.assertEqual(exp.evaluate_cached().metrics['evaluated'], 2)
+            self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
+
+    def test_tables_filled_before_completion_markers_complete_without_rebuilding(self):
+        import numpy as np
+        from classification.schemas import PointRecord
+
+        exp = self.experiment()
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        # Fill both tables the way earlier code left them: every key, no marker.
+        reference = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
+        reference.append([PointRecord(label, 'class_name', label, label) for label in ('Apple', 'Pear')],
+                         np.eye(2))
+        cache = EmbeddingTable.create(self.db_path, 'cache', 'validation_cache', 2, snapshot='')
+        cache.append([PointRecord(label, 'validation_image', str(i), '') for i, label in enumerate(('Apple', 'Pear'))],
+                     np.eye(2))
+        for evaluate in (exp.evaluate, exp.evaluate_cached):
+            with self.assertRaisesRegex(IncompleteTableError, 'missing 0 of 2'):
+                evaluate()
+        exp.config = updated(exp.config, 'cache_validation_embeddings', True)
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch.object(EmbeddingTable, 'append', side_effect=AssertionError('append')):
+            exp.build_vector_database()
+            self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
+            self.assertEqual(exp.evaluate_cached().metrics['majority_vote_accuracy'], 1)
 
     def test_evaluation_reads_read_only_database(self):
         exp = self.experiment()

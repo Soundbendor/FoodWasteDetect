@@ -27,6 +27,8 @@ SCHEMA_VERSION = 1
 _HEADER_KEY = "classification.embedding_table"
 _SNAPSHOT_KEY = "classification.creation_snapshot"
 _ADR = "docs/adr/0001-embedding-table-header.md"
+# LanceDB version tag marking the version at which a table was verified complete.
+_COMPLETE_TAG = "complete"
 
 _STRING_COLUMNS = ("id", "class", "source_kind", "source_identity", "value")
 _VECTOR = "vector"
@@ -38,6 +40,10 @@ class EmbeddingTableError(ValueError):
 
 class LegacyTableError(EmbeddingTableError):
     """A table lacks a valid header for the current schema version and must be rebuilt."""
+
+
+class IncompleteTableError(EmbeddingTableError):
+    """A table's build has not finished, so it may lack expected source keys."""
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,47 @@ class EmbeddingTable:
         return cls(path, table, header)
 
     @classmethod
+    def open_complete(
+        cls,
+        uri: str | Path,
+        name: str,
+        role: TableRole,
+        *,
+        expected: Callable[[], Iterable[SourceKey]],
+    ) -> Self:
+        """Open an existing complete table for reading under the given role.
+
+        A complete table opens without computing the expected keys or scanning
+        stored ones.
+
+        Args:
+            uri: Local database directory.
+            name: Table name.
+            role: The role the caller requires.
+            expected: Returns the source keys the finished table must contain; called
+                only for an incomplete table, to state how many are missing.
+
+        Returns:
+            The opened complete table.
+
+        Raises:
+            FileNotFoundError: If the database directory does not exist.
+            LegacyTableError: If the table has no valid current header.
+            EmbeddingTableError: If the table's role differs from ``role``.
+            IncompleteTableError: If the table is not marked complete at its current
+                version, stating how many expected source keys are missing.
+        """
+        table = cls.open(uri, name, role)
+        if not table.is_complete:
+            unique = set(expected())
+            absent = table.missing(unique)
+            raise IncompleteTableError(
+                f"Table {name!r} is incomplete: missing {len(absent)} of {len(unique)} "
+                "expected source keys; resume and complete its build before using it"
+            )
+        return table
+
+    @classmethod
     def create(
         cls, uri: str | Path, name: str, role: TableRole, dimension: int, *, snapshot: str
     ) -> Self:
@@ -205,6 +252,17 @@ class EmbeddingTable:
         return self._header.prefix_source
 
     @property
+    def is_complete(self) -> bool:
+        """Return whether the completion marker points at the table's current version.
+
+        Any write after ``mark_complete()`` moves the version past the marker, so a
+        changed table is never reported complete. Tables written before completion
+        markers existed have none and are incomplete.
+        """
+        marker = self._table.tags.list().get(_COMPLETE_TAG)
+        return marker is not None and marker["version"] == self._table.version
+
+    @property
     def creation_snapshot(self) -> str:
         """Return the creation snapshot exactly as it was written."""
         return _metadata(self._table)[_SNAPSHOT_KEY]
@@ -216,7 +274,8 @@ class EmbeddingTable:
         table. Otherwise one streaming creation copies every row, record ID, and
         metadata value, replacing each vector with its exact float32 prefix. The new
         header keeps this table's role and records this table as the source; the
-        creation snapshot is copied verbatim.
+        creation snapshot is copied verbatim. A new prefix of a complete table is
+        marked complete once the copy finishes; a prefix of an incomplete table is not.
 
         Args:
             destination: Name of the prefix table in the same database.
@@ -245,10 +304,14 @@ class EmbeddingTable:
         )
         snapshot = self.creation_snapshot
         schema = _schema(header, snapshot)
+        source_complete = self.is_complete
         rows = pa.RecordBatchReader.from_batches(
             schema, _prefix_batches(self._table, schema, dimension, batch_size)
         )
-        return type(self)._create(self.uri, destination, header, snapshot, rows)
+        prefix = type(self)._create(self.uri, destination, header, snapshot, rows)
+        if source_complete:
+            prefix._table.tags.create(_COMPLETE_TAG, prefix._table.version)
+        return prefix
 
     def append(
         self,
@@ -272,27 +335,35 @@ class EmbeddingTable:
         )
 
     def mark_complete(self, expected: Iterable[SourceKey]) -> None:
-        """Verify that every expected source key is stored; optimize reference tables.
+        """Verify every expected source key, optimize reference tables, then mark complete.
 
-        Validation caches are never optimized.
+        Validation caches are never optimized. The completion marker is persisted
+        against the version reached after optimization, replacing any earlier marker.
 
         Args:
             expected: Source keys the finished table must contain; repeats count once.
                 Extra stored rows are allowed.
 
         Raises:
-            EmbeddingTableError: If any expected key is absent, stating how many;
-                nothing is optimized.
+            IncompleteTableError: If any expected key is absent, stating how many;
+                nothing is optimized or marked.
         """
         unique = set(expected)
         absent = self.missing(unique)
         if absent:
-            raise EmbeddingTableError(
+            raise IncompleteTableError(
                 f"Table {self.name!r} is missing {len(absent)} of {len(unique)} "
                 "expected source keys; resume the build before using it"
             )
+        # A stale marker would pin its old version against optimization's cleanup.
+        self._clear_completion()
         if self.role == "reference":
             self.optimize()
+        self._table.tags.create(_COMPLETE_TAG, self._table.version)
+
+    def _clear_completion(self) -> None:
+        if _COMPLETE_TAG in self._table.tags.list():
+            self._table.tags.delete(_COMPLETE_TAG)
 
     def optimize(self) -> None:
         """Compact with LanceDB's default maintenance and version-retention policy."""
