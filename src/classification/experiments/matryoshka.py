@@ -17,27 +17,21 @@ from classification.experiments.report_types import EvaluationReport
 from classification.tracking import Tracker
 
 
-def table_names(config: ExperimentConfig, dimension: int, source_width: int) -> tuple[str, str]:
-    """Return reference/cache names, retaining names at the stored source width."""
+def table_names(sources: tuple[str, str], dimension: int, source_width: int) -> tuple[str, str]:
+    """Return derived reference/cache names, retaining names at the stored source width."""
     suffix = f"_d{dimension}" if dimension != source_width else ""
-    options = config.lancedb
-    validation = options.validation_table
-    if validation is None:
-        raise ValueError("lancedb.validation_table is required for sweeps")
-    return options.table + suffix, validation + suffix
+    reference, validation = sources
+    return reference + suffix, validation + suffix
 
 
-def validate_config(config: ExperimentConfig, dimensions: list[int], source_width: int) -> None:
-    """Check target widths and distinct source and destination names."""
-    names = [config.lancedb.table, config.lancedb.validation_table]
-    if any(not isinstance(name, str) or not name.strip() for name in names):
-        raise ValueError("Reference and validation table names must be nonempty")
+def validate_sweep(sources: tuple[str, str], dimensions: list[int], source_width: int) -> None:
+    """Check target widths and that derived table names collide with no other sweep table."""
     if any(dimension > source_width for dimension in dimensions):
         raise ValueError("Sweep dimensions must not exceed the source vector width")
-    all_names = list(names)
+    all_names = list(sources)
     for dimension in dimensions:
         if dimension != source_width:
-            all_names.extend(table_names(config, dimension, source_width))
+            all_names.extend(table_names(sources, dimension, source_width))
     if len(set(all_names)) != len(all_names):
         raise ValueError("Sweep source and destination table names must be distinct")
 
@@ -111,23 +105,22 @@ def run_sweep(
 ) -> dict[str, list[dict[str, Any]]]:
     """Prepare each dimension and publish a combined summary only after all succeed."""
     dimensions = config.sweep_dimensions
-    # TODO: refactor overly defensive checks
     if dimensions is None:
         raise ValueError("sweep_dimensions is required for sweeps")
+    validation_source = config.lancedb.validation_table
+    # ExperimentConfig requires a usable validation table whenever sweep_dimensions is set.
+    assert validation_source is not None
     uri = Path(config.lancedb.uri).expanduser().resolve()
     if not uri.is_dir():
         raise FileNotFoundError(f"LanceDB database does not exist: {uri}")
     connection = LanceDBConnection(uri)
-    validation_source = config.lancedb.validation_table
-    if not validation_source or not validation_source.strip():
-        raise ValueError("Reference and validation table names must be nonempty")
     sources = (config.lancedb.table, validation_source)
     validation_vector_dim = vector_width(connection.open_table(validation_source))
     training_vector_dim = vector_width(connection.open_table(config.lancedb.table))
     if training_vector_dim != validation_vector_dim:
         raise ValueError("Source vector widths must match")
     source_width = training_vector_dim
-    validate_config(config, dimensions, source_width)
+    validate_sweep(sources, dimensions, source_width)
     output = Path(config.output_dir).expanduser().resolve() / datetime.now(UTC).strftime(
         "matroyshka_sweep_%Y%m%dT%H%M%S_%fZ"
     )
@@ -136,7 +129,7 @@ def run_sweep(
     for dimension in dimensions:
         settings = config.model_dump()
         settings["vector_dimension"] = dimension
-        reference, validation = table_names(config, dimension, source_width)
+        reference, validation = table_names(sources, dimension, source_width)
         settings["embedding"]["truncate_dim"] = dimension
         settings["lancedb"].update(table=reference, validation_table=validation)
         settings["cache_validation_embeddings"] = True

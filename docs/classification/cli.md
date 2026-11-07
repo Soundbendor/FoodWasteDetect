@@ -1,8 +1,8 @@
 # CLI and configuration
 
-Read this document when changing command parsing, overrides, stage dispatch, or
-the Ollama download entry point. The implementation is
-[`cli.py`](../../src/classification/cli.py), reached by both the `classification` console script
+Read this document when changing command parsing, overrides, configuration
+validation rules, stage dispatch, or the Ollama download entry point. The
+implementation is [`cli.py`](../../src/classification/cli.py), reached by both the `classification` console script
 and [`__main__.py`](../../src/classification/__main__.py).
 
 ## Command flow
@@ -51,6 +51,23 @@ example, `--set 'sweep_dimensions=[256,512,1024]'`. The field is required only
 for sweep execution. See the [sweep contract](experiments.md#cached-matryoshka-sweep).
 
 Overrides do not select isolated artifact names or manage services.
+
+## Validation table
+
+Configuration validation is the only owner of the `lancedb.validation_table`
+rule, so an unusable setting fails while the configuration loads, before W&B
+initialization or any stage starts. `LanceDBConfig` checks the name and
+`ExperimentConfig` checks when it is required:
+
+- When set, the name must be nonempty after trimming whitespace and must differ
+  from `lancedb.table`.
+- It must be set when `cache_validation_embeddings` is enabled or
+  `sweep_dimensions` is configured. Otherwise it may be null.
+
+Stages do not re-check these properties. Cached evaluation keeps one guard that a
+name is set, because it reads an existing cache regardless of the cache flag. The
+sweep's distinct derived-name check depends on its own naming policy and stays
+with the [sweep](experiments.md#cached-matryoshka-sweep).
 
 ## Ollama downloads
 

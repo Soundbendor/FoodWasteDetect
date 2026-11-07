@@ -1,8 +1,10 @@
 """Strict configuration validation without datasets, encoders, or services."""
 
 from itertools import product
+from pathlib import Path
 
 import pytest
+import yaml
 from config_helpers import config_data, updated
 from pydantic import ValidationError
 
@@ -146,16 +148,45 @@ def test_timeout_constraints(value):
         )
 
 
-def test_output_and_cache_constraints(tmp_path):
+def test_output_directory_must_be_separate_from_raw_data(tmp_path):
     data = config_data(dataset={"name": "foodx251", "root": str(tmp_path)})
     data["output_dir"] = str(tmp_path / "output")
     with pytest.raises(ValidationError, match="separate from raw"):
         ExperimentConfig.model_validate(data)
-    for table in (None, "", " ", "references"):
-        data = config_data(cache_validation_embeddings=True)
-        data["lancedb"]["validation_table"] = table
-        with pytest.raises(ValidationError, match="validation_table"):
-            ExperimentConfig.model_validate(data)
+
+
+@pytest.mark.parametrize("cache", [False, True])
+@pytest.mark.parametrize("table", ["", " ", "references"])
+def test_unusable_validation_table_fails_at_load(table, cache):
+    data = config_data(cache_validation_embeddings=cache)
+    data["lancedb"]["validation_table"] = table
+    with pytest.raises(ValidationError, match=r"lancedb\.validation_table"):
+        ExperimentConfig.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"cache_validation_embeddings": True}, {"sweep_dimensions": [8, 16]}],
+    ids=["cache", "sweep"],
+)
+def test_validation_table_required_for_cache_or_sweep(settings):
+    data = config_data(**settings)
+    with pytest.raises(ValidationError, match=r"lancedb\.validation_table is required"):
+        ExperimentConfig.model_validate(data)
+    data["lancedb"]["validation_table"] = "validation"
+    assert ExperimentConfig.model_validate(data).lancedb.validation_table == "validation"
+
+
+def test_validation_table_optional_without_cache_or_sweep():
+    assert ExperimentConfig.model_validate(config_data()).lancedb.validation_table is None
+
+
+@pytest.mark.parametrize(
+    "name", ["classification.yml", "classification_embeddinggemma2_images.yml", "ge_v2.yml"]
+)
+def test_shipped_experiment_configurations_load(name):
+    data = yaml.safe_load((Path("cfg") / name).read_text())
+    assert ExperimentConfig.model_validate(data).model_dump(exclude_unset=True) == data
 
 
 def test_optional_services_and_report_serialization():

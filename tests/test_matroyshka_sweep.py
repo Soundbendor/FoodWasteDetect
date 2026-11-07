@@ -126,7 +126,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         for prediction in report['predictions']:
             assert prediction['prediction'] == winner
             assert prediction['neighbors'][0]['score'] == pytest.approx(float(max(scores)), abs=1e-6)
-        for source, destination in zip(('reference', 'validation'), sweep.table_names(ExperimentConfig.model_validate(config), dimension, 3072), strict=True):
+        for source, destination in zip(('reference', 'validation'), sweep.table_names(('reference', 'validation'), dimension, 3072), strict=True):
             table = connection.open_table(destination)
             assert table.schema.field('vector').type == pa.list_(pa.float32(), dimension)
             rows = table.to_arrow().to_pylist()
@@ -252,13 +252,12 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     assert runs[1][0].__exit__.call_args.args[0] is RuntimeError
 
 
-@pytest.mark.parametrize('validation', ['reference', 'reference_d768', 'reference_d1536', ''])
-def test_collisions_fail_before_tracking(sources, runs, validation):
+@pytest.mark.parametrize('validation', ['reference_d768', 'reference_d1536'])
+def test_derived_name_collisions_fail_before_tracking(sources, runs, validation):
     config, connection, _, _ = sources
-    if validation and validation != 'reference':
-        sweep.prepare_table(connection, 'validation', validation, 3072, 1)
+    sweep.prepare_table(connection, 'validation', validation, 3072, 1)
     config['lancedb']['validation_table'] = validation
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='distinct'):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert runs == []
 

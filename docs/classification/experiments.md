@@ -120,10 +120,10 @@ on resume, even when the current configuration differs.
 
 ## Validation caching
 
-Enabled `cache_validation_embeddings` requires a nonempty
-`lancedb.validation_table` distinct from the reference table. All backends share
-this path. Cache records use `validation_image`; they never join reference
-searches.
+Enabled `cache_validation_embeddings` requires `lancedb.validation_table`; the
+configuration enforces the [validation-table rule](cli.md#validation-table) at
+load time. All backends share this path. Cache records use `validation_image`;
+they never join reference searches.
 
 Evaluation opens references first, creates or opens the cache, scans saved
 identities, and completes missing validation batches. It then fetches vectors in
@@ -201,8 +201,10 @@ The sweep makes no embedding requests and performs no completeness validation. M
 vectors fail instead of being regenerated. Evaluation uses the configured `k` and
 batch size.
 
-Both source names and all derived names must be distinct, even if the stored
-width is not requested. A target equal to the stored width uses the original
+Configured `sweep_dimensions` require a validation table under the
+[validation-table rule](cli.md#validation-table). Beyond that rule, both source
+names and all derived names must be distinct, even if the stored width is not
+requested. A target equal to the stored width uses the original
 tables; smaller targets use `<source>_d<dimension>`. Each missing destination is created by one streaming
 `create_table()` call, with no query-result limit, retaining every row, UUID,
 and row metadata value. Only vectors change to exact float32 prefixes and

@@ -168,10 +168,8 @@ class Experiment:
             return self._evaluation_batches()
         options = self.config.lancedb
         table = options.validation_table
-        if not table or not table.strip() or table == options.table:
-            raise ValueError(
-                "lancedb.validation_table must be nonempty and distinct from reference table"
-            )
+        if table is None:
+            raise ValueError("lancedb.validation_table is required for cached evaluation")
         if cached_only:
             cache = LanceDBIndex.open(uri=options.uri, table=table)
         else:

@@ -1094,3 +1094,11 @@ def test_k_requires_positive_nonboolean_integer():
         with pytest.raises(ValueError, match='k'):
             ExperimentConfig.model_validate(config_data(k=k, embed_images=True, embed_class_labels=False,
                                  embed_descriptions=False))
+
+
+def test_cached_evaluation_requires_validation_table():
+    import pytest
+    experiment = Experiment.__new__(Experiment)
+    experiment.config = ExperimentConfig.model_validate(config_data())
+    with pytest.raises(ValueError, match=r'lancedb\.validation_table is required'):
+        experiment.evaluate_cached()

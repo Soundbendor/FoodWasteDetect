@@ -589,30 +589,15 @@ def test_cache_toggle_boolean(transport, resume_config, value):
     from classification.experiments.classification import Experiment
 
     resume_config["cache_validation_embeddings"] = value
-    if not value:
-        resume_config["lancedb"]["validation_table"] = None
-    ExperimentConfig.model_validate(resume_config)
     transport(lambda request: response())
     experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
     experiment.evaluate()
+    uri, name = resume_config["lancedb"]["uri"], resume_config["lancedb"]["validation_table"]
     if value:
-        cache = LanceDBIndex.open(resume_config["lancedb"]["uri"],
-                                  resume_config["lancedb"]["validation_table"])
-        assert len(cache.get_record_ids()) == 13
-        resume_config["lancedb"]["validation_table"] = resume_config["lancedb"]["table"]
-        with pytest.raises(ValueError, match="distinct"):
-            ExperimentConfig.model_validate(resume_config)
-
-
-@pytest.mark.parametrize("name", [None, "", " ", "foodx251_ge_v2"])
-def test_invalid_validation_table(resume_config, name):
-    from classification.experiments.classification import Experiment
-
-
-    resume_config["lancedb"]["validation_table"] = name
-    with pytest.raises(ValueError, match="distinct"):
-        ExperimentConfig.model_validate(resume_config)
+        assert len(LanceDBIndex.open(uri, name).get_record_ids()) == 13
+    else:
+        assert not LanceDBIndex.exists(uri, name)
 
 
 def test_default_cache_disabled_and_local_cache_supported(transport, resume_config):
@@ -846,16 +831,6 @@ class MockContext:
 
     def __exit__(self, *args):
         return False
-
-
-def test_cli_rejects_invalid_vertex_cache_before_tracking(resume_config):
-    from classification.cli import _run_experiment
-
-    resume_config["lancedb"]["validation_table"] = None
-    with patch("classification.cli.wandb.init") as init:
-        with pytest.raises(ValueError, match="distinct"):
-            _run_experiment(ExperimentConfig.model_validate(resume_config), "evaluate")
-        init.assert_not_called()
 
 
 def test_run_dispatches_shared_stages():
