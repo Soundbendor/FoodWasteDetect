@@ -24,7 +24,9 @@ _Avoid_: validation index, cache table
 
 **Prefix table**:
 An embedding table derived from another by keeping every record and shortening
-each vector to its leading values, used to evaluate smaller dimensions.
+each vector to its leading values, used to evaluate smaller dimensions. It is
+derived only from a complete table and is complete once its row count matches
+its source's.
 _Avoid_: truncated index, derived index, sweep table
 
 **Creation snapshot**:

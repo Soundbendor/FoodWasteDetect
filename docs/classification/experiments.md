@@ -298,16 +298,28 @@ Set `sweep_dimensions` to a nonempty list of unique positive integers in the
 order to evaluate them. Existing configurations must supply this field for the
 sweep; other stages and historical snapshots may omit it. The shipped Gemini
 configuration uses 768, 1536, and 3072. The sweep opens the reference table
-and the validation cache under their roles and requires their header dimensions
-and encoder fingerprints to match before anything is derived; all targets must fit
-that stored width, including when the sources are already truncated.
-The sweep makes no embedding requests. Each per-dimension cached evaluation
-requires its reference table and validation cache to be
-[complete](retrieval.md#completion); an incomplete table fails with its missing
-count instead of being regenerated. Prefix tables of complete sources are marked
-complete when derived, so a source changed after completion yields incomplete
-prefixes that evaluation refuses. Evaluation uses the configured `k` and
-batch size.
+and the validation cache under their roles as [complete](retrieval.md#completion)
+tables and requires their header dimensions and encoder fingerprints to match
+before anything is derived or tracked; an incomplete source fails with
+`IncompleteTableError` and is not regenerated. All targets must fit that stored
+width, including when the sources are already truncated. The sweep makes no
+embedding requests. Evaluation uses the configured `k` and batch size.
+
+For each target below the stored width, an existing `<source>_d<dimension>`
+table is handled by the [prefix-table contract](retrieval.md#prefix-tables):
+
+- **Reuse**: a complete prefix of that source at that dimension, with the
+  source's fingerprints, is evaluated without copying.
+- **Recreation**: a prefix of that source at that dimension that is incomplete,
+  for example after a crash mid-copy, is dropped and copied again. Rerunning
+  the sweep after a crash therefore needs no manual cleanup and completes.
+- **Refusal**: a legacy table, a table that is not a prefix table, or a prefix
+  derived from another source, another source dimension, another dimension, or
+  other fingerprints fails the sweep and is left unchanged. Rename the sweep
+  sources or remove the table deliberately.
+
+Each new prefix is complete only after its row count is verified against its
+source, so each per-dimension cached evaluation opens complete prefix tables.
 
 Configured `sweep_dimensions` require a validation table under the
 [validation-table rule](cli.md#validation-table). The sweep owns experiment policy
@@ -318,8 +330,8 @@ be distinct, even if the stored width is not requested. A target equal to the
 stored width uses the original tables; each smaller target calls
 `EmbeddingTable.derive_prefix()` on both sources. The
 [prefix-table contract](retrieval.md#prefix-tables) defines how prefix tables are
-copied, reused, and given headers that record their source table and source
-dimension. Reference switches and image caps remain recorded
+copied, verified, reused, recreated, refused, and given headers that record their
+source table and source dimension. Reference switches and image caps remain recorded
 but do not filter stored rows. The sweep delegates cached validation preparation
 to `Experiment.evaluate_cached()`.
 

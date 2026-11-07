@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
 import lancedb
+from lancedb.db import LanceDBConnection
 import numpy as np
 import pytest
 import yaml
@@ -19,6 +20,7 @@ from classification.experiments import matryoshka as sweep
 from classification.experiments.classification import Experiment
 from classification.retrieval.embedding_table import (
     EmbeddingTable,
+    EmbeddingTableError,
     IncompatibleTableError,
     IncompleteTableError,
     PrefixSource,
@@ -147,6 +149,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         for source, destination in zip(('reference', 'validation'), sweep.table_names(('reference', 'validation'), dimension, 3072), strict=True):
             table = stored(uri, destination)
             assert table.dimension == dimension
+            assert table.is_complete
             assert table.prefix_source == (None if dimension == 3072 else PrefixSource(source, 3072))
             rows = table.rows()
             assert [record for record, _ in rows] == [record for record, _ in snapshots[source]]
@@ -165,12 +168,15 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         np.testing.assert_array_equal([v for _, v in after], [v for _, v in snapshot])
 
 
-def test_modified_validation_cache_is_refused_without_embedding_or_summary(sources, runs):
+@pytest.mark.parametrize('name', ['reference', 'validation'])
+def test_incomplete_source_is_refused_before_deriving_or_tracking(sources, runs, name):
     config, connection, _, _ = sources
-    connection.open_table('validation').delete("source_identity = 'first'")
-    with pytest.raises(IncompleteTableError, match="'validation_d768' is incomplete: missing 1 of 2"):
+    connection.open_table(name).delete("source_identity = 'B' OR source_identity = 'first'")
+    with pytest.raises(IncompleteTableError, match=f"'{name}' is incomplete"):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
-    assert len(runs) == 1
+    assert runs == []
+    assert not EmbeddingTable.exists(connection.uri, 'reference_d768')
+    assert not EmbeddingTable.exists(connection.uri, 'validation_d768')
     Experiment._create_embedder.assert_not_called()
     assert not list(Path(config['output_dir']).rglob('report.json'))
     assert not list(Path(config['output_dir']).rglob('summary.json'))
@@ -345,3 +351,61 @@ def test_collision_when_source_width_omitted(sources, monkeypatch):
         sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
     prepare.assert_not_called()
     evaluate.assert_not_called()
+
+
+def test_rerun_after_a_crash_mid_copy_recreates_the_prefix_and_completes(sources, runs, monkeypatch):
+    config, connection, vectors, _ = sources
+    create = LanceDBConnection.create_table
+
+    def crash(self, name, *args, **kwargs):
+        table = create(self, name, *args, **kwargs)
+        if name == 'validation_d1536':
+            raise RuntimeError('crash mid-copy')
+        return table
+
+    monkeypatch.setattr(LanceDBConnection, 'create_table', crash)
+    with pytest.raises(RuntimeError, match='crash mid-copy'):
+        cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
+    assert not stored(connection.uri, 'validation_d1536').is_complete
+    monkeypatch.setattr(LanceDBConnection, 'create_table', create)
+
+    cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
+
+    summaries = list(Path(config['output_dir']).glob('matroyshka_sweep_*/summary.json'))
+    assert len(summaries) == 1
+    results = json.loads(summaries[0].read_text())['results']
+    assert [item['majority_vote_accuracy'] for item in results] == [1, 0, 1]
+    recreated = stored(connection.uri, 'validation_d1536')
+    assert recreated.is_complete
+    assert [record.source_identity for record, _ in recreated.rows()] == ['second', 'first']
+    Experiment._create_embedder.assert_not_called()
+
+
+def not_a_prefix(uri):
+    table = EmbeddingTable.create(uri, 'reference_d768', 'reference', 768, snapshot='kept',
+                                  **fingerprints('reference'))
+    table.append([PointRecord('A', 'class_name', 'A', 'A')], np.ones((1, 768)))
+    table.mark_complete([('class_name', 'A')])
+
+
+def legacy(uri):
+    lancedb.connect(uri).create_table('reference_d768', data=[{'vector': [1.0, 2.0]}])
+
+
+def prefix_of_another_source(uri):
+    other = EmbeddingTable.create(uri, 'other', 'reference', 3072, snapshot='',
+                                  **fingerprints('reference'))
+    other.append([PointRecord('A', 'class_name', 'A', 'A')], np.ones((1, 3072)))
+    other.mark_complete([('class_name', 'A')])
+    other.derive_prefix('reference_d768', 768, batch_size=1)
+
+
+@pytest.mark.parametrize('setup', [not_a_prefix, legacy, prefix_of_another_source])
+def test_sweep_refuses_a_destination_it_did_not_derive_and_leaves_it_unchanged(sources, runs, setup):
+    config, connection, _, _ = sources
+    setup(connection.uri)
+    before = connection.open_table('reference_d768').to_arrow()
+    with pytest.raises(EmbeddingTableError):
+        cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
+    assert connection.open_table('reference_d768').to_arrow().equals(before)
+    assert not list(Path(config['output_dir']).rglob('summary.json'))

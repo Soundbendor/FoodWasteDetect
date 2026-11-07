@@ -18,7 +18,9 @@ Experiment selection, resumption, and report publication belong to `experiments`
 
 Keep LanceDB, Arrow, column names, schema metadata keys, and the completion tag
 inside `embedding_table.py`. Refuse legacy and incompatible tables; never migrate
-them or add an override. Compare fingerprints generically: their setting names
+them or add an override. Drop a table only when `derive_prefix()` recreates an
+incomplete prefix of the same source at the same dimension; never drop a table
+this source did not derive. Compare fingerprints generically: their setting names
 and values come from `experiments/fingerprints.py`. Use the
 [glossary](../../../GLOSSARY.md) vocabulary. Preserve exact cosine search, separate
 vote fraction from similarity, and keep pure voting/metric functions independent

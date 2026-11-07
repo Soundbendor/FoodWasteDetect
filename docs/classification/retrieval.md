@@ -141,15 +141,17 @@ What complete means per role:
   marked.
 - **Validation cache**: every validation-split `validation_image` key is present.
   Caches are marked without optimizing.
-- **Prefix table**: the streaming copy finished from a source that was complete
-  when the copy began. A prefix of an incomplete source stays incomplete.
+- **Prefix table**: the streaming copy from a complete source finished and its
+  row count was verified to equal the source's.
 
-`open_complete(uri, name, role, *, expected)` opens a complete table without
+`open_complete(uri, name, role, *, expected=None)` opens a complete table without
 calling `expected` or scanning stored keys. For an incomplete table it calls
 `expected`, performs one `missing()` scan, and raises `IncompleteTableError`
 stating how many of the expected keys are missing and how to finish the table:
-rerun `index` for a reference table, or evaluate with validation caching enabled
-for a validation cache. The count is zero when every key is stored but the build
+rerun `index` for a reference table, evaluate with validation caching enabled
+for a validation cache, or rerun the sweep for a prefix table. Without
+`expected`, it refuses an incomplete table without counting, and the error's
+`missing` is `None`. The count is zero when every key is stored but the build
 never reached `mark_complete()`. Computing the expected keys can itself fail,
 for example when reference inputs no longer cover every class; that error
 propagates instead.
@@ -170,20 +172,32 @@ verification.
 
 ### Prefix tables
 
-`derive_prefix(destination, dimension, *, batch_size)` returns a prefix table in
-the same database:
+`derive_prefix(destination, dimension, *, batch_size)` returns a complete prefix
+table in the same database:
 
-- An existing destination is opened under the source's role without reading the
-  source; a legacy destination raises `LegacyTableError`, and one recording other
-  fingerprints than the source raises `IncompatibleTableError`. Either is left
-  unchanged.
-- A prefix wider than the source dimension raises `EmbeddingTableError` before
-  anything is written. A prefix equal to the source dimension copies vectors
-  unchanged.
-- Otherwise one streaming `create_table()` call, with no query-result limit,
-  retains every row, record ID, and row metadata value. Only vectors change to
-  exact float32 prefixes; no normalization is applied. When the source is
-  complete, the new prefix is marked complete after the copy finishes.
+- The source must be [complete](#completion); otherwise `IncompleteTableError`
+  is raised before anything is written. A prefix wider than the source dimension
+  raises `EmbeddingTableError`, also before any write. A prefix equal to the
+  source dimension copies vectors unchanged.
+- An existing destination is opened under the source's role. It is **reused**
+  without copying when it is complete, records the source's fingerprints, and is
+  a prefix of this source at the source's current dimension, at the requested
+  dimension. It is **dropped and recreated** when it matches in the same way but
+  is incomplete, as a crash between creation and marking, or any later write,
+  leaves it; a prefix holds only derived data, so no paid requests repeat.
+- Any other existing destination is **refused and left unchanged**: a legacy
+  table raises `LegacyTableError`; one of another role, one that is not a
+  prefix table, or one derived from another source, from this source at
+  another source dimension, or at another dimension raises
+  `EmbeddingTableError`; one recording other fingerprints raises
+  `IncompatibleTableError`, checked first, even when it is incomplete. The
+  destination is never dropped in these cases.
+- A new prefix is written by one streaming `create_table()` call, with no
+  query-result limit, retaining every row, record ID, and row metadata value.
+  Only vectors change to exact float32 prefixes; no normalization is applied.
+  The prefix is marked complete only after its row count equals the source's.
+  A different count raises `IncompleteTableError` (its `missing` is the row
+  shortfall) and leaves the prefix incomplete, so a rerun recreates it.
 - The new header keeps the source's role and fingerprints, records the prefix
   dimension, and records the source table and source dimension. A prefix of a
   prefix records its immediate source. The creation snapshot is copied verbatim,
@@ -192,7 +206,9 @@ the same database:
   compatible sources are compatible with each other.
 
 Open, create, and stream failures propagate without scan, repair, overwrite, or
-cleanup; this is not a crash durability guarantee.
+cleanup; recreation happens only on the next `derive_prefix()` call. This is not
+a crash durability guarantee: there is one writer, and no locking or transaction
+protects a concurrent derivation.
 
 `optimize()` delegates to LanceDB defaults. Reference builds invoke it only
 through `mark_complete()` of an incomplete table; validation caches, complete
@@ -296,7 +312,11 @@ evaluation, row preservation, bad-vector rejection, exact cosine
 ordering, negative scores, unlimited scans, ordered fetches, concurrent readers,
 completion markers (persistence across reopen, invalidation by appends, refusal
 with a missing count, tables without markers), optimization, and prefix
-derivation and completion. `tests/test_retrieval.py` checks
+derivation: refusal of incomplete sources, row-count-verified completion, reuse
+without copying, recreation after a crash or later write, and refusal, without
+changes, of legacy, non-prefix, other-source, other-dimension, other-role, and
+other-fingerprint destinations. `tests/test_matroyshka_sweep.py` checks the same
+reuse, recreation, and refusal through the sweep entry point. `tests/test_retrieval.py` checks
 vote ties, abstentions, and hand-calculated ranking denominators.
 `tests/test_classification.py` checks that deeper rankings do not expand saved
 voting support. `tests/test_matroyshka_sweep.py` and `tests/test_tracking.py` cover

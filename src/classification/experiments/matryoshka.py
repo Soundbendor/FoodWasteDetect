@@ -41,7 +41,12 @@ def run_sweep(
     config: ExperimentConfig,
     evaluate: Callable[[ExperimentConfig], tuple[EvaluationReport, str]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Prepare each dimension and publish a combined summary only after all succeed."""
+    """Prepare each dimension and publish a combined summary only after all succeed.
+
+    Both sources must be complete. Each prefix table below the source width is reused
+    when complete, recreated when a crash or later write left it incomplete, and
+    refused when it is not this source's prefix at that dimension.
+    """
     dimensions = config.sweep_dimensions
     if dimensions is None:
         raise ValueError("sweep_dimensions is required for sweeps")
@@ -49,10 +54,13 @@ def run_sweep(
     # ExperimentConfig requires a usable validation table whenever sweep_dimensions is set.
     assert validation_source is not None
     sources = (config.lancedb.table, validation_source)
-    validation_cache = EmbeddingTable.open(
+    # Prefixes are derived only from complete sources, so refuse either before any write.
+    validation_cache = EmbeddingTable.open_complete(
         config.lancedb.uri, validation_source, "validation_cache"
     )
-    reference_table = EmbeddingTable.open(config.lancedb.uri, config.lancedb.table, "reference")
+    reference_table = EmbeddingTable.open_complete(
+        config.lancedb.uri, config.lancedb.table, "reference"
+    )
     source_width = reference_table.dimension
     if validation_cache.dimension != source_width:
         raise ValueError(

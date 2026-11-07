@@ -18,6 +18,31 @@ For hardware acceptance, read the [V100 procedure](#v100-kernel-check) together
 with the current encoder's hardware constraints. Procedures here retain the root
 guide's explicit authorization requirements.
 
+## Prefix-table recreation (2026-11-06)
+
+`derive_prefix()` now requires a complete source and marks a new prefix complete
+only after its row count equals the source's. This replaces the interim rule from
+the [completion-marker entry](#completion-markers-2026-11-06), which marked a
+prefix complete when its source was complete at copy time. An existing
+destination is reused when it is a complete prefix of the same source at the
+same source dimension and target dimension, dropped and recreated when it is
+such a prefix but incomplete, and otherwise refused and left unchanged
+([prefix tables](classification/retrieval.md#prefix-tables)). Fingerprint
+refusal from the [fingerprint entry](#encoder-and-inputs-fingerprints-2026-11-06)
+is kept and checked first. The sweep opens both sources as complete tables, so
+an incomplete source fails before any prefix is written or any run is tracked.
+The header format and schema version are unchanged, so no rebuild is needed.
+
+Crashes were simulated by letting LanceDB `create_table()` commit and then
+raising before the completion marker, and short copies by dropping a streamed
+batch; both against temporary local LanceDB 0.40.0 tables. In the worktree's
+`default` and `jina-cpu` environments, installed from the committed lockfile,
+Ruff, the format check, scoped ty, and `classification --help` passed. The
+default suite passed 624 tests with two skips; the Jina suite passed 623 tests
+with three skips. Both reported the existing Sentence Transformers deprecation
+warning. The test task hid GPUs and set Hugging Face offline mode. No model or
+dataset downloads, GPU work, live cloud requests, or shared storage were used.
+
 ## Encoder and inputs fingerprints (2026-11-06)
 
 **Every existing embedding table must be rebuilt under a new name again.** The

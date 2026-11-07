@@ -7,8 +7,10 @@ encoding batches for reference tables and validation caches; table opening,
 missing-key scans, and completion checks belong to `EmbeddingTable` in `retrieval`.
 Open tables only through `EmbeddingTable` with the matching role. `matryoshka.py`
 holds sweep policy (dimensions, `<source>_d<dim>` names, distinct-name and
-source-dimension checks) and derives prefix tables through
-`EmbeddingTable.derive_prefix()`; it must not import LanceDB or Arrow.
+source-dimension checks), opens both sources as complete tables, and derives
+prefix tables through `EmbeddingTable.derive_prefix()`, which decides reuse,
+recreation, or refusal; it must not import LanceDB or Arrow or drop tables
+itself.
 
 | Task | Read before changing |
 | --- | --- |

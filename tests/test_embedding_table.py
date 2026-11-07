@@ -612,7 +612,23 @@ PREFIX_VECTORS = np.array([[0.1, 0.2, 0.3, 0.4], [-1.5, 2.25, 1e-8, 7.0]], dtype
 def source(tmp_path):
     table = EmbeddingTable.create(tmp_path / "db", "source", "reference", 4, snapshot="snapshot", **fingerprints("reference"))
     table.append(PREFIX_ROWS, PREFIX_VECTORS)
+    table.mark_complete(record.source_key for record in PREFIX_ROWS)
     return table
+
+
+def complete_cache(uri, name, keys, vectors):
+    cache = EmbeddingTable.create(uri, name, "validation_cache", 4, snapshot="", **fingerprints("validation_cache"))
+    cache.append([PointRecord("A", kind, identity, "") for kind, identity in keys], vectors)
+    cache.mark_complete(keys)
+    return cache
+
+
+def forbid_copies(monkeypatch):
+    """Fail any table creation or drop, so a test observes that nothing is rewritten."""
+    for operation in ("create_table", "drop_table"):
+        monkeypatch.setattr(
+            LanceDBConnection, operation, Mock(side_effect=AssertionError(f"{operation} forbidden"))
+        )
 
 
 def test_prefix_keeps_records_and_replaces_vectors_with_float32_prefixes(source):
@@ -634,6 +650,7 @@ def test_prefix_keeps_records_and_replaces_vectors_with_float32_prefixes(source)
 def test_prefix_creation_snapshot_is_identical_to_its_source(tmp_path, snapshot):
     source = EmbeddingTable.create(tmp_path / "db", "source", "reference", 4, snapshot=snapshot, **fingerprints("reference"))
     source.append(PREFIX_ROWS, PREFIX_VECTORS)
+    source.mark_complete(record.source_key for record in PREFIX_ROWS)
 
     derived = source.derive_prefix("source_d2", 2, batch_size=1)
     second = derived.derive_prefix("source_d1", 1, batch_size=1)
@@ -646,10 +663,7 @@ def test_prefix_creation_snapshot_is_identical_to_its_source(tmp_path, snapshot)
 
 
 def test_prefix_tables_inherit_their_sources_fingerprints(source, tmp_path):
-    cache = EmbeddingTable.create(
-        tmp_path / "db", "cache", "validation_cache", 4, snapshot="",
-        **fingerprints("validation_cache"),
-    )
+    cache = complete_cache(tmp_path / "db", "cache", [("validation_image", "a")], PREFIX_VECTORS[:1])
 
     reference_prefix = source.derive_prefix("source_d2", 2, batch_size=1)
     cache_prefix = cache.derive_prefix("cache_d2", 2, batch_size=1)
@@ -665,9 +679,8 @@ def test_prefix_tables_inherit_their_sources_fingerprints(source, tmp_path):
 
 
 def test_prefix_of_a_validation_cache_is_a_validation_cache(tmp_path):
-    cache = EmbeddingTable.create(tmp_path / "db", "cache", "validation_cache", 4, snapshot="", **fingerprints("validation_cache"))
     keys = [("validation_image", "b"), ("validation_image", "a")]
-    cache.append([PointRecord("A", kind, identity, "") for kind, identity in keys], PREFIX_VECTORS)
+    cache = complete_cache(tmp_path / "db", "cache", keys, PREFIX_VECTORS)
 
     derived = cache.derive_prefix("cache_d3", 3, batch_size=1)
 
@@ -675,18 +688,36 @@ def test_prefix_of_a_validation_cache_is_a_validation_cache(tmp_path):
     np.testing.assert_array_equal(derived.fetch_vectors(keys[::-1]), PREFIX_VECTORS[::-1, :3])
 
 
-def test_prefix_of_a_complete_source_is_complete(source):
-    source.mark_complete(record.source_key for record in PREFIX_ROWS)
-
+def test_prefix_of_a_complete_source_is_complete_after_its_copy_is_verified(source):
     source.derive_prefix("source_d2", 2, batch_size=1)
 
     assert EmbeddingTable.open(source.uri, "source_d2", "reference").is_complete
     assert source.is_complete
 
 
-def test_prefix_of_an_incomplete_source_is_incomplete(source):
-    source.derive_prefix("source_d2", 2, batch_size=1)
+def test_deriving_from_an_incomplete_source_fails_before_writing(source):
+    source.append([PointRecord("C", "class_name", "late", "late")], np.ones((1, 4)))
 
+    with pytest.raises(IncompleteTableError, match="'source' is incomplete") as error:
+        source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert error.value.missing is None
+    assert not EmbeddingTable.exists(source.uri, "source_d2")
+
+
+def test_a_copy_short_of_the_source_row_count_is_left_incomplete(source, monkeypatch):
+    create = LanceDBConnection.create_table
+
+    def drop_last_batch(self, name, data=None, **kwargs):
+        batches = list(data)[:-1]
+        return create(self, name, pa.RecordBatchReader.from_batches(data.schema, batches), **kwargs)
+
+    monkeypatch.setattr(LanceDBConnection, "create_table", drop_last_batch)
+
+    with pytest.raises(IncompleteTableError, match="copied 1 of 2 rows") as error:
+        source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert error.value.missing == 1
     assert not EmbeddingTable.open(source.uri, "source_d2", "reference").is_complete
 
 
@@ -704,13 +735,53 @@ def test_full_width_prefix_copies_vectors_unchanged(source):
     np.testing.assert_array_equal(vectors_of(derived), PREFIX_VECTORS)
 
 
-def test_existing_prefix_is_reused_without_copying_again(source):
-    first = source.derive_prefix("source_d2", 2, batch_size=1)
-    source.append([PointRecord("C", "class_name", "late", "late")], np.ones((1, 4)))
+def test_complete_matching_prefix_is_reused_without_copying(source, monkeypatch):
+    source.derive_prefix("source_d2", 2, batch_size=1)
+    forbid_copies(monkeypatch)
 
     reused = source.derive_prefix("source_d2", 2, batch_size=1)
 
-    assert records_of(reused) == records_of(first) == PREFIX_ROWS
+    assert reused.is_complete
+    assert records_of(reused) == PREFIX_ROWS
+    np.testing.assert_array_equal(vectors_of(reused), PREFIX_VECTORS[:, :2])
+
+
+def crash_after_creating(monkeypatch):
+    """Let one table creation commit, then fail before the copy is marked complete."""
+    create = LanceDBConnection.create_table
+
+    def crash(self, name, *args, **kwargs):
+        monkeypatch.setattr(LanceDBConnection, "create_table", create)
+        create(self, name, *args, **kwargs)
+        raise RuntimeError("crash mid-copy")
+
+    monkeypatch.setattr(LanceDBConnection, "create_table", crash)
+
+
+def test_prefix_left_incomplete_by_a_crash_is_recreated(source, monkeypatch):
+    crash_after_creating(monkeypatch)
+    with pytest.raises(RuntimeError, match="crash mid-copy"):
+        source.derive_prefix("source_d2", 2, batch_size=1)
+    crashed = EmbeddingTable.open(source.uri, "source_d2", "reference")
+    assert crashed.prefix_source == PrefixSource("source", 4)
+    assert not crashed.is_complete
+
+    recreated = source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert recreated.is_complete
+    assert records_of(recreated) == PREFIX_ROWS
+    np.testing.assert_array_equal(vectors_of(recreated), PREFIX_VECTORS[:, :2])
+    assert recreated.creation_snapshot == "snapshot"
+
+
+def test_prefix_changed_after_completion_is_recreated_from_its_source(source):
+    derived = source.derive_prefix("source_d2", 2, batch_size=1)
+    derived.append([PointRecord("C", "class_name", "stray", "stray")], np.ones((1, 2)))
+
+    recreated = source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert recreated.is_complete
+    assert records_of(recreated) == PREFIX_ROWS
 
 
 def test_existing_prefix_from_another_encoder_is_refused(source):
@@ -724,8 +795,121 @@ def test_existing_prefix_from_another_encoder_is_refused(source):
         source.derive_prefix("source_d2", 2, batch_size=1)
 
 
-def test_legacy_destination_is_refused_and_left_unchanged(source):
+def test_incomplete_prefix_of_an_earlier_encoder_is_refused_not_recreated(source, monkeypatch):
+    stale = dict(SYNTHETIC_ENCODER, **{"embedding.model_id": "stale"})
+    earlier = EmbeddingTable.create(
+        source.uri, "earlier", "reference", 4, snapshot="", encoder=stale, inputs=SYNTHETIC_INPUTS
+    )
+    earlier.append(PREFIX_ROWS, PREFIX_VECTORS)
+    earlier.mark_complete(record.source_key for record in PREFIX_ROWS)
+    crash_after_creating(monkeypatch)
+    with pytest.raises(RuntimeError, match="crash mid-copy"):
+        earlier.derive_prefix("earlier_d2", 2, batch_size=1)
+    # Rebuild the source under the same name with another encoder.
+    LanceDBConnection(source.uri).drop_table("earlier")
+    rebuilt = EmbeddingTable.create(
+        source.uri, "earlier", "reference", 4, snapshot="", **fingerprints("reference")
+    )
+    rebuilt.append(PREFIX_ROWS, PREFIX_VECTORS)
+    rebuilt.mark_complete(record.source_key for record in PREFIX_ROWS)
+    forbid_copies(monkeypatch)
+
+    with pytest.raises(IncompatibleTableError, match="embedding.model_id: stored 'stale'"):
+        rebuilt.derive_prefix("earlier_d2", 2, batch_size=1)
+
+    assert EmbeddingTable.open(source.uri, "earlier_d2", "reference").encoder_fingerprint == stale
+
+
+def not_a_prefix(source):
+    table = EmbeddingTable.create(source.uri, "source_d2", "reference", 2, snapshot="", **fingerprints("reference"))
+    table.append(PREFIX_ROWS[:1], np.ones((1, 2)))
+    table.mark_complete([PREFIX_ROWS[0].source_key])
+
+
+def prefix_of_another_source(source):
+    other = EmbeddingTable.create(source.uri, "other", "reference", 4, snapshot="", **fingerprints("reference"))
+    other.append(PREFIX_ROWS[:1], np.ones((1, 4)))
+    other.mark_complete([PREFIX_ROWS[0].source_key])
+    other.derive_prefix("source_d2", 2, batch_size=1)
+
+
+def prefix_at_another_dimension(source):
+    source.derive_prefix("source_d2", 3, batch_size=1)
+
+
+def incomplete(setup):
+    """Leave the destination ``setup`` writes incomplete, as a crash or a later write would."""
+
+    def wrapped(source):
+        setup(source)
+        table = EmbeddingTable.open(source.uri, "source_d2", "reference")
+        table.append([PointRecord("C", "class_name", "stray", "stray")], np.ones((1, table.dimension)))
+
+    wrapped.__name__ = f"incomplete_{setup.__name__}"
+    return wrapped
+
+
+@pytest.mark.parametrize(
+    ("setup", "reason"),
+    [
+        (not_a_prefix, "is not a prefix table"),
+        (incomplete(not_a_prefix), "is not a prefix table"),
+        (prefix_of_another_source, "derived from 'other' at dimension 4"),
+        (incomplete(prefix_of_another_source), "derived from 'other' at dimension 4"),
+        (prefix_at_another_dimension, "has dimension 3"),
+        (incomplete(prefix_at_another_dimension), "has dimension 3"),
+    ],
+)
+def test_destination_this_source_did_not_derive_is_refused_and_left_unchanged(
+    source, monkeypatch, setup, reason
+):
+    setup(source)
+    before = EmbeddingTable.open(source.uri, "source_d2", "reference")
+    rows, complete = before.rows(), before.is_complete
+    forbid_copies(monkeypatch)
+
+    with pytest.raises(EmbeddingTableError, match=reason) as error:
+        source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert not isinstance(error.value, IncompleteTableError | IncompatibleTableError | LegacyTableError)
+    after = EmbeddingTable.open(source.uri, "source_d2", "reference")
+    assert records_of(after) == [record for record, _ in rows]
+    np.testing.assert_array_equal(vectors_of(after), [vector for _, vector in rows])
+    assert after.is_complete == complete
+
+
+def test_destination_derived_from_a_source_of_another_width_is_refused(tmp_path, monkeypatch):
+    """A source rebuilt at another width under the same name does not own old prefixes."""
+    uri = tmp_path / "db"
+    first = EmbeddingTable.create(uri, "source", "reference", 8, snapshot="", **fingerprints("reference"))
+    first.append(PREFIX_ROWS, np.ones((2, 8)))
+    first.mark_complete(record.source_key for record in PREFIX_ROWS)
+    first.derive_prefix("source_d2", 2, batch_size=1)
+    LanceDBConnection(uri).drop_table("source")
+    rebuilt = EmbeddingTable.create(uri, "source", "reference", 4, snapshot="", **fingerprints("reference"))
+    rebuilt.append(PREFIX_ROWS, PREFIX_VECTORS)
+    rebuilt.mark_complete(record.source_key for record in PREFIX_ROWS)
+    forbid_copies(monkeypatch)
+
+    with pytest.raises(EmbeddingTableError, match="derived from 'source' at dimension 8"):
+        rebuilt.derive_prefix("source_d2", 2, batch_size=1)
+
+    np.testing.assert_array_equal(
+        vectors_of(EmbeddingTable.open(uri, "source_d2", "reference")), np.ones((2, 2))
+    )
+
+
+def test_destination_of_another_role_is_refused(source, monkeypatch):
+    complete_cache(source.uri, "source_d2", [("validation_image", "a")], PREFIX_VECTORS[:1])
+    forbid_copies(monkeypatch)
+
+    with pytest.raises(EmbeddingTableError, match="is a validation_cache table"):
+        source.derive_prefix("source_d2", 2, batch_size=1)
+
+
+def test_legacy_destination_is_refused_and_left_unchanged(source, monkeypatch):
     legacy_table(source.uri, "source_d2", None)
+    forbid_copies(monkeypatch)
 
     with pytest.raises(LegacyTableError):
         source.derive_prefix("source_d2", 2, batch_size=1)
@@ -737,6 +921,7 @@ def test_legacy_destination_is_refused_and_left_unchanged(source):
 def test_prefix_streams_every_row_without_a_result_limit(source):
     many = [PointRecord("A", "training_image", f"extra-{i}", f"extra-{i}") for i in range(23)]
     source.append(many, np.ones((23, 4), dtype=np.float32))
+    source.mark_complete(record.source_key for record in PREFIX_ROWS + many)
 
     derived = source.derive_prefix("many_d3", 3, batch_size=3)
 

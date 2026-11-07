@@ -5,6 +5,7 @@ record-to-row mapping, or LanceDB and Arrow calls. Callers work in domain terms:
 source keys, records, and vectors.
 """
 
+import logging
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ _RESUME: dict[TableRole, str] = {
     "reference": "rerun the index stage to resume and mark it",
     "validation_cache": "evaluate with validation caching enabled to fill and mark it",
 }
+_RESUME_PREFIX = "rerun the sweep to recreate it from its complete source"
 
 _STRING_COLUMNS = ("id", "class", "source_kind", "source_identity", "value")
 _VECTOR = "vector"
@@ -75,10 +77,17 @@ class IncompleteTableError(EmbeddingTableError):
     """A table's build has not finished, so it may lack expected source keys.
 
     Attributes:
-        missing: How many expected source keys were absent when the error was raised.
+        missing: How many expected source keys, or for a short prefix copy how many
+            rows, were absent when the error was raised; None when not counted.
     """
 
-    def __init__(self, message: str, *, missing: int) -> None:
+    def __init__(self, message: str, *, missing: int | None) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Description of the incomplete table and the fix.
+            missing: Count of absent source keys or rows; None when not counted.
+        """
         super().__init__(message)
         self.missing = missing
 
@@ -182,7 +191,7 @@ class EmbeddingTable:
         name: str,
         role: TableRole,
         *,
-        expected: Callable[[], Iterable[SourceKey]],
+        expected: Callable[[], Iterable[SourceKey]] | None = None,
         encoder: Fingerprint | None = None,
         dimension: int | None = None,
     ) -> Self:
@@ -196,7 +205,8 @@ class EmbeddingTable:
             name: Table name.
             role: The role the caller requires.
             expected: Returns the source keys the finished table must contain; called
-                only for an incomplete table, to state how many are missing.
+                only for an incomplete table, to state how many are missing. None
+                refuses an incomplete table without counting.
             encoder: Encoder fingerprint the table must record; None skips the check.
             dimension: Vector width the table must record; None skips the check.
 
@@ -210,12 +220,13 @@ class EmbeddingTable:
             IncompatibleTableError: If ``encoder`` or ``dimension`` differs from the
                 stored value, listing each difference.
             IncompleteTableError: If the table is not marked complete at its current
-                version, stating how many expected source keys are missing.
+                version, stating how many expected source keys are missing when
+                ``expected`` is given.
         """
         table = cls.open(uri, name, role)
         table.require_compatible(encoder=encoder, dimension=dimension)
         if not table.is_complete:
-            raise table._incomplete(expected())
+            raise table._incomplete(None if expected is None else expected())
         return table
 
     @classmethod
@@ -404,15 +415,20 @@ class EmbeddingTable:
         return _metadata(self._table)[_SNAPSHOT_KEY]
 
     def derive_prefix(self, destination: str, dimension: int, *, batch_size: int) -> Self:
-        """Open or create a prefix table holding this table's rows at a smaller dimension.
+        """Reuse, recreate, or create a prefix table of this complete table.
 
-        An existing destination is opened under this table's role without reading this
-        table, and must record this table's fingerprints. Otherwise one streaming creation copies every row, record ID, and
-        metadata value, replacing each vector with its exact float32 prefix. The new
-        header keeps this table's role and records this table as the source; the
-        creation snapshot is copied verbatim. A new prefix of a complete table is
-        marked complete once the copy finishes; a prefix of an incomplete table is not.
-        The prefix inherits this table's encoder and inputs fingerprints.
+        Only a complete table can be derived from. An existing destination is opened
+        under this table's role and must be a prefix of this table, at this table's
+        current dimension, at ``dimension``, and with this table's fingerprints;
+        anything else is refused and left unchanged. A complete matching prefix is
+        reused without copying; an incomplete one, left by a crash or a later write,
+        is dropped and recreated, since it holds only derived data.
+
+        One streaming creation copies every row, record ID, and metadata value,
+        replacing each vector with its exact float32 prefix. The new header keeps this
+        table's role and fingerprints and records this table as the source; the
+        creation snapshot is copied verbatim. The prefix is marked complete only after
+        its row count is verified to equal this table's.
 
         Args:
             destination: Name of the prefix table in the same database.
@@ -420,22 +436,37 @@ class EmbeddingTable:
             batch_size: Rows per streamed batch.
 
         Returns:
-            The prefix table.
+            The complete prefix table.
 
         Raises:
-            EmbeddingTableError: If ``dimension`` exceeds this table's dimension.
+            IncompleteTableError: If this table is not complete, before anything is
+                written; or if the copy holds fewer or more rows than this table, in
+                which case the prefix stays incomplete and a rerun recreates it.
+            EmbeddingTableError: If ``dimension`` exceeds this table's dimension, or an
+                existing destination has another role, is not a prefix table, or was
+                derived from another source, source dimension, or at another
+                dimension; the destination is left unchanged.
+            LegacyTableError: If an existing destination has no valid current header;
+                it is left unchanged.
             IncompatibleTableError: If an existing destination records other
                 fingerprints; it is left unchanged.
         """
-        if type(self).exists(self.uri, destination):
-            existing = type(self).open(self.uri, destination, self.role)
-            existing.require_compatible(encoder=self._header.encoder, inputs=self._header.inputs)
-            return existing
+        if not self.is_complete:
+            raise self._incomplete(None)
         if dimension > self.dimension:
             raise EmbeddingTableError(
                 f"Prefix width {dimension} exceeds the stored width {self.dimension} "
                 f"of table {self.name!r}"
             )
+        cls = type(self)
+        if cls.exists(self.uri, destination):
+            existing = cls.open(self.uri, destination, self.role)
+            existing.require_compatible(encoder=self._header.encoder, inputs=self._header.inputs)
+            self._require_own_prefix(existing, dimension)
+            if existing.is_complete:
+                return existing
+            logging.warning("Recreating incomplete prefix table %r", destination)
+            LanceDBConnection(self.uri).drop_table(destination)
         header = _Header(
             schema_version=SCHEMA_VERSION,
             role=self.role,
@@ -447,14 +478,38 @@ class EmbeddingTable:
         )
         snapshot = self.creation_snapshot
         schema = _schema(header, snapshot)
-        source_complete = self.is_complete
         rows = pa.RecordBatchReader.from_batches(
             schema, _prefix_batches(self._table, schema, dimension, batch_size)
         )
-        prefix = type(self)._create(self.uri, destination, header, snapshot, rows)
-        if source_complete:
-            prefix._write_completion()
+        prefix = cls._create(self.uri, destination, header, snapshot, rows)
+        copied, expected = prefix._table.count_rows(), self._table.count_rows()
+        if copied != expected:
+            raise IncompleteTableError(
+                f"Prefix table {destination!r} is incomplete: copied {copied} of "
+                f"{expected} rows of {self.name!r}; {_RESUME_PREFIX}",
+                missing=expected - copied,
+            )
+        prefix._write_completion()
         return prefix
+
+    def _require_own_prefix(self, existing: "EmbeddingTable", dimension: int) -> None:
+        """Refuse a destination this table did not derive at ``dimension``."""
+        source = existing.prefix_source
+        own = PrefixSource(self.name, self.dimension)
+        if source is None:
+            problem = "is not a prefix table"
+        elif source != own:
+            problem = f"was derived from {source.table!r} at dimension {source.dimension}"
+        elif existing.dimension != dimension:
+            problem = f"has dimension {existing.dimension}"
+        else:
+            return
+        raise EmbeddingTableError(
+            f"Cannot derive prefix table {existing.name!r} from {self.name!r} at dimension "
+            f"{dimension}: the existing table {problem}, so it was not derived from "
+            f"{self.name!r} at dimension {self.dimension} and is left unchanged; choose "
+            "another table name or remove it yourself"
+        )
 
     def append(
         self,
@@ -499,13 +554,20 @@ class EmbeddingTable:
             self.optimize()
         self._write_completion()
 
-    def _incomplete(self, expected: Iterable[SourceKey]) -> IncompleteTableError:
-        """Count absent expected keys once and describe them for the researcher."""
+    def _incomplete(self, expected: Iterable[SourceKey] | None) -> IncompleteTableError:
+        """Describe an incomplete table, counting absent expected keys when given."""
+        resume = _RESUME_PREFIX if self.prefix_source is not None else _RESUME[self.role]
+        if expected is None:
+            return IncompleteTableError(
+                f"Table {self.name!r} is incomplete: it is not marked complete at its "
+                f"current version; {resume}",
+                missing=None,
+            )
         unique = set(expected)
         missing = len(self.missing(unique))
         return IncompleteTableError(
             f"Table {self.name!r} is incomplete: missing {missing} of {len(unique)} expected "
-            f"source keys; {_RESUME[self.role]}",
+            f"source keys; {resume}",
             missing=missing,
         )
 
