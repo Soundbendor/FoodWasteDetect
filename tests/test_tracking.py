@@ -267,7 +267,7 @@ def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_c
     ]
 
 
-def test_table_counts_null_recall_and_saved_report_survives_logging_failure(experiment_case, sdk):
+def test_counts_without_summary_null_recall_and_saved_report_survives_logging_failure(experiment_case, sdk):
     exp = experiment_case.experiment()
     exp.build_vector_database()
     (exp.output / "index.json").unlink()

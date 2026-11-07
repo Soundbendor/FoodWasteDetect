@@ -19,8 +19,9 @@ class IndexSummary(BaseModel):
 class EvaluationReport(BaseModel):
     """Completed predictions and metrics written before tracker publication.
 
-    ``reference_source_counts`` holds every stored row of the reference table by
-    source kind, read from the table itself.
+    Attributes:
+        reference_source_counts: Stored reference-table rows per source kind, read
+            from the table itself; never null.
     """
 
     config: ExperimentConfig

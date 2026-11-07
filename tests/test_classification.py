@@ -935,7 +935,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(report['reference_source_counts'], {'training_image': 2, 'class_name': 2})
         self.assertFalse((exp.output / 'index.json').exists())
 
-    def test_evaluation_counts_every_row_of_a_resumed_reference_table(self):
+    def test_evaluation_counts_a_resumed_reference_table(self):
         exp = self.experiment((True, True, False))
         exp.batch_size = 1
         append = LanceDBIndex.append
