@@ -180,11 +180,13 @@ table in the same database:
   raises `EmbeddingTableError`, also before any write. A prefix equal to the
   source dimension copies vectors unchanged.
 - An existing destination is opened under the source's role. It is **reused**
-  without copying when it is complete, records the source's fingerprints, and is
-  a prefix of this source at the source's current dimension, at the requested
-  dimension. It is **dropped and recreated** when it matches in the same way but
-  is incomplete, as a crash between creation and marking, or any later write,
-  leaves it; a prefix holds only derived data, so no paid requests repeat.
+  without copying when it is complete, has the source's row count, records the
+  source's fingerprints, and is a prefix of this source at the source's current
+  dimension, at the requested dimension. It is **dropped and recreated** when it
+  matches in the same way but is incomplete, as a crash between creation and
+  marking, or any later write, leaves it, or when its row count differs because
+  the source was completed again with other rows; a prefix holds only derived
+  data, so no paid requests repeat.
 - Any other existing destination is **refused and left unchanged**: a legacy
   table raises `LegacyTableError`; one of another role, one that is not a
   prefix table, or one derived from another source, from this source at
@@ -196,8 +198,9 @@ table in the same database:
   query-result limit, retaining every row, record ID, and row metadata value.
   Only vectors change to exact float32 prefixes; no normalization is applied.
   The prefix is marked complete only after its row count equals the source's.
-  A different count raises `IncompleteTableError` (its `missing` is the row
-  shortfall) and leaves the prefix incomplete, so a rerun recreates it.
+  A different count raises `IncompleteTableError` (its `missing` is the source
+  row count minus the copied row count) and leaves the prefix incomplete, so a
+  rerun recreates it.
 - The new header keeps the source's role and fingerprints, records the prefix
   dimension, and records the source table and source dimension. A prefix of a
   prefix records its immediate source. The creation snapshot is copied verbatim,
@@ -315,8 +318,8 @@ with a missing count, tables without markers), optimization, and prefix
 derivation: refusal of incomplete sources, row-count-verified completion, reuse
 without copying, recreation after a crash or later write, and refusal, without
 changes, of legacy, non-prefix, other-source, other-dimension, other-role, and
-other-fingerprint destinations. `tests/test_matroyshka_sweep.py` checks the same
-reuse, recreation, and refusal through the sweep entry point. `tests/test_retrieval.py` checks
+other-fingerprint destinations. `tests/test_matroyshka_sweep.py` checks the
+same reuse, recreation, and refusal through the sweep entry point. `tests/test_retrieval.py` checks
 vote ties, abstentions, and hand-calculated ranking denominators.
 `tests/test_classification.py` checks that deeper rankings do not expand saved
 voting support. `tests/test_matroyshka_sweep.py` and `tests/test_tracking.py` cover

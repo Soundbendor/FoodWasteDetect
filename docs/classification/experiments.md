@@ -309,9 +309,10 @@ For each target below the stored width, an existing `<source>_d<dimension>`
 table is handled by the [prefix-table contract](retrieval.md#prefix-tables):
 
 - **Reuse**: a complete prefix of that source at that dimension, with the
-  source's fingerprints, is evaluated without copying.
+  source's fingerprints and row count, is evaluated without copying.
 - **Recreation**: a prefix of that source at that dimension that is incomplete,
-  for example after a crash mid-copy, is dropped and copied again. Rerunning
+  for example after a crash mid-copy, or whose row count differs because the
+  source was completed again, is dropped and copied again. Rerunning
   the sweep after a crash therefore needs no manual cleanup and completes.
 - **Refusal**: a legacy table, a table that is not a prefix table, or a prefix
   derived from another source, another source dimension, another dimension, or

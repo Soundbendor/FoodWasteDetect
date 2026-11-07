@@ -784,6 +784,18 @@ def test_prefix_changed_after_completion_is_recreated_from_its_source(source):
     assert records_of(recreated) == PREFIX_ROWS
 
 
+def test_complete_prefix_of_a_source_completed_again_with_more_rows_is_recreated(source):
+    source.derive_prefix("source_d2", 2, batch_size=1)
+    late = PointRecord("C", "class_name", "late", "late")
+    source.append([late], np.ones((1, 4)))
+    source.mark_complete(record.source_key for record in [*PREFIX_ROWS, late])
+
+    recreated = source.derive_prefix("source_d2", 2, batch_size=1)
+
+    assert recreated.is_complete
+    assert records_of(recreated) == [*PREFIX_ROWS, late]
+
+
 def test_existing_prefix_from_another_encoder_is_refused(source):
     other = dict(SYNTHETIC_ENCODER, **{"embedding.model_id": "other"})
     EmbeddingTable.create(

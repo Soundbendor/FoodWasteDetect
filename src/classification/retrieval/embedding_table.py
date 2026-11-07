@@ -77,8 +77,9 @@ class IncompleteTableError(EmbeddingTableError):
     """A table's build has not finished, so it may lack expected source keys.
 
     Attributes:
-        missing: How many expected source keys, or for a short prefix copy how many
-            rows, were absent when the error was raised; None when not counted.
+        missing: How many expected source keys were absent, or for a prefix copy the
+            source row count minus the copied row count, when the error was raised;
+            None when not counted.
     """
 
     def __init__(self, message: str, *, missing: int | None) -> None:
@@ -420,9 +421,11 @@ class EmbeddingTable:
         Only a complete table can be derived from. An existing destination is opened
         under this table's role and must be a prefix of this table, at this table's
         current dimension, at ``dimension``, and with this table's fingerprints;
-        anything else is refused and left unchanged. A complete matching prefix is
-        reused without copying; an incomplete one, left by a crash or a later write,
-        is dropped and recreated, since it holds only derived data.
+        anything else is refused and left unchanged. A complete matching prefix with
+        this table's row count is reused without copying. One left incomplete by a
+        crash or a later write, or whose row count no longer matches because this
+        table was completed again with other rows, is dropped and recreated, since it
+        holds only derived data.
 
         One streaming creation copies every row, record ID, and metadata value,
         replacing each vector with its exact float32 prefix. The new header keeps this
@@ -463,9 +466,9 @@ class EmbeddingTable:
             existing = cls.open(self.uri, destination, self.role)
             existing.require_compatible(encoder=self._header.encoder, inputs=self._header.inputs)
             self._require_own_prefix(existing, dimension)
-            if existing.is_complete:
+            if existing.is_complete and existing._table.count_rows() == self._table.count_rows():
                 return existing
-            logging.warning("Recreating incomplete prefix table %r", destination)
+            logging.warning("Recreating incomplete or stale prefix table %r", destination)
             LanceDBConnection(self.uri).drop_table(destination)
         header = _Header(
             schema_version=SCHEMA_VERSION,
@@ -492,7 +495,7 @@ class EmbeddingTable:
         prefix._write_completion()
         return prefix
 
-    def _require_own_prefix(self, existing: "EmbeddingTable", dimension: int) -> None:
+    def _require_own_prefix(self, existing: Self, dimension: int) -> None:
         """Refuse a destination this table did not derive at ``dimension``."""
         source = existing.prefix_source
         own = PrefixSource(self.name, self.dimension)

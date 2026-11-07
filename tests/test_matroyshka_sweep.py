@@ -400,7 +400,12 @@ def prefix_of_another_source(uri):
     other.derive_prefix('reference_d768', 768, batch_size=1)
 
 
-@pytest.mark.parametrize('setup', [not_a_prefix, legacy, prefix_of_another_source])
+def prefix_at_another_dimension(uri):
+    stored(uri, 'reference').derive_prefix('reference_d768', 1536, batch_size=1)
+
+
+@pytest.mark.parametrize('setup', [not_a_prefix, legacy, prefix_of_another_source,
+                                   prefix_at_another_dimension])
 def test_sweep_refuses_a_destination_it_did_not_derive_and_leaves_it_unchanged(sources, runs, setup):
     config, connection, _, _ = sources
     setup(connection.uri)
@@ -409,3 +414,19 @@ def test_sweep_refuses_a_destination_it_did_not_derive_and_leaves_it_unchanged(s
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert connection.open_table('reference_d768').to_arrow().equals(before)
     assert not list(Path(config['output_dir']).rglob('summary.json'))
+
+
+def test_rerun_reuses_complete_prefix_tables_without_copying(sources, runs, monkeypatch):
+    config, connection, _, _ = sources
+    cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
+    for operation in ('create_table', 'drop_table'):
+        monkeypatch.setattr(LanceDBConnection, operation,
+                            Mock(side_effect=AssertionError(f'{operation} forbidden')))
+
+    cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
+
+    summaries = sorted(Path(config['output_dir']).glob('matroyshka_sweep_*/summary.json'))
+    assert len(summaries) == 2
+    first, second = (json.loads(path.read_text())['results'] for path in summaries)
+    assert [item['majority_vote_accuracy'] for item in second] == [
+        item['majority_vote_accuracy'] for item in first] == [1, 0, 1]
