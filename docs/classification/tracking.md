@@ -27,12 +27,12 @@ untracked by default; their progress bars still work.
 | Publisher | Output and completion boundary |
 | --- | --- |
 | `Tracker.configuration(config: ExperimentConfig)` | `configuration-<run.id>` artifact of type `configuration`, containing `resolved_config.yaml` with settings captured before stage execution. |
-| `Tracker.reference_counts(counts)` | `reference_source_counts` in the run summary. A completed index build publishes counts after its local summary write; evaluation supplies matching summary counts or null. |
+| `Tracker.reference_counts(counts)` | `reference_source_counts` in the run summary. Always a mapping from source kind to stored row count. A completed index build publishes counts after its local summary write; evaluation publishes the reference table's own counts before evaluating; see [experiments](experiments.md#artifact-and-failure-contract). |
 | `Tracker.evaluation(report, report_path)` | Every aggregate metric under `evaluation/<key>`, a per-class W&B table, and an `evaluation-<run.id>` artifact of type `evaluation` containing `report.json`. Called only after a complete evaluation and successful local report write. |
 
 The per-class table columns are `class`, `support`, `correct`, `recall`, `precision`,
 and `f1`. Metric definitions belong in [retrieval](retrieval.md); local artifact
-formats and reference-summary matching belong in [experiments](experiments.md).
+formats and the source of reference counts belong in [experiments](experiments.md).
 
 ## Progress ownership
 

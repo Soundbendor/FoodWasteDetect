@@ -96,12 +96,13 @@ state.
 | Domain: explore terminology or architectural decisions                            | [Domain rules](docs/agents/domain.md)                                       |
 | CLIP design: extend localization, masks, crop retrieval, or evaluation             | [CLIP architecture](docs/clip/architecture.md)                               |
 | CLIP repairs: touch legacy annotations, crops, indexing, metrics, or training      | [Source review and correctness gaps](docs/clip/review.md)                    |
-| CLI: change parsing, overrides, command dispatch, or downloads                     | [CLI and configuration](docs/classification/cli.md)                          |
+| CLI: change parsing, overrides, config rules, command dispatch, or downloads       | [CLI and configuration](docs/classification/cli.md)                          |
 | Tracking: change W&B lifecycle, artifacts, summaries, or progress                  | [Tracking and progress](docs/classification/tracking.md)                     |
 | Data: change FoodX251 selection, schemas, descriptions, or Ollama ownership        | [Data and descriptions](docs/classification/data.md)                         |
 | Encoders: change local/Vertex models, dimensions, image ownership, or requests     | [Encoder contracts](docs/classification/encoders.md)                         |
 | Experiments: change stages, resumption, validation caching, reports, or sweeps     | [Experiment contracts](docs/classification/experiments.md)                   |
-| Retrieval: change LanceDB operations, voting, or metric definitions                | [Storage and retrieval](docs/classification/retrieval.md)                    |
+| Retrieval: change embedding tables, voting, or metric definitions                  | [Embedding tables and retrieval](docs/classification/retrieval.md)           |
+| Decision: change embedding table headers, legacy refusal, or migration policy      | [ADR-0001: embedding table header](docs/adr/0001-embedding-table-header.md)  |
 | Operations: change smoke helpers or Slurm/service scripts                          | [Script operations](docs/classification/scripts.md)                          |
 | Verification: inspect environment checks, historical results, or acceptance limits | [Experiment verification notes](docs/experiments.md)                         |
 | Migration history: inspect the Pydantic configuration migration                    | [Pydantic migration plan](docs/plans/pydantic_config_migration.md)             |

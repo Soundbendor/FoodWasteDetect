@@ -53,9 +53,9 @@ backend construction:
 
 | Record | Meaning |
 | --- | --- |
-| `SourceIdentity` | `(source_kind, source_identity)`, the storage/resumption key. |
+| `SourceKey` | `(source_kind, source_identity)`, the [source key](../../GLOSSARY.md) used for storage and resumption. |
 | `ImageMetadata` | Filename, canonical class, source ID, and source split. |
-| `PointRecord` | Frozen reference/cache record with label, source kind/identity, value, and generated UUID. `to_payload()` stores the label under `class`. |
+| `PointRecord` | Frozen embedding-table record with label, source kind, source identity, value, and generated UUID; `source_key` returns its source key. Storage columns belong to the [embedding table module](retrieval.md#rows-and-appends). |
 | `Neighbor` | Retrieved ID, label, and cosine similarity score. |
 | `Prediction` | Image metadata plus prediction, vote fraction, nearest label, ordered neighbors, and per-query retrieval metrics. |
 | `QueryRetrievalMetrics` | Top-five hit, precision, reciprocal rank, nDCG, AP@R, and relevant-reference count. Definitions are in [retrieval](retrieval.md). |

@@ -58,6 +58,16 @@ class LanceDBConfig(ConfigModel):
     table: NonemptyString
     validation_table: str | None = None
 
+    @model_validator(mode="after")
+    def usable_validation_table(self) -> Self:
+        """Reject a blank validation table or one that reuses the reference table."""
+        name = self.validation_table
+        if name is not None and (not name.strip() or name == self.table):
+            raise ValueError(
+                "lancedb.validation_table must be nonempty and distinct from lancedb.table"
+            )
+        return self
+
 
 class OllamaConfig(ConfigModel):
     """Owned server connection and process settings, also used for downloads."""
@@ -87,7 +97,6 @@ class ExperimentConfig(ConfigModel):
     embed_images: bool
     embed_class_labels: bool
     embed_descriptions: bool
-    vector_dimension: PositiveInt | None = None
     sweep_dimensions: list[PositiveInt] | None = None
     n_imgs_per_class: PositiveInt | None = None
     descriptions_file: str | None = None
@@ -109,10 +118,10 @@ class ExperimentConfig(ConfigModel):
         output = Path(self.output_dir).expanduser().resolve()
         if output.is_relative_to(Path(self.dataset.root).expanduser().resolve()):
             raise ValueError("Output directory must be separate from raw data")
-        if self.cache_validation_embeddings:
-            name = self.lancedb.validation_table
-            if not name or not name.strip() or name == self.lancedb.table:
-                raise ValueError(
-                    "lancedb.validation_table must be nonempty and distinct from reference table"
-                )
+        needs_validation_table = self.cache_validation_embeddings or self.sweep_dimensions
+        if needs_validation_table and self.lancedb.validation_table is None:
+            raise ValueError(
+                "lancedb.validation_table is required when cache_validation_embeddings "
+                "is enabled or sweep_dimensions is set"
+            )
         return self

@@ -267,7 +267,7 @@ def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_c
     ]
 
 
-def test_unknown_counts_null_recall_and_saved_report_survives_logging_failure(experiment_case, sdk):
+def test_counts_without_summary_null_recall_and_saved_report_survives_logging_failure(experiment_case, sdk):
     exp = experiment_case.experiment()
     exp.build_vector_database()
     (exp.output / "index.json").unlink()
@@ -280,7 +280,8 @@ def test_unknown_counts_null_recall_and_saved_report_survives_logging_failure(ex
     assert caught.value is failure
     report = json.loads(next(exp.output.glob("evaluation_*/report.json")).read_text())
     assert report["metrics"]["evaluated"] == 2
-    assert sdk.summary["reference_source_counts"] is None
+    assert sdk.summary["reference_source_counts"] == {"class_name": 2}
+    assert report["reference_source_counts"] == {"class_name": 2}
     table = next(
         c.args[0]["evaluation/per_class"]
         for c in sdk.log.call_args_list
@@ -314,7 +315,7 @@ config = {"k": 1, "embed_images": False, "embed_class_labels": True,
           "embed_descriptions": False, "embedding": {"model_id": "openai/clip-vit-base-patch32"}}
 config.update(dataset=dict(name="foodx251", root="/raw"), lancedb=dict(uri="/db", table="references"), output_dir="/output")
 config = ExperimentConfig.model_validate(config)
-report = EvaluationReport(config=config, table="references", reference_source_counts=None, predictions=[], metrics=dict(metrics([], ["A", "B"]), **report["metrics"]))
+report = EvaluationReport(config=config, table="references", dimension=2, reference_source_counts={"class_name": 1}, predictions=[], metrics=dict(metrics([], ["A", "B"]), **report["metrics"]))
 original_configuration = Tracker.configuration
 
 def publish(tracker, config):
@@ -411,7 +412,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
     assert bar.disable  # Context exit closes the bar.
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
-        patch("classification.experiments.classification.LanceDBIndex.query", side_effect=[[], failure]),
+        patch("classification.experiments.classification.EmbeddingTable.query", side_effect=[[], failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.evaluate()
@@ -478,7 +479,7 @@ def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_
     exp.batch_size = 1
     exp.tracker = Tracker(sdk)
     with (
-        patch("classification.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),
+        patch("classification.experiments.classification.EmbeddingTable.append", side_effect=[None, failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.build_vector_database()
@@ -537,28 +538,11 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     assert report['config']['embedding']['truncate_dim'] == 1024
     from classification.cli import wandb
     initial_config = wandb.init.call_args.kwargs['config']
-    assert initial_config['vector_dimension'] is None
-    assert report['config']['vector_dimension'] == 1024
-    assert dict(initial_config, vector_dimension=1024) == report['config']
+    assert report['dimension'] == 1024
+    assert initial_config == report['config']
     artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
     config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
     assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == initial_config
-
-
-def test_historical_counts_do_not_validate_historical_configuration(experiment_case):
-    exp = experiment_case.experiment()
-    summary = exp.build_vector_database()
-    path = exp.output / "index.json"
-    # Historical config can be absent or use a retired schema.
-    for historical_config in (None, {"retired_field": "value"}):
-        historical = summary.model_dump(mode="json")
-        historical["config"] = historical_config
-        path.write_text(json.dumps(historical))
-        report = exp.evaluate()
-        assert report.config is exp.config
-        assert report.reference_source_counts == summary.source_counts
-        saved = json.loads(next(exp.output.glob("evaluation_*/report.json")).read_text())
-        assert saved["config"]["embedding"]["device"] == "auto"
 
 
 @pytest.mark.parametrize("path,value", [

@@ -24,8 +24,8 @@ class Tracker:
             yaml.safe_dump(config.model_dump(mode="json"), stream, sort_keys=False)
         self.run.log_artifact(artifact)
 
-    def reference_counts(self, counts: dict[str, int] | None) -> None:
-        """Publish source counts, or null when no matching index summary exists."""
+    def reference_counts(self, counts: dict[str, int]) -> None:
+        """Publish the reference table's stored row counts by source kind."""
         self.run.summary["reference_source_counts"] = counts
 
     def evaluation(self, report: EvaluationReport, report_path: Path) -> None:

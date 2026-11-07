@@ -1,24 +1,15 @@
-"""Synthetic retrieval contracts, independent of experiments and model loading."""
+"""Synthetic voting and metric contracts, independent of storage and model loading."""
 
 import importlib.util
 import itertools
-import multiprocessing
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import Mock
 
-if any(importlib.util.find_spec(name) is None for name in ("numpy", "lancedb")):
-    raise unittest.SkipTest("requires NumPy and LanceDB")
+if importlib.util.find_spec("numpy") is None:
+    raise unittest.SkipTest("requires NumPy")
 
-import numpy as np
-import pyarrow as pa
-import pytest
-
-from classification.retrieval.lancedb import LanceDBIndex
 from classification.retrieval.voting import classify
 from classification.retrieval.metrics import metrics, ranking_metrics
-from classification.schemas import Neighbor, PointRecord, Prediction
+from classification.schemas import Neighbor, Prediction
 
 
 def prediction_row(
@@ -122,140 +113,8 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(legacy_metrics(predictions, []), expected)
 
 
-def concurrent_reader(uri, barrier, queue):
-    index = LanceDBIndex.open(uri, "fixture")
-    barrier.wait(timeout=30)
-    results = [index.query(np.array([1., 0.]), 10) for _ in range(10)]
-    queue.put(results)
-
-
-class LanceDBTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.uri = Path(self.temp.name) / "db"
-
-    def populate(self, dtype=np.float32, uri=None):
-        self.index = LanceDBIndex.create(self.uri if uri is None else uri, "fixture", 2)
-        records = [PointRecord(label, "class_name", label, label) for label in ("A", "B", "C")]
-        vectors = np.array([[3., 0.], [1., 1.], [-2., 0.]], dtype=dtype)
-        self.index.append(records[:2], vectors[:2])
-        self.index.append(records[2:], vectors[2:])
-        return records, vectors
-
-    def test_length_mismatch_does_not_append(self):
-        self.index = LanceDBIndex(self.uri, Mock())
-        record = PointRecord("A", "class_name", "A", "A")
-        for records, vectors in [([record], np.empty((0, 2))), ([], np.ones((1, 2)))]:
-            with self.assertRaisesRegex(ValueError, "Record/vector count mismatch"):
-                self.index.append(records, vectors)
-        self.index.table.add.assert_not_called()
-
-    def test_round_trip_and_table_protection(self):
-        for dtype in (np.float32, np.float64):
-            records, vectors = self.populate(dtype, self.uri / dtype.__name__)
-            with self.assertRaises(ValueError):
-                LanceDBIndex.create(self.index.uri, "fixture", 2)
-            reopened = LanceDBIndex.open(self.index.uri, "fixture")
-            stored = reopened.table.to_arrow()
-            self.assertEqual(stored.schema.field("vector").type, pa.list_(pa.float32(), 2))
-            for record, vector, point in zip(records, vectors, stored.to_pylist(), strict=True):
-                self.assertEqual({k: v for k, v in point.items() if k != "vector"}, record.to_payload())
-                np.testing.assert_allclose(point["vector"], vector)
-            neighbors = reopened.query(np.array([2., 0.], dtype=dtype), 10)
-            self.assertEqual([n["label"] for n in neighbors], ["A", "B", "C"])
-            np.testing.assert_allclose([n["score"] for n in neighbors], [1., 2**-0.5, -1.], atol=1e-6)
-            self.assertEqual(neighbors[0]["id"], records[0].id)
-            self.assertEqual(len(reopened.query(vectors[0], 1)), 1)
-
-    def test_full_v4_vectors_round_trip_with_cosine_search(self):
-        self.index = LanceDBIndex.create(self.uri, "fixture", 2048)
-        records = [PointRecord(label, "class_name", label, label) for label in ("A", "B")]
-        vectors = np.zeros((2, 2048), dtype=np.float32)
-        vectors[0, -1] = 3
-        vectors[1, 0] = 2
-        self.index.append(records, vectors)
-        reopened = LanceDBIndex.open(self.uri, "fixture")
-        self.assertEqual(
-            reopened.table.schema.field("vector").type, pa.list_(pa.float32(), 2048)
-        )
-        neighbors = reopened.query(vectors[0] * 2, 10)
-        self.assertEqual([n["id"] for n in neighbors], [r.id for r in records])
-        np.testing.assert_allclose([n["score"] for n in neighbors], [1., 0.], atol=1e-6)
-        self.assertEqual(classify(neighbors), ("A", 0.5))
-
-    def test_empty_and_bad_vectors(self):
-        self.index = LanceDBIndex.create(self.uri, "fixture", 2)
-        self.assertEqual(self.index.query(np.array([1., 0.]), 10), [])
-        for vector in ([[1., 2., 3.]], [[float("nan"), 1.]]):
-            with self.assertRaises((ValueError, pa.ArrowInvalid)):
-                self.index.append([PointRecord("A", "class_name", "A", "A")], np.array(vector))
-            self.assertEqual(self.index.table.count_rows(), 0)
-
-    def test_missing_storage_is_not_created(self):
-        self.assertFalse(LanceDBIndex.exists(self.uri, "fixture"))
-        with self.assertRaises(FileNotFoundError):
-            LanceDBIndex.open(self.uri, "fixture")
-        self.assertFalse(self.uri.exists())
-        self.uri.mkdir()
-        with self.assertRaises(ValueError):
-            LanceDBIndex.open(self.uri, "fixture")
-        self.assertEqual(list(self.uri.iterdir()), [])
-
-    def test_path_resolution(self):
-        self.assertEqual(LanceDBIndex("~/fixtures", Mock()).uri, Path.home() / "fixtures")
-        self.assertEqual(LanceDBIndex("fixtures", Mock()).uri, Path.cwd() / "fixtures")
-
-    def test_concurrent_readers_preserve_table(self):
-        self.populate()
-        before = self.index.table.to_arrow()
-        version = self.index.table.version
-        ctx = multiprocessing.get_context("spawn")
-        barrier, queue = ctx.Barrier(3), ctx.Queue()
-        processes = [ctx.Process(target=concurrent_reader, args=(str(self.uri), barrier, queue)) for _ in range(3)]
-        try:
-            for process in processes:
-                process.start()
-            for _ in processes:
-                results = queue.get(timeout=45)
-                for result in results:
-                    self.assertEqual([n["label"] for n in result], ["A", "B", "C"])
-                    np.testing.assert_allclose([n["score"] for n in result], [1., 2**-0.5, -1.], atol=1e-6)
-            for process in processes:
-                process.join(timeout=10)
-                self.assertEqual(process.exitcode, 0)
-        finally:
-            for process in processes:
-                if process.is_alive():
-                    process.terminate()
-                process.join(timeout=10)
-            queue.close()
-        self.index = LanceDBIndex.open(self.uri, "fixture")
-        self.assertEqual(self.index.table.version, version)
-        self.assertEqual(self.index.table.to_arrow(), before)
-
-
 if __name__ == "__main__":
     unittest.main()
-
-
-def test_identity_scan_and_vector_fetch_preserve_source_and_order(tmp_path):
-    from classification.retrieval.lancedb import LanceDBIndex
-    from classification.schemas import PointRecord
-
-    index = LanceDBIndex.create(tmp_path / "db", "vectors", 3)
-    records = [PointRecord("Apple", kind, f"quoted'{i}", "value")
-               for kind in ("training_image", "validation_image") for i in range(13)]
-    vectors = np.asarray([[i + 1, i + 2, i + 3] for i in range(26)], dtype=np.float32)
-    order = np.random.default_rng(12).permutation(26)
-    index.append([records[i] for i in order], vectors[order])
-    identities = [(record.source_kind, record.source_identity) for record in records]
-    assert sorted(index.get_record_ids()) == sorted(identities)
-    requested = list(reversed(range(26))) + [3, 0]
-    np.testing.assert_array_equal(
-        index.fetch_vectors([identities[i] for i in requested]), vectors[requested],
-    )
-    assert index.fetch_vectors([]).shape == (0, 3)
 
 
 def test_classification_macro_micro_and_display_independence():
@@ -312,30 +171,3 @@ def test_support_cosine_is_query_weighted_and_keeps_negative_scores():
     result = metrics(rows, [])
     assert result['mean_top1_cosine_similarity'] == pytest.approx(-0.1)
     assert result['mean_support_cosine_similarity'] == pytest.approx(-0.3)
-
-
-def test_class_counts_stream_all_rows_and_reference_types(tmp_path):
-    index = LanceDBIndex.create(tmp_path, 'counts', 2)
-    assert index.class_counts() == {}
-    records = [PointRecord('A' if i % 2 else 'B', kind, str(i), '')
-               for kind in ('class_name', 'description', 'training_image') for i in range(1100)]
-    index.append(records, np.ones((len(records), 2), dtype=np.float32))
-    assert index.class_counts() == {'A': 1650, 'B': 1650}
-
-
-def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
-    from classification.retrieval.lancedb import LanceDBIndex
-    from classification.schemas import PointRecord
-
-    index = LanceDBIndex.create(tmp_path / 'db', 'references', 2)
-    for i in range(32):
-        index.append([PointRecord(str(i), 'class_name', str(i), str(i))],
-                     np.asarray([[1.0, i + 1.0]], dtype=np.float32))
-    before = index.table.to_arrow().to_pylist()
-    fragments = index.table.stats()['fragment_stats']['num_fragments']
-    neighbors = index.query(np.asarray([1.0, 1.0]), 5)
-    index.optimize()
-    assert index.table.stats()['fragment_stats']['num_fragments'] < fragments
-    assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r['id']) == sorted(
-        before, key=lambda r: r['id'])
-    assert index.query(np.asarray([1.0, 1.0]), 5) == neighbors

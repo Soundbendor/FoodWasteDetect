@@ -16,17 +16,20 @@ selection and image ownership use [data](data.md); for scoring use
 | Module              | Responsibility                                                                                            |
 | ------------------- | --------------------------------------------------------------------------------------------------------- |
 | `classification.py` | `Experiment`: configuration, lazy encoder, stages, summaries, and report publication                      |
-| `index_builder.py`  | `IndexBuilder`: input selection, reference resumption, encoding batches, and validation-cache preparation |
+| `index_builder.py`  | `IndexBuilder`: input selection, encoding batches, reference-table builds, and validation-cache builds    |
 | `descriptions.py`   | Saved-vocabulary reading and ordered text-reference construction                                          |
 | `evaluation.py`     | Batch evaluation, metadata-row conversion, predictions, and completeness checks                           |
 | `config.py`         | Experiment settings                                                                                      |
+| `fingerprints.py`   | Encoder and inputs fingerprints computed from the configuration and the loaded vocabulary                 |
 | `batches.py`        | `EmbeddingBatch` type alias                                       |
 | `artifacts.py`      | Shared `write_json()`                                                                                     |
 | `report_types.py`   | Index summary and evaluation report models                                                                |
-| `matryoshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
+| `matryoshka.py`     | Cached dimension sweep policy, derived table names, and sweep summary                              |
 
-`LanceDBIndex` owns ordinary database operations. The sweep's streaming creation
-of derived tables is implemented directly in `matryoshka.py`. CLI parsing stays
+`EmbeddingTable` ([embedding tables](retrieval.md#embedding-tables)) owns every
+table operation, including the streaming derivation of prefix tables for the sweep;
+`matryoshka.py` does not import LanceDB or Arrow. Terms follow the
+[glossary](../../GLOSSARY.md). CLI parsing stays
 in [cli.py](cli.md); neither experiment module has its own command-line parser.
 Use concrete module imports; `__init__.py` does not import backends.
 
@@ -82,20 +85,40 @@ It affects images only. Every class must have a selected training reference when
 images are enabled; selected image decoding can still fail later. Compare
 complete retrieval strategies: changing sources changes reference counts.
 
-New builds prepare and validate reference inputs before creating a table or
-loading the encoder. Existing builds follow this sequence:
+`IndexBuilder.build_reference_table()` sequences `EmbeddingTable` operations on a
+reference table; it makes no other storage calls and never mutates the experiment
+configuration. New and resumed builds follow one flow:
 
-1. Open the table, prepare the capped unbatched training selection, check class
-   coverage, and prepare text references.
-2. Scan all `(source_kind, source_identity)` metadata once, without a result
-   limit. Initialize counts from every stored row, including duplicates and
-   extra rows; use the identity set to exclude saved inputs.
-3. Batch and decode only remaining images, preserving the original dataset
-   splits and order. Caps apply before saved-identity exclusion.
-4. Encode each text/image batch and append its strictly paired records/vectors
-   once. Advance counts and progress only after successful append.
-5. Optimize the reference table, including a no-work resume, then return the
-   index and counts to `Experiment` for summary publication.
+1. Prepare and validate inputs: the capped unbatched training selection, class
+   coverage, text references, and the inputs fingerprint (which read the
+   vocabulary once). The expected
+   source keys are every prepared text record and selected training image. An
+   empty expected set fails before any table exists. Validation failures happen
+   before a table is created or the encoder is constructed.
+2. `open_or_create(..., "reference", ...)` opens the table, or creates it with a
+   header, both [fingerprints](#fingerprints-and-incompatible-tables), and a
+   creation snapshot when absent. Opening a legacy table, or a validation cache
+   under the reference name, fails. An existing table whose fingerprints differ
+   from the current configuration fails with `IncompatibleTableError` before any
+   scan, write, or encoder construction, including when it is already complete.
+   The dimension is supplied lazily as `embedder.dimension` and computed only when
+   creating, so resuming never constructs the encoder for that reason.
+3. A table already [complete](retrieval.md#completion) is returned after this
+   verification: no missing-key scan, no optimization, no encoder, and no write.
+4. Otherwise `missing()` scans all source keys once, without
+   a result limit, and returns the expected keys that are absent. Only those text
+   records and images are embedded, preserving the original dataset splits and
+   order. Caps apply before filtering by missing keys. A table with no missing
+   keys never constructs the encoder.
+5. Encode each text/image batch and append its strictly paired records/vectors
+   once. Advance progress only after a successful append.
+6. `mark_complete(expected)` verifies that every expected key is present,
+   failing with `IncompleteTableError` and the number of missing keys otherwise,
+   then optimizes the reference table and marks it complete. A resume with no
+   missing keys, such as a table written before completion markers existed or one
+   whose optimization failed, is verified, optimized, and marked without
+   re-encoding. The builder returns the table to `Experiment` for summary
+   publication.
 
 Image records are built directly from column-oriented batches, with strict
 pairing of `class`, `source_id`, and `fname` columns. `EmbeddingBatch` is an
@@ -105,32 +128,91 @@ evaluation and reporting. Keep final partial batches. The dataset and encoder
 
 Successful batches survive later failures; failed encoding batches save no
 vectors. Storage failures propagate without write retries or rollback. Existing
-rows and UUIDs remain intact. Optimization failure preserves the previous
-summary; a rerun retries finalization without re-encoding saved inputs. Use one
+rows and UUIDs remain intact. Completion or optimization failure preserves the
+previous summary and leaves the table incomplete; a rerun retries finalization
+without re-encoding saved inputs. Use one
 writer and finish building/optimization before concurrent readers. Shared jobs
 need a filesystem path visible to all nodes and separate evaluation output
 directories.
 
-### Table creation metadata
+### Fingerprints and incompatible tables
 
-New reference and validation tables store the full `ExperimentConfig` as JSON under
-the Arrow schema key `classification.build`, with `vector_dimension` set to the
-stored vector size. The snapshot records creation settings and remains unchanged
-on resume, even when the current configuration differs.
+`fingerprints.encoder_fingerprint(config)` and
+`fingerprints.inputs_fingerprint(config, vocabulary)` compute the
+[fingerprints](retrieval.md#fingerprints-and-compatibility) that every new table
+records. Resumes compare both; evaluation compares the encoder fingerprint and
+dimension only, since reference inputs do not change the validation vectors:
+
+| Fingerprint | Settings | Recorded on |
+| --- | --- | --- |
+| Encoder | `embedding.model_id`, `embedding.truncate_dim`, `embedding.vertex.classification_prompt` | Reference tables and validation caches |
+| Inputs | `dataset.name`, `embed_images`, `embed_class_labels`, `embed_descriptions`, `n_imgs_per_class`, `vocabulary_sha256` | Reference tables only |
+
+The vocabulary digest hashes the loaded description mapping as canonical JSON,
+so reordering class keys in the file does not change it but editing, adding,
+removing, or reordering a class's descriptions does. It is null when
+descriptions are disabled. Values are recorded as configured: the dataset name
+is compared exactly, and the flag and cap are recorded even when no backend or
+image selection uses them.
+
+Settings that do not change vectors are excluded and never block resuming or
+evaluation: `embedding.device`, `embedding.batch_size`, the Vertex project,
+location, concurrency, attempts, and request timeout, `dataset.root`,
+`output_dir`, `k`, the validation-cache flag, descriptions-file location, Ollama
+settings, and sweep dimensions. Moving data or switching hardware between runs
+is therefore safe.
+
+When a vector-affecting setting changes, use a new table name (and a new output
+directory); there is no override flag. `IncompatibleTableError` lists each
+differing setting with its stored and required values:
+
+- **Resume**: `build_reference_table()` requires both fingerprints to match;
+  `build_validation_cache()` requires the encoder fingerprint to match.
+- **Live evaluation**: `evaluate()` opens the reference table requiring the
+  configured encoder fingerprint, before the cache is built or any validation
+  image is encoded. Without caching, the encoder's width must also equal the
+  reference dimension before the first image is encoded. With caching, the
+  completed cache's encoder fingerprint and dimension must equal the reference
+  table's before any vector is fetched.
+- **Cached evaluation**: `evaluate_cached()` opens the complete validation cache
+  first, then requires the reference table to record the cache's encoder
+  fingerprint and dimension. The configured encoder settings are not consulted,
+  so cached prefix tables evaluate under an unchanged configuration.
+
+### Creation snapshot
+
+New reference tables and validation caches store the full `ExperimentConfig` JSON
+as their creation snapshot, beside the store-owned
+[header](retrieval.md#header). The snapshot is the configuration exactly as
+supplied; the configuration has no dimension setting, and the dimension comes from
+the table header (`EmbeddingTable.dimension`). The snapshot remains unchanged on
+resume, even when settings outside the fingerprints differ, and prefix tables
+copy it verbatim. Resumption and evaluation compare the header's fingerprints,
+never the snapshot. Tables written before the header existed are refused as legacy and must
+be rebuilt under a new name ([ADR-0001](../adr/0001-embedding-table-header.md)).
 
 ## Validation caching
 
-Enabled `cache_validation_embeddings` requires a nonempty
-`lancedb.validation_table` distinct from the reference table. All backends share
-this path. Cache records use `validation_image`; they never join reference
-searches.
+Enabled `cache_validation_embeddings` requires `lancedb.validation_table`; the
+configuration enforces the [validation-table rule](cli.md#validation-table) at
+load time. All backends share this path. Cache records use `validation_image`;
+they never join reference searches.
 
-Evaluation opens references first, creates or opens the cache, scans saved
-identities, and completes missing validation batches. It then fetches vectors in
-metadata order through `Experiment`. Complete caches need neither image
-decoding nor a model/client. Disabled caching recomputes validation embeddings.
-Validation-cache preparation does not optimize tables; evaluation does not
-optimize or insert into reference tables.
+Evaluation opens the complete reference table first, requiring the configured
+encoder fingerprint, then calls `IndexBuilder.build_validation_cache()`. It uses
+the same operations as a reference build on a validation cache:
+`open_or_create(..., "validation_cache", ...)` with a lazy dimension and the
+configured encoder fingerprint (caches carry no inputs fingerprint); an already
+complete cache is returned without a scan. Otherwise it runs `missing()` over every validation-split
+`validation_image` key, appends the missing batches, and calls
+`mark_complete(expected)`, which marks the cache complete and never optimizes it.
+Completion fails with the number of missing keys before any vectors are fetched.
+Evaluation with caching enabled therefore leaves a complete cache that later
+cached evaluations and sweeps can open; it also completes a filled cache written
+before completion markers existed without re-encoding. `Experiment` then fetches
+vectors in metadata order. Complete caches need neither image decoding nor a model/client.
+Disabled caching recomputes validation embeddings. Validation caches are never
+optimized; evaluation does not optimize or insert into reference tables.
 
 Cache persistence uses the same completed-batch boundary as reference insertion.
 For paid backends, restarting can repeat requests from the unfinished batch;
@@ -138,19 +220,42 @@ For paid backends, restarting can repeat requests from the unfinished batch;
 
 ## Artifact and failure contract
 
-`build_vector_database()` returns and writes `index.json` only after successful
-optimization. It contains `table`, resolved `uri`, `source_counts`, and
-effective `config`, including defaults. Evaluation attaches counts from this file
-only when both URI and table match; otherwise `reference_source_counts` is null.
-Writers return an `IndexSummary`. Historical summaries supply only URI/table
-matching and source counts.
+`build_vector_database()` returns and writes `index.json` only after the
+reference table is marked complete and optimized. It contains `table`, resolved
+`uri`, `dimension` (the table's stored vector width), `source_counts` (read from
+the table with `EmbeddingTable.source_counts()`, duplicates included),
+`duplicate_count` (from `EmbeddingTable.duplicate_count()`, zero when every source
+key is stored once), and the unmodified `config`, including defaults. A nonzero
+duplicate count is logged as a warning and does not stop the run
+([duplicate source keys](retrieval.md#duplicate-source-keys)). Writers return an
+`IndexSummary`.
+Evaluation never reads `index.json`: a missing, stale, mismatched, or malformed
+summary has no effect on reports. Before evaluating, `evaluate()` and
+`evaluate_cached()` read `reference_source_counts` from the reference table with
+`EmbeddingTable.source_counts()`, which counts every stored row, duplicates included.
+The field is always present and never null.
 
 `evaluate()` and `evaluate_cached()` share `_execute_evaluation()`. The latter
 reads existing cached vectors regardless of the cache flag, without completing or
-mutating the cache. `Experiment` prepares validation batches; it opens or completes
+mutating the cache.
+
+Both open the reference table with `EmbeddingTable.open_complete()`, requiring
+the encoder fingerprint and dimension described under
+[incompatible tables](#fingerprints-and-incompatible-tables); an incompatible
+table fails before its completion is checked. An
+incomplete reference table, such as one left by an interrupted `index` run, fails
+with `IncompleteTableError` stating how many expected reference source keys are
+missing; the expected keys come from `IndexBuilder.expected_reference_keys()`,
+which prepares reference inputs without decoding images or constructing the
+encoder. Rerun `index` to resume and mark it. `evaluate_cached()` opens the
+validation cache the same way, against `IndexBuilder.expected_validation_keys()`, before
+it prepares the reference table or fetches any vector. Fill an incomplete cache
+by evaluating with `cache_validation_embeddings` enabled. `Experiment` prepares validation batches; it opens or completes
 the cache and constructs the metadata iterator eagerly, then fetches vectors lazily.
-Ordinary evaluation prepares references first; cached-only evaluation prepares the
-cache first. Missing vectors fail during consumption after reference preparation. `evaluation.evaluate_batches()` consumes
+Evaluation opens the reference table with role `reference` and the cache with role
+`validation_cache`, so a table opened under the wrong role fails. Ordinary
+evaluation prepares references first; cached-only evaluation prepares the cache
+first. `evaluation.evaluate_batches()` consumes
 these batches through a supplied query callable, owns progress and completeness
 checks, and returns predictions. It performs no report writes or tracking.
 `Experiment` assembles an `EvaluationReport` model with typed configuration,
@@ -161,8 +266,9 @@ This is validation accuracy, not official test accuracy. Strict metadata/vector
 pairing is retained.
 
 A successful evaluation writes only `evaluation_<UTC timestamp>/report.json`,
-containing `config`, `table`, `reference_source_counts`, `predictions`, and
-`metrics`. Predictions contain image metadata, majority-vote label, vote
+containing `config`, `table`, `dimension` (the reference table's stored vector
+width), `reference_source_counts`, `predictions`, and `metrics`.
+Predictions contain image metadata, majority-vote label, vote
 fraction, nearest label, first-k neighbors, and per-query retrieval metrics.
 [Retrieval](retrieval.md) defines the denominators and abstention behavior.
 Reports have no separate prediction/metric files, manifest, prediction `value`,
@@ -177,14 +283,15 @@ request retries are separately documented in [encoders](encoders.md).
 [Tracking](tracking.md) defines loop-owned progress bars and W&B lifecycle
 details.
 
-Keep the explicitly deferred scope: artifact compatibility checks, hashes,
-manifest/table-content validation, automatic table naming, migration, rollback,
+Keep the explicitly deferred scope: image-content or taxonomy hashes,
+manifest/table-content validation, automatic table naming, rollback,
 and Git/model/code revision, dependency-version, or timestamp provenance
 metadata are not implemented. This includes nested text-encoder revisions; UTC
-output directory names remain in use. Changing models, dimensions, prompts,
+output directory names remain in use. Changing models, truncation dimensions, prompts,
 descriptions, source inputs, or caps requires fresh tables and output
-directories with all enabled references rebuilt. Existing tables are reused by
-identity without verifying compatibility. Preserve historical data and
+directories with all enabled references rebuilt; existing tables refuse such
+changes through their fingerprints. Fingerprints cover configuration, not model
+or code revisions. Tables without a valid header are refused, never migrated. Preserve historical data and
 collections; the separate CLIP/Qdrant experiment is unaffected.
 
 ## Cached Matryoshka sweep
@@ -194,34 +301,58 @@ This is a cached prefix experiment, not a guarantee of Matryoshka quality.
 Set `sweep_dimensions` to a nonempty list of unique positive integers in the
 order to evaluate them. Existing configurations must supply this field for the
 sweep; other stages and historical snapshots may omit it. The shipped Gemini
-configuration uses 768, 1536, and 3072. The source reference and validation
-vector fields must be fixed-size lists of the same positive width; all targets
-must fit that stored width, including when the sources are already truncated.
-The sweep makes no embedding requests and performs no completeness validation. Missing cached
-vectors fail instead of being regenerated. Evaluation uses the configured `k` and
-batch size.
+configuration uses 768, 1536, and 3072. The sweep opens the reference table
+and the validation cache under their roles as [complete](retrieval.md#completion)
+tables and requires their header dimensions and encoder fingerprints to match
+before anything is derived or tracked; an incomplete source fails with
+`IncompleteTableError` and is not regenerated. All targets must fit that stored
+width, including when the sources are already truncated. The sweep makes no
+embedding requests. Evaluation uses the configured `k` and batch size.
 
-Both source names and all derived names must be distinct, even if the stored
-width is not requested. A target equal to the stored width uses the original
-tables; smaller targets use `<source>_d<dimension>`. Each missing destination is created by one streaming
-`create_table()` call, with no query-result limit, retaining every row, UUID,
-and row metadata value. Only vectors change to exact float32 prefixes and
-fixed-size Arrow types; no extra normalization is applied. Reference switches
-and image caps remain recorded but do not filter stored rows.
+For each target below the stored width, an existing `<source>_d<dimension>`
+table is handled by the [prefix-table contract](retrieval.md#prefix-tables):
 
-Derived tables retain the source configuration with only `vector_dimension`
-changed. Other schema metadata is preserved; absent snapshots remain absent.
+- **Reuse**: a complete prefix of that source at that dimension, with the
+  source's fingerprints and row count, is evaluated without copying.
+- **Recreation**: a prefix of that source at that dimension that is incomplete,
+  for example after a crash mid-copy, or whose row count differs because the
+  source was completed again, is dropped and copied again. Rerunning
+  the sweep after a crash therefore needs no manual cleanup and completes.
+- **Refusal**: a legacy table, a table that is not a prefix table, or a prefix
+  derived from another source, another source dimension, another dimension, or
+  other fingerprints fails the sweep and is left unchanged. Rename the sweep
+  sources or remove the table deliberately.
 
-Existing destinations are reused if they open. Open/create/stream failures
-propagate without scan, repair, overwrite, or cleanup; this is not a crash
-durability guarantee. The sweep delegates cached validation preparation to `Experiment.evaluate_cached()`.
+Each new prefix is complete only after its row count is verified against its
+source, so each per-dimension cached evaluation opens complete prefix tables.
 
-Each dimension enables validation caching and uses its own table names and output
-directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`.
+Configured `sweep_dimensions` require a validation table under the
+[validation-table rule](cli.md#validation-table). The sweep owns experiment policy
+only: target dimensions, `<source>_d<dimension>` naming, distinct-name checks,
+pairing the reference table with the validation cache, and the loop over
+dimensions. Beyond the validation-table rule, both source names and all derived names must
+be distinct, even if the stored width is not requested. A target equal to the
+stored width uses the original tables; each smaller target calls
+`EmbeddingTable.derive_prefix()` on both sources. The
+[prefix-table contract](retrieval.md#prefix-tables) defines how prefix tables are
+copied, verified, reused, recreated, refused, and given headers that record their
+source table and source dimension. Reference switches and image caps remain recorded
+but do not filter stored rows. The sweep delegates cached validation preparation
+to `Experiment.evaluate_cached()`.
+
+Each per-dimension configuration enables validation caching and uses its own
+table names and output directory under
+`<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`. It leaves
+`embedding.truncate_dim` as configured, since the sweep embeds nothing, and
+records no dimension; each report's `dimension` comes from that dimension's
+reference table. Prefix tables keep the source's creation snapshot verbatim and inherit its
+fingerprints, so each per-dimension cached evaluation finds a compatible reference
+prefix and cache prefix regardless of the sweep configuration's encoder settings.
 The CLI owns one native W&B context per dimension, with no outer run, explicit
 identity/group settings, or
-resume checks. Standard reports have null reference counts unless a matching
-index summary exists in their output directory.
+resume checks. Each dimension's report and W&B summary carry the source counts of
+that dimension's reference table, which a prefix table copies row for row from its
+source.
 
 Only complete success writes `summary.json`, with dimensions, tables, output
 directories, aggregate metrics, and returned W&B run IDs. Reports from earlier
@@ -235,9 +366,12 @@ batches and query callables. For saved-vocabulary/reference construction, use
 `tests/test_descriptions.py`. For orchestration changes, use
 `tests/test_classification.py` with synthetic encoders/images, mocked Ollama,
 and temporary LanceDB tables. It covers selection, pairing, partial/complete
-resumes, cache reuse, failures, and publication ordering. For sweep changes use
-`tests/test_matroyshka_sweep.py`; scoring is covered in
-`tests/test_retrieval.py`, tracking in `tests/test_tracking.py`.
+resumes, completion refusal and marking per role, fingerprint refusal on resume
+and evaluation, excluded settings that still resume, cache reuse, failures, and
+publication ordering. For sweep changes use
+`tests/test_matroyshka_sweep.py`; embedding table behavior is covered in
+`tests/test_embedding_table.py`, scoring in `tests/test_retrieval.py`, and
+tracking in `tests/test_tracking.py`.
 
 These tests establish neither real-checkpoint behavior nor cloud, GPU, HPC, or
 shared-storage compatibility. Consult the [verification log](../experiments.md)

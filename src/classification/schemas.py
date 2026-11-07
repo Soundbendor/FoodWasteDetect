@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from typing import TypedDict
 from uuid import uuid4
 
-type SourceIdentity = tuple[str, str]
+# (source kind, source identity): what a stored record was embedded from.
+type SourceKey = tuple[str, str]
 
 ImageMetadata = TypedDict(
     "ImageMetadata",
@@ -43,7 +44,7 @@ class Prediction(ImageMetadata):
 
 @dataclass(frozen=True)
 class PointRecord:
-    """Reference or cache row with a stable source identity and generated record ID."""
+    """Embedding-table record with a source key, stored text value, and generated record ID."""
 
     label: str
     source_kind: str
@@ -51,12 +52,7 @@ class PointRecord:
     value: str
     id: str = field(default_factory=lambda: str(uuid4()))
 
-    def to_payload(self) -> dict[str, str]:
-        """Return storage fields, mapping ``label`` to the reserved key ``class``."""
-        return {
-            "id": self.id,
-            "class": self.label,
-            "source_kind": self.source_kind,
-            "source_identity": self.source_identity,
-            "value": self.value,
-        }
+    @property
+    def source_key(self) -> SourceKey:
+        """Return the record's ``(source_kind, source_identity)`` pair."""
+        return (self.source_kind, self.source_identity)

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from collections import Counter
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from classification.datasets.image_dataset import load_dataset
 from classification.encoders.base import Embedder
@@ -19,6 +16,7 @@ from classification.experiments.batches import EmbeddingBatch
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions
 from classification.experiments.evaluation import evaluate_batches
+from classification.experiments.fingerprints import encoder_fingerprint
 from classification.experiments.index_builder import IndexBuilder
 from classification.experiments.report_types import (
     EvaluationReport,
@@ -26,7 +24,7 @@ from classification.experiments.report_types import (
 )
 from classification.llm.generate_descriptors import DescriberLLM
 from classification.llm.ollama import OllamaSession
-from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.embedding_table import EmbeddingTable, Fingerprint
 from classification.retrieval.metrics import metrics
 from classification.tracking import Tracker
 
@@ -87,13 +85,21 @@ class Experiment:
             batch_size=self.batch_size,
         )
 
-    def _lancedb_adapter(self) -> LanceDBIndex:
+    def _reference_table(
+        self, *, encoder: Fingerprint, dimension: int | None = None
+    ) -> EmbeddingTable:
+        """Open the complete reference table, requiring the validation vectors' encoder."""
         options = self.config.lancedb
-        return LanceDBIndex.open(uri=options.uri, table=options.table)
+        return EmbeddingTable.open_complete(
+            options.uri,
+            options.table,
+            "reference",
+            expected=self._index_builder().expected_reference_keys,
+            encoder=encoder,
+            dimension=dimension,
+        )
 
-    def _evaluation_batches(
-        self,
-    ) -> Iterator[EmbeddingBatch]:
+    def _evaluation_batches(self) -> Iterator[EmbeddingBatch]:
         """Encode uncached validation images in bounded batches."""
         for batch in self.dataset.iter_batches("val", self.batch_size):
             vectors = self.embedder.encode_images(batch.pop("image"))
@@ -145,37 +151,46 @@ class Experiment:
         )
 
     def build_vector_database(self) -> IndexSummary:
-        """Build or resume references, optimize the table, and publish its summary."""
-        index, counts = self._index_builder().build_reference_index()
-        return self._publish_index(index, counts)
+        """Build or resume the reference table, mark it complete, and publish its summary."""
+        reference = self._index_builder().build_reference_table()
+        return self._publish_index(reference)
 
-    def _publish_index(self, index: LanceDBIndex, counts: Counter[str]) -> IndexSummary:
-        """Write index.json before publishing reference counts to the tracker."""
+    def _publish_index(self, reference: EmbeddingTable) -> IndexSummary:
+        """Write index.json before publishing the table's source counts to the tracker.
+
+        Duplicate source keys are tolerated; a nonzero count is logged as a warning.
+        """
+        counts = dict(reference.source_counts())
+        duplicates = reference.duplicate_count()
+        if duplicates:
+            logging.warning(
+                "Reference table %r holds %d duplicate source key rows; source and class "
+                "counts include them",
+                reference.name,
+                duplicates,
+            )
         artifact = IndexSummary(
-            table=index.name,
-            uri=str(index.uri),
+            table=reference.name,
+            uri=str(reference.uri),
+            dimension=reference.dimension,
             source_counts=counts,
+            duplicate_count=duplicates,
             config=self.config,
         )
         self.output.mkdir(parents=True, exist_ok=True)
         write_json(self.output / "index.json", artifact.model_dump(mode="json"))
         if self.tracker:
-            self.tracker.reference_counts(dict(counts))
+            self.tracker.reference_counts(counts)
         return artifact
 
-    def _prepare_validation_batches(self, *, cached_only: bool) -> Iterator[EmbeddingBatch]:
-        if not cached_only and not self.config.cache_validation_embeddings:
-            return self._evaluation_batches()
-        options = self.config.lancedb
-        table = options.validation_table
-        if not table or not table.strip() or table == options.table:
-            raise ValueError(
-                "lancedb.validation_table must be nonempty and distinct from reference table"
-            )
-        if cached_only:
-            cache = LanceDBIndex.open(uri=options.uri, table=table)
-        else:
-            cache = self._index_builder().build_validation_table(table)
+    def _validation_table_name(self) -> str:
+        table = self.config.lancedb.validation_table
+        if table is None:
+            raise ValueError("lancedb.validation_table is required for cached evaluation")
+        return table
+
+    def _cached_batches(self, cache: EmbeddingTable) -> Iterator[EmbeddingBatch]:
+        """Pair validation metadata, read eagerly, with lazily fetched cached vectors."""
         metadata = self.dataset.iter_batches("val", self.batch_size, decode=False)
         return (
             (
@@ -188,54 +203,70 @@ class Experiment:
         )
 
     def evaluate(self) -> EvaluationReport:
-        """Complete optional validation caching, then classify the full split."""
-        index, artifact = self._prepare_evaluation()
-        batches = self._prepare_validation_batches(cached_only=False)
-        return self._execute_evaluation(index, artifact, batches)
+        """Complete optional validation caching, then classify the full split.
+
+        The reference table must record the configured encoder fingerprint, and the
+        validation vectors' width must equal its dimension, before any validation
+        image is encoded.
+        """
+        reference, counts = self._prepare_evaluation(encoder=encoder_fingerprint(self.config))
+        if self.config.cache_validation_embeddings:
+            cache = self._index_builder().build_validation_cache(self._validation_table_name())
+            reference.require_compatible(
+                encoder=cache.encoder_fingerprint, dimension=cache.dimension
+            )
+            batches = self._cached_batches(cache)
+        else:
+            reference.require_compatible(dimension=self.embedder.dimension)
+            batches = self._evaluation_batches()
+        return self._execute_evaluation(reference, counts, batches)
 
     def evaluate_cached(self) -> EvaluationReport:
-        """Classify the validation split using existing cached vectors only."""
-        batches = self._prepare_validation_batches(cached_only=True)
-        index, artifact = self._prepare_evaluation()
-        return self._execute_evaluation(index, artifact, batches)
+        """Classify the validation split using existing cached vectors only.
 
-    def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict[str, Any] | None]:
-        table = self.config.lancedb.table
-        index = self._lancedb_adapter()
-        artifact: dict[str, Any] | None = None
-        path = self.output / "index.json"
-        if path.exists():
-            logging.info("Loading index.json from checkpoint...")
-            summary: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-            # Only attach metadata identifying this database and table.
-            if (
-                summary["table"] == table
-                and Path(summary["uri"]).expanduser().resolve() == index.uri
-            ):
-                artifact = summary
+        The reference table must record the validation cache's encoder fingerprint
+        and dimension; the configured encoder settings are not consulted.
+        """
+        cache = EmbeddingTable.open_complete(
+            self.config.lancedb.uri,
+            self._validation_table_name(),
+            "validation_cache",
+            expected=self._index_builder().expected_validation_keys,
+        )
+        batches = self._cached_batches(cache)
+        reference, counts = self._prepare_evaluation(
+            encoder=cache.encoder_fingerprint, dimension=cache.dimension
+        )
+        return self._execute_evaluation(reference, counts, batches)
+
+    def _prepare_evaluation(
+        self, *, encoder: Fingerprint, dimension: int | None = None
+    ) -> tuple[EmbeddingTable, dict[str, int]]:
+        """Open a compatible reference table and publish its stored source-kind counts."""
+        reference = self._reference_table(encoder=encoder, dimension=dimension)
+        counts = dict(reference.source_counts())
         if self.tracker:
-            self.tracker.reference_counts(
-                artifact["source_counts"] if artifact is not None else None
-            )
-        return index, artifact
+            self.tracker.reference_counts(counts)
+        return reference, counts
 
     def _execute_evaluation(
         self,
-        index: LanceDBIndex,
-        artifact: dict[str, Any] | None,
+        reference: EmbeddingTable,
+        reference_source_counts: dict[str, int],
         batches: Iterable[EmbeddingBatch],
     ) -> EvaluationReport:
         predictions = evaluate_batches(
             batches,
-            query=index.query,
-            class_counts=index.class_counts(),
+            query=reference.query,
+            class_counts=reference.class_counts(),
             k=self.config.k,
             expected_count=len(self.dataset.validation_set()),
         )
         report = EvaluationReport(
             config=self.config,
-            table=index.name,
-            reference_source_counts=artifact["source_counts"] if artifact is not None else None,
+            table=reference.name,
+            dimension=reference.dimension,
+            reference_source_counts=reference_source_counts,
             predictions=predictions,
             metrics=metrics(predictions, self.classes),
         )

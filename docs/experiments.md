@@ -18,6 +18,150 @@ For hardware acceptance, read the [V100 procedure](#v100-kernel-check) together
 with the current encoder's hardware constraints. Procedures here retain the root
 guide's explicit authorization requirements.
 
+## Append role guard and duplicate counts (2026-11-06)
+
+`EmbeddingTable.append()` now refuses `validation_image` records in a reference
+table and every other source kind in a validation cache, raising
+`EmbeddingTableError` before anything is written
+([rows and appends](classification/retrieval.md#rows-and-appends)).
+`duplicate_count()` reports stored rows minus distinct source keys; the `index`
+stage logs a warning when it is nonzero and writes `duplicate_count` into
+`index.json`, while source and class counts still include duplicate rows
+([duplicate source keys](classification/retrieval.md#duplicate-source-keys)).
+The header format and schema version are unchanged, so no rebuild is needed;
+`index.json` files written earlier lack the new field and are never read by
+evaluation.
+
+Checks used synthetic records and temporary local LanceDB 0.40.0 tables; the
+stage tests built a reference table and validation cache through `index` and
+cached evaluation, and created a duplicate by appending a stored record again
+and rerunning `index`. In the worktree's `default` and `jina-cpu` environments, installed from
+the committed lockfile, Ruff, the format check, scoped ty, and
+`classification --help` passed. The default suite passed 638 tests with two
+skips; the Jina suite passed 637 tests with three skips. Both reported the
+existing Sentence Transformers deprecation warning. The test task hid GPUs and
+set Hugging Face offline mode. No model or dataset downloads, GPU work, live
+cloud requests, or shared storage were used.
+
+## Prefix-table recreation (2026-11-06)
+
+`derive_prefix()` now requires a complete source and marks a new prefix complete
+only after its row count equals the source's. This replaces the interim rule from
+the [completion-marker entry](#completion-markers-2026-11-06), which marked a
+prefix complete when its source was complete at copy time. An existing
+destination is reused when it is a complete prefix of the same source at the
+same source dimension and target dimension with the source's row count, dropped
+and recreated when it is such a prefix but incomplete or of another row count,
+and otherwise refused and left unchanged
+([prefix tables](classification/retrieval.md#prefix-tables)). Fingerprint
+refusal from the [fingerprint entry](#encoder-and-inputs-fingerprints-2026-11-06)
+is kept and checked first. The sweep opens both sources as complete tables, so
+an incomplete source fails before any prefix is written or any run is tracked.
+The header format and schema version are unchanged, so no rebuild is needed.
+
+Crashes were simulated by letting LanceDB `create_table()` commit and then
+raising before the completion marker, and short copies by dropping a streamed
+batch; both against temporary local LanceDB 0.40.0 tables. In the worktree's
+`default` and `jina-cpu` environments, installed from the committed lockfile,
+Ruff, the format check, scoped ty, and `classification --help` passed. The
+default suite passed 627 tests with two skips; the Jina suite passed
+626 tests with three skips. Both reported the existing Sentence Transformers deprecation
+warning. The test task hid GPUs and set Hugging Face offline mode. No model or
+dataset downloads, GPU work, live cloud requests, or shared storage were used.
+
+## Encoder and inputs fingerprints (2026-11-06)
+
+**Every existing embedding table must be rebuilt under a new name again.** The
+header schema version is now 2, so tables written under version 1, including
+any rebuilt after the [header entry](#embedding-table-header-2026-11-06), raise
+`LegacyTableError`. New headers record an encoder fingerprint (model ID,
+truncation dimension, Vertex classification-prompt flag) and, for reference
+tables, an inputs fingerprint (dataset name, reference-source switches, image
+cap, vocabulary SHA-256)
+([fingerprints](classification/retrieval.md#fingerprints-and-compatibility)).
+Resuming or evaluating with different vector-affecting settings now raises
+`IncompatibleTableError` listing each difference; the earlier test that resumed
+after a truncation change now expects refusal. No table was read or migrated.
+
+Checks ran with the same commands as the
+[header entry](#embedding-table-header-2026-11-06), in the worktree's `default`
+and `jina-cpu` environments installed from the committed lockfile. Ruff, the
+format check, and scoped ty passed in both. The default suite passed 607 tests and
+316 subtests with two skips. The Jina suite passed 606 tests and 316 subtests with
+three skips. Both reported the existing Sentence Transformers deprecation warning.
+The test task hid GPUs and set Hugging Face offline mode. No model or dataset
+downloads, GPU work, live cloud requests, or shared storage were used.
+
+## Completion markers (2026-11-06)
+
+Embedding tables now record completion as a LanceDB version tag named `complete`
+([completion contract](classification/retrieval.md#completion)). Before
+implementing it, the version-tag behavior was checked with LanceDB 0.40.0 and
+PyArrow 26.0.0 in both the `default` and `jina-cpu` environments, on throwaway
+local filesystem tables in session scratch space. No project table was read or
+written. Observed:
+
+- After appends and `optimize()`, `tags.create("complete", version)` succeeded.
+  A fresh connection reopened the table at that version, and the tag pointed at
+  it (version 6 in the run).
+- A later `add()` moved the table to version 7 while the tag stayed at 6.
+- Optimizing again kept the tag listed, pointing at its version, and
+  `checkout("complete")` still read that version's rows and schema metadata.
+  An optimize that compacts files also writes new versions (7 to 9 in the run),
+  so a marker must be written after optimization. An optimize with nothing to
+  compact left the version unchanged.
+- With `cleanup_older_than=timedelta(0)`, cleanup failed with "1 tagged
+  version(s) have been marked for cleanup" while the tag pointed at an old
+  version. It succeeded when the tag pointed at the current version. The default
+  seven-day retention avoids this for recent versions, so `optimize()` and
+  `mark_complete()` delete any marker before optimizing.
+- Asking for an absent tag with `tags.get_version()` raises `RuntimeError`, so
+  the store reads `tags.list()` instead.
+
+Tables written before this change have no marker. They open as incomplete, and
+rerunning `index` (or evaluating with validation caching enabled) marks them
+without re-encoding. The header schema version is unchanged.
+
+Checks ran with the same commands as the
+[header entry](#embedding-table-header-2026-11-06), in the worktree's `default`
+and `jina-cpu` environments installed from the committed lockfile. Ruff, the
+format check, and scoped ty passed in both. The default suite passed 585 tests and
+310 subtests with two skips. The Jina suite passed 584 tests and 310 subtests with
+three skips. Both reported the existing Sentence Transformers deprecation warning.
+The test task hid GPUs and set Hugging Face offline mode. No model or dataset
+downloads, GPU work, live cloud requests, or shared storage were used.
+
+## Embedding table header (2026-11-06)
+
+**Every existing embedding table must be rebuilt under a new name.** This
+includes the Gemini Embedding 2 reference tables and validation caches; budget
+their Vertex requests before rebuilding. The storage module is now
+`retrieval/embedding_table.py`, with `EmbeddingTable` replacing `LanceDBIndex` and
+`SourceKey` replacing `SourceIdentity`. New tables record a header with the schema
+version (1), role, dimension, and, for prefix tables, the source table and source
+dimension. The creation snapshot moves to its own key and is copied verbatim into
+prefix tables. Tables without that header, including every table written before
+this change, raise `LegacyTableError` on open
+([ADR-0001](adr/0001-embedding-table-header.md)). No table was read or migrated.
+
+Checks ran in the existing `default` and `jina-cpu` CPU environments, installed in
+the worktree from the committed lockfile, with no manifest or lockfile changes:
+
+```sh
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default lint
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default format-check
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default typecheck
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default test -q
+```
+
+The same commands ran with `-e jina-cpu`. Ruff, the format check, and scoped ty
+passed in both. The default suite passed 568 tests and 310 subtests with two
+skips. The Jina suite passed 567 tests and 310 subtests with three skips. Both
+reported the existing Sentence Transformers deprecation warning. The test task hid
+GPUs and set Hugging Face offline mode. Inputs were synthetic, with temporary
+local LanceDB databases and mocked models, Vertex, Ollama, and W&B. No model or
+dataset downloads, GPU work, live cloud requests, or shared storage were used.
+
 ## Classification responsibility refactor (2026-11-03)
 
 The refactor separates owned Ollama sessions from description requests, shares
