@@ -414,8 +414,10 @@ def test_opening_an_incomplete_table_for_reading_states_the_missing_count(tmp_pa
     table, keys = four_rows(tmp_path, role)
     expected = Mock(return_value=keys + [(keys[0][0], "absent"), (keys[0][0], "absent")])
 
-    with pytest.raises(IncompleteTableError, match="'table' is incomplete: missing 1 of 5"):
+    fix = "rerun the index stage" if role == "reference" else "validation caching enabled"
+    with pytest.raises(IncompleteTableError, match="'table' is incomplete: missing 1 of 5") as error:
         EmbeddingTable.open_complete(table.uri, "table", role, expected=expected)
+    assert fix in str(error.value)
 
     table.mark_complete(keys)
     table.append([PointRecord("B", keys[0][0], "absent", "")], np.ones((1, 2)))
@@ -433,6 +435,15 @@ def test_opening_a_complete_table_for_reading_skips_the_key_scan(tmp_path, role)
         opened = EmbeddingTable.open_complete(table.uri, "table", role, expected=expected)
 
     assert (opened.role, opened.is_complete, len(opened.rows())) == (role, True, 4)
+
+
+def test_optimizing_a_complete_table_makes_it_incomplete(tmp_path):
+    table, keys = four_rows(tmp_path, "reference")
+    table.mark_complete(keys)
+
+    table.optimize()
+
+    assert not EmbeddingTable.open(table.uri, "table", "reference").is_complete
 
 
 def test_tables_written_before_completion_markers_open_as_incomplete(tmp_path):

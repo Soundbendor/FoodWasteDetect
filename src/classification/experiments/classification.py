@@ -179,7 +179,7 @@ class Experiment:
                 options.uri,
                 table,
                 "validation_cache",
-                expected=self._index_builder().validation_keys,
+                expected=self._index_builder().expected_validation_keys,
             )
         else:
             cache = self._index_builder().build_validation_cache(table)

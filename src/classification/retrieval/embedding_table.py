@@ -29,6 +29,11 @@ _SNAPSHOT_KEY = "classification.creation_snapshot"
 _ADR = "docs/adr/0001-embedding-table-header.md"
 # LanceDB version tag marking the version at which a table was verified complete.
 _COMPLETE_TAG = "complete"
+# How a researcher finishes an incomplete table of each role.
+_RESUME: dict[TableRole, str] = {
+    "reference": "rerun the index stage to resume and mark it",
+    "validation_cache": "evaluate with validation caching enabled to fill and mark it",
+}
 
 _STRING_COLUMNS = ("id", "class", "source_kind", "source_identity", "value")
 _VECTOR = "vector"
@@ -43,7 +48,15 @@ class LegacyTableError(EmbeddingTableError):
 
 
 class IncompleteTableError(EmbeddingTableError):
-    """A table's build has not finished, so it may lack expected source keys."""
+    """A table's build has not finished, so it may lack expected source keys.
+
+    Attributes:
+        missing: How many expected source keys were absent when the error was raised.
+    """
+
+    def __init__(self, message: str, *, missing: int) -> None:
+        super().__init__(message)
+        self.missing = missing
 
 
 @dataclass(frozen=True)
@@ -167,12 +180,7 @@ class EmbeddingTable:
         """
         table = cls.open(uri, name, role)
         if not table.is_complete:
-            unique = set(expected())
-            absent = table.missing(unique)
-            raise IncompleteTableError(
-                f"Table {name!r} is incomplete: missing {len(absent)} of {len(unique)} "
-                "expected source keys; resume and complete its build before using it"
-            )
+            raise table._incomplete(expected())
         return table
 
     @classmethod
@@ -310,7 +318,7 @@ class EmbeddingTable:
         )
         prefix = type(self)._create(self.uri, destination, header, snapshot, rows)
         if source_complete:
-            prefix._table.tags.create(_COMPLETE_TAG, prefix._table.version)
+            prefix._write_completion()
         return prefix
 
     def append(
@@ -348,17 +356,25 @@ class EmbeddingTable:
             IncompleteTableError: If any expected key is absent, stating how many;
                 nothing is optimized or marked.
         """
-        unique = set(expected)
-        absent = self.missing(unique)
-        if absent:
-            raise IncompleteTableError(
-                f"Table {self.name!r} is missing {len(absent)} of {len(unique)} "
-                "expected source keys; resume the build before using it"
-            )
-        # A stale marker would pin its old version against optimization's cleanup.
+        error = self._incomplete(expected)
+        if error.missing:
+            raise error
         self._clear_completion()
         if self.role == "reference":
             self.optimize()
+        self._write_completion()
+
+    def _incomplete(self, expected: Iterable[SourceKey]) -> IncompleteTableError:
+        """Count absent expected keys once and describe them for the researcher."""
+        unique = set(expected)
+        missing = len(self.missing(unique))
+        return IncompleteTableError(
+            f"Table {self.name!r} is incomplete: missing {missing} of {len(unique)} expected "
+            f"source keys; {_RESUME[self.role]}",
+            missing=missing,
+        )
+
+    def _write_completion(self) -> None:
         self._table.tags.create(_COMPLETE_TAG, self._table.version)
 
     def _clear_completion(self) -> None:
@@ -366,7 +382,12 @@ class EmbeddingTable:
             self._table.tags.delete(_COMPLETE_TAG)
 
     def optimize(self) -> None:
-        """Compact with LanceDB's default maintenance and version-retention policy."""
+        """Compact with LanceDB's default maintenance and version-retention policy.
+
+        Clears the completion marker first: compaction writes new versions, and a
+        marker on an old version would block LanceDB's cleanup of it.
+        """
+        self._clear_completion()
         self._table.optimize()
 
     def class_counts(self) -> Counter[str]:

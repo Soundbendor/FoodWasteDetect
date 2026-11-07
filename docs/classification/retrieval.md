@@ -85,9 +85,9 @@ Builds resume and finish through two operations over expected source keys:
 
 A table is complete when its completion marker, a LanceDB version tag, points at
 the table's current version. `is_complete` reads this without scanning rows. Any
-later write, including `append()`, a delete, or an optimization that compacts
-files, moves the version past the marker, so a changed table is never reported
-complete. Tables written before completion markers existed have none: they open
+later write, such as `append()` or a delete, moves the version past the marker,
+so a changed table is never reported complete. `optimize()` clears the marker
+before compacting. Tables written before completion markers existed have none: they open
 normally and are incomplete. Marking them complete needs no rebuild.
 
 What complete means per role:
@@ -103,8 +103,12 @@ What complete means per role:
 `open_complete(uri, name, role, *, expected)` opens a complete table without
 calling `expected` or scanning stored keys. For an incomplete table it calls
 `expected`, performs one `missing()` scan, and raises `IncompleteTableError`
-stating how many of the expected keys are missing; the count is zero when every
-key is stored but the build never reached `mark_complete()`.
+stating how many of the expected keys are missing and how to finish the table:
+rerun `index` for a reference table, or evaluate with validation caching enabled
+for a validation cache. The count is zero when every key is stored but the build
+never reached `mark_complete()`. Computing the expected keys can itself fail,
+for example when reference inputs no longer cover every class; that error
+propagates instead.
 
 | Read operation | Contract |
 | --- | --- |
@@ -150,7 +154,7 @@ versions with `delete_unverified=False`; the application supplies no custom poli
 See the [verification log](../experiments.md#unified-experiment-pipeline-november-2-2026)
 for that version's observed behavior. Appends and optimization preserve the header
 and creation snapshot. LanceDB's cleanup refuses to remove a tagged version, so
-`mark_complete()` deletes a stale marker before optimizing; the
+`optimize()` and `mark_complete()` delete any marker first; the
 [version-tag check](../experiments.md#completion-markers-2026-11-06) records the
 observed tag behavior.
 

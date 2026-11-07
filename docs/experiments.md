@@ -18,6 +18,45 @@ For hardware acceptance, read the [V100 procedure](#v100-kernel-check) together
 with the current encoder's hardware constraints. Procedures here retain the root
 guide's explicit authorization requirements.
 
+## Completion markers (2026-11-06)
+
+Embedding tables now record completion as a LanceDB version tag named `complete`
+([completion contract](classification/retrieval.md#completion)). Before
+implementing it, the version-tag behavior was checked with LanceDB 0.40.0 and
+PyArrow 26.0.0 in both the `default` and `jina-cpu` environments, on throwaway
+local filesystem tables in session scratch space. No project table was read or
+written. Observed:
+
+- After appends and `optimize()`, `tags.create("complete", version)` succeeded.
+  A fresh connection reopened the table at that version, and the tag pointed at
+  it (version 6 in the run).
+- A later `add()` moved the table to version 7 while the tag stayed at 6.
+- Optimizing again kept the tag listed, pointing at its version, and
+  `checkout("complete")` still read that version's rows and schema metadata.
+  An optimize that compacts files also writes new versions (7 to 9 in the run),
+  so a marker must be written after optimization. An optimize with nothing to
+  compact left the version unchanged.
+- With `cleanup_older_than=timedelta(0)`, cleanup failed with "1 tagged
+  version(s) have been marked for cleanup" while the tag pointed at an old
+  version. It succeeded when the tag pointed at the current version. The default
+  seven-day retention avoids this for recent versions, so `optimize()` and
+  `mark_complete()` delete any marker before optimizing.
+- Asking for an absent tag with `tags.get_version()` raises `RuntimeError`, so
+  the store reads `tags.list()` instead.
+
+Tables written before this change have no marker. They open as incomplete, and
+rerunning `index` (or evaluating with validation caching enabled) marks them
+without re-encoding. The header schema version is unchanged.
+
+Checks ran with the same commands as the
+[header entry](#embedding-table-header-2026-11-06), in the worktree's `default`
+and `jina-cpu` environments installed from the committed lockfile. Ruff, the
+format check, and scoped ty passed in both. The default suite passed 585 tests and
+310 subtests with two skips. The Jina suite passed 584 tests and 310 subtests with
+three skips. Both reported the existing Sentence Transformers deprecation warning.
+The test task hid GPUs and set Hugging Face offline mode. No model or dataset
+downloads, GPU work, live cloud requests, or shared storage were used.
+
 ## Embedding table header (2026-11-06)
 
 **Every existing embedding table must be rebuilt under a new name.** This

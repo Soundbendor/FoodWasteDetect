@@ -190,7 +190,7 @@ with `IncompleteTableError` stating how many expected reference source keys are
 missing; the expected keys come from `IndexBuilder.expected_reference_keys()`,
 which prepares reference inputs without decoding images or constructing the
 encoder. Rerun `index` to resume and mark it. `evaluate_cached()` opens the
-validation cache the same way, against `IndexBuilder.validation_keys()`, before
+validation cache the same way, against `IndexBuilder.expected_validation_keys()`, before
 it prepares the reference table or fetches any vector. Fill an incomplete cache
 by evaluating with `cache_validation_embeddings` enabled. `Experiment` prepares validation batches; it opens or completes
 the cache and constructs the metadata iterator eagerly, then fetches vectors lazily.

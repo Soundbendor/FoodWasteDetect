@@ -114,17 +114,22 @@ class IndexBuilder:
         Reads enabled descriptions and selects training images without decoding them
         or constructing the encoder.
 
+        Returns:
+            Every prepared text record's key followed by each selected training
+            image's key, in preparation order.
+
         Raises:
             ValueError: If selected training images do not cover every class.
         """
         return _reference_keys(*self._prepare_reference_inputs())
 
-    def validation_keys(self) -> list[SourceKey]:
-        """Return the source keys of every validation-split image, in split order."""
-        return [
-            ("validation_image", identity)
-            for identity in self.dataset.validation_set()["source_id"]
-        ]
+    def expected_validation_keys(self) -> list[SourceKey]:
+        """Return the source keys a complete validation cache holds.
+
+        Returns:
+            One ``validation_image`` key per validation-split image, in split order.
+        """
+        return _validation_keys(self.dataset.validation_set())
 
     def _open_or_create(self, table: str, role: TableRole) -> EmbeddingTable:
         """Open the named table, creating it with the encoder width only when absent."""
@@ -206,11 +211,15 @@ class IndexBuilder:
         if cache.is_complete:
             return cache
         validation = self.dataset.validation_set()
-        expected = self.validation_keys()
+        expected = _validation_keys(validation)
         images = self._pending_images(validation, "validation_image", cache.missing(expected))
         self._insert_image_records(cache, images, split="val")
         cache.mark_complete(expected)
         return cache
+
+
+def _validation_keys(validation: Dataset) -> list[SourceKey]:
+    return [("validation_image", identity) for identity in validation["source_id"]]
 
 
 def _reference_keys(images: Dataset | None, records: list[PointRecord]) -> list[SourceKey]:

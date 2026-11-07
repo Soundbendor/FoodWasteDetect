@@ -933,7 +933,7 @@ class ExperimentTests(unittest.TestCase):
         exp.config = updated(exp.config, 'cache_validation_embeddings', True)
         with patch.object(EmbeddingTable, 'append'), \
              patch.object(EmbeddingTable, 'optimize', side_effect=AssertionError('optimize')):
-            with self.assertRaisesRegex(ValueError, "'cache' is missing 2 of 2 expected"):
+            with self.assertRaisesRegex(IncompleteTableError, "'cache' is incomplete: missing 2 of 2 expected"):
                 exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
         with patch.object(EmbeddingTable, 'optimize', side_effect=AssertionError('optimize')):
@@ -1045,7 +1045,6 @@ class ExperimentTests(unittest.TestCase):
 
     def test_tables_filled_before_completion_markers_complete_without_rebuilding(self):
         import numpy as np
-        from classification.schemas import PointRecord
 
         exp = self.experiment()
         exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
