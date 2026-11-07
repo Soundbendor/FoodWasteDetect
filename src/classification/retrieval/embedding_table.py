@@ -43,6 +43,12 @@ _RESUME: dict[TableRole, str] = {
 _RESUME_PREFIX = "rerun the sweep to recreate it from its complete source"
 # The only source kind a validation cache stores, and the one a reference table refuses.
 _VALIDATION_KIND = "validation_image"
+# Per role, whether the role guard refuses the validation kind or every other kind,
+# and the rule stated when it refuses.
+_ROLE_GUARD: dict[TableRole, tuple[bool, str]] = {
+    "reference": (False, f"a reference table never stores {_VALIDATION_KIND!r} records"),
+    "validation_cache": (True, f"a validation cache stores only {_VALIDATION_KIND!r} records"),
+}
 
 _STRING_COLUMNS = ("id", "class", "source_kind", "source_identity", "value")
 _VECTOR = "vector"
@@ -546,15 +552,13 @@ class EmbeddingTable:
 
     def _require_allowed_kinds(self, records: Iterable[PointRecord]) -> None:
         """Refuse source kinds this role forbids, naming them, before any write."""
-        cache = self.role == "validation_cache"
-        kinds = {record.source_kind for record in records}
-        refused = sorted(kinds - {_VALIDATION_KIND} if cache else kinds & {_VALIDATION_KIND})
+        only_validation, rule = _ROLE_GUARD[self.role]
+        refused = sorted(
+            kind
+            for kind in {record.source_kind for record in records}
+            if (kind == _VALIDATION_KIND) != only_validation
+        )
         if refused:
-            rule = (
-                f"a validation cache stores only {_VALIDATION_KIND!r} records"
-                if cache
-                else f"a reference table never stores {_VALIDATION_KIND!r} records"
-            )
             raise EmbeddingTableError(
                 f"Cannot append to table {self.name!r}: {rule}, but the batch holds "
                 f"{', '.join(map(repr, refused))}; nothing was written"

@@ -114,7 +114,7 @@ retries. Compatibility is checked when a table is opened, not per append;
 transaction and rollback guarantees are outside the current scope. Follow
 [experiment persistence](experiments.md#reference-builds-and-resumption).
 
-The **role guard** keeps validation vectors out of reference searches. A
+The [role guard](../../GLOSSARY.md) keeps validation vectors out of reference searches. A
 reference table refuses `validation_image` records; a validation cache accepts
 only `validation_image` records. A batch holding any forbidden source kind raises
 `EmbeddingTableError` naming those kinds, before anything is written, so the
@@ -343,9 +343,9 @@ without copying, recreation after a crash or later write, and refusal, without
 changes, of legacy, non-prefix, other-source, other-dimension, other-role, and
 other-fingerprint destinations. `tests/test_matroyshka_sweep.py` checks the
 same reuse, recreation, and refusal through the sweep entry point.
-`tests/test_classification.py` checks the duplicate warning and the summary's
-`duplicate_count` through the `index` stage. `tests/test_retrieval.py` checks
-vote ties, abstentions, and hand-calculated ranking denominators.
-`tests/test_classification.py` checks that deeper rankings do not expand saved
-voting support. `tests/test_matroyshka_sweep.py` and `tests/test_tracking.py` cover
+`tests/test_retrieval.py` checks vote ties, abstentions, and hand-calculated
+ranking denominators. `tests/test_classification.py` checks that built reference
+tables and validation caches pass the role guard, the duplicate warning and the
+summary's `duplicate_count` through the `index` stage, and that deeper rankings
+do not expand saved voting support. `tests/test_matroyshka_sweep.py` and `tests/test_tracking.py` cover
 metric propagation. Historical reports remain unchanged when metrics evolve.

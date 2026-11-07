@@ -33,11 +33,12 @@ The header format and schema version are unchanged, so no rebuild is needed;
 evaluation.
 
 Checks used synthetic records and temporary local LanceDB 0.40.0 tables; the
-stage test created a duplicate by appending a stored record again and rerunning
-`index`. In the worktree's `default` and `jina-cpu` environments, installed from
+stage tests built a reference table and validation cache through `index` and
+cached evaluation, and created a duplicate by appending a stored record again
+and rerunning `index`. In the worktree's `default` and `jina-cpu` environments, installed from
 the committed lockfile, Ruff, the format check, scoped ty, and
-`classification --help` passed. The default suite passed 637 tests with two
-skips; the Jina suite passed 636 tests with three skips. Both reported the
+`classification --help` passed. The default suite passed 638 tests with two
+skips; the Jina suite passed 637 tests with three skips. Both reported the
 existing Sentence Transformers deprecation warning. The test task hid GPUs and
 set Hugging Face offline mode. No model or dataset downloads, GPU work, live
 cloud requests, or shared storage were used.

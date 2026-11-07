@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from classification.experiments.classification import Experiment
 from classification.experiments.evaluation import extract_batch_metadata, prediction
 from classification.experiments.config import ExperimentConfig
@@ -940,6 +942,23 @@ class ExperimentTests(unittest.TestCase):
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
             self.assertEqual(exp.evaluate_cached().dimension, 2)
 
+    def test_built_tables_pass_the_role_guard_and_keep_validation_rows_out_of_references(self):
+        exp = self.experiment((True, True, False))
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.config = updated(exp.config, 'cache_validation_embeddings', True)
+        exp.build_vector_database()
+        self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
+
+        reference = EmbeddingTable.open(self.db_path, exp.config.lancedb.table, 'reference')
+        cache = EmbeddingTable.open(self.db_path, 'cache', 'validation_cache')
+        self.assertEqual(reference.source_counts(), {'training_image': 2, 'class_name': 2})
+        self.assertEqual(cache.source_counts(), {'validation_image': 2})
+        stored = [record for record, _ in cache.rows()]
+        with self.assertRaisesRegex(ValueError, "never stores 'validation_image'"):
+            reference.append(stored, np.ones((len(stored), 2), dtype=np.float32))
+        self.assertTrue(reference.is_complete)
+        self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
+
     def test_index_summary_records_zero_duplicates_without_warning(self):
         exp = self.experiment((True, True, False))
         with self.assertNoLogs(level='WARNING'):
@@ -948,7 +967,6 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(json.loads((exp.output / 'index.json').read_text())['duplicate_count'], 0)
 
     def test_index_warns_about_duplicate_source_keys_and_records_their_count(self):
-        import numpy as np
         exp = self.experiment((False, True, False))
         exp.build_vector_database()
         name = exp.config.lancedb.table

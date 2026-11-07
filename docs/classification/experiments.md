@@ -227,7 +227,8 @@ the table with `EmbeddingTable.source_counts()`, duplicates included),
 `duplicate_count` (from `EmbeddingTable.duplicate_count()`, zero when every source
 key is stored once), and the unmodified `config`, including defaults. A nonzero
 duplicate count is logged as a warning and does not stop the run
-([duplicate source keys](retrieval.md#duplicate-source-keys)). Writers return an `IndexSummary`.
+([duplicate source keys](retrieval.md#duplicate-source-keys)). Writers return an
+`IndexSummary`.
 Evaluation never reads `index.json`: a missing, stale, mismatched, or malformed
 summary has no effect on reports. Before evaluating, `evaluate()` and
 `evaluate_cached()` read `reference_source_counts` from the reference table with

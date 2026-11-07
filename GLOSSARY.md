@@ -59,6 +59,12 @@ expected to hold. It carries a completion marker at its current version; any
 later write makes it incomplete again.
 _Avoid_: finished index, optimized table
 
+**Role guard**:
+The append rule that keeps validation vectors out of reference searches: a
+reference table refuses validation-image records, and a validation cache accepts
+only validation-image records. A refused batch writes nothing.
+_Avoid_: kind filter, leak check
+
 ### Records
 
 **Source key**:
@@ -75,3 +81,10 @@ _Avoid_: reference type, source type
 The identifier of one input within its source kind, such as a class name, a
 description position, or a dataset image ID.
 _Avoid_: source ID (for the stored value), key
+
+**Duplicate source key**:
+A source key stored in more than one row of an embedding table. Duplicates are
+tolerated and reported; the duplicate count is the stored row count minus the
+number of distinct source keys, and every duplicate row still counts in source
+and class counts.
+_Avoid_: duplicate record, repeated ID
