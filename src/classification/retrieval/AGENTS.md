@@ -16,6 +16,7 @@ Experiment selection, resumption, and report publication belong to `experiments`
 
 Keep LanceDB, Arrow, column names, and schema metadata keys inside
 `embedding_table.py`. Refuse legacy tables; never migrate them. Use the
-[glossary](../../../GLOSSARY.md) vocabulary. Preserve exact cosine search, separate vote fraction from similarity, and keep
-pure voting/metric functions independent of database and model loading. Import
+[glossary](../../../GLOSSARY.md) vocabulary. Preserve exact cosine search, separate
+vote fraction from similarity, and keep pure voting/metric functions independent
+of database and model loading. Import
 concrete modules directly; the package initializer does not load backends.

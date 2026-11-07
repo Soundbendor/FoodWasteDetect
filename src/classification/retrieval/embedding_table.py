@@ -88,13 +88,29 @@ class EmbeddingTable:
 
     @staticmethod
     def exists(uri: str | Path, name: str) -> bool:
-        """Check for a table without creating a missing database directory."""
+        """Check for a table without creating a missing database directory.
+
+        Args:
+            uri: Local database directory.
+            name: Table name.
+
+        Returns:
+            True when the directory and the named table both exist.
+        """
         path = _resolve(uri)
         return path.is_dir() and name in LanceDBConnection(path)
 
     @classmethod
     def open(cls, uri: str | Path, name: str, role: TableRole) -> Self:
         """Open an existing table under the given role, without creating storage.
+
+        Args:
+            uri: Local database directory.
+            name: Table name.
+            role: The role the caller requires.
+
+        Returns:
+            The opened table.
 
         Raises:
             FileNotFoundError: If the database directory does not exist.
@@ -124,6 +140,9 @@ class EmbeddingTable:
             role: Reference table or validation cache.
             dimension: Fixed vector width.
             snapshot: Creation snapshot, stored verbatim and never rewritten.
+
+        Returns:
+            The new, empty table.
         """
         header = _Header(schema_version=SCHEMA_VERSION, role=role, dimension=dimension)
         return cls._create(_resolve(uri), name, header, snapshot)
@@ -238,6 +257,10 @@ class EmbeddingTable:
     ) -> None:
         """Append records paired with vectors; malformed vectors fail backend validation.
 
+        Args:
+            records: Records to store, in order.
+            vectors: One vector per record, of the table's dimension.
+
         Raises:
             ValueError: If the record and vector counts differ; nothing is written.
         """
@@ -319,7 +342,12 @@ class EmbeddingTable:
     def fetch_vectors(self, keys: Sequence[SourceKey]) -> NDArray[np.float32]:
         """Fetch validation-cache vectors in the requested key order, including repeats.
 
-        Empty input returns shape ``(0, dimension)``.
+        Args:
+            keys: Source keys to fetch; repeats are allowed.
+
+        Returns:
+            A float32 matrix with one row per requested key; empty input returns
+            shape ``(0, dimension)``.
 
         Raises:
             EmbeddingTableError: If this table is not a validation cache.
@@ -350,6 +378,14 @@ class EmbeddingTable:
         self, vector: np.ndarray[tuple[int], np.dtype[np.float32 | np.float64]], k: int
     ) -> list[Neighbor]:
         """Retrieve exact cosine neighbours from a reference table, in backend order.
+
+        Args:
+            vector: Query vector of the table's dimension.
+            k: Maximum number of neighbours.
+
+        Returns:
+            Neighbours with record ID, label, and cosine similarity, which may be
+            negative.
 
         Raises:
             EmbeddingTableError: If this table is not a reference table.

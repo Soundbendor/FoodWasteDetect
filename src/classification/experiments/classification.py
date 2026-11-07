@@ -143,16 +143,16 @@ class Experiment:
 
     def build_vector_database(self) -> IndexSummary:
         """Build or resume the reference table, mark it complete, and publish its summary."""
-        index = self._index_builder().build_reference_table()
-        return self._publish_index(index)
+        reference = self._index_builder().build_reference_table()
+        return self._publish_index(reference)
 
-    def _publish_index(self, index: EmbeddingTable) -> IndexSummary:
+    def _publish_index(self, reference: EmbeddingTable) -> IndexSummary:
         """Write index.json before publishing the table's source counts to the tracker."""
-        counts = dict(index.source_counts())
+        counts = dict(reference.source_counts())
         artifact = IndexSummary(
-            table=index.name,
-            uri=str(index.uri),
-            dimension=index.dimension,
+            table=reference.name,
+            uri=str(reference.uri),
+            dimension=reference.dimension,
             source_counts=counts,
             config=self.config,
         )
@@ -186,41 +186,41 @@ class Experiment:
 
     def evaluate(self) -> EvaluationReport:
         """Complete optional validation caching, then classify the full split."""
-        index, counts = self._prepare_evaluation()
+        reference, counts = self._prepare_evaluation()
         batches = self._prepare_validation_batches(cached_only=False)
-        return self._execute_evaluation(index, counts, batches)
+        return self._execute_evaluation(reference, counts, batches)
 
     def evaluate_cached(self) -> EvaluationReport:
         """Classify the validation split using existing cached vectors only."""
         batches = self._prepare_validation_batches(cached_only=True)
-        index, counts = self._prepare_evaluation()
-        return self._execute_evaluation(index, counts, batches)
+        reference, counts = self._prepare_evaluation()
+        return self._execute_evaluation(reference, counts, batches)
 
     def _prepare_evaluation(self) -> tuple[EmbeddingTable, dict[str, int]]:
         """Open the reference table and publish its stored source-kind counts."""
-        index = self._reference_table()
-        counts = dict(index.source_counts())
+        reference = self._reference_table()
+        counts = dict(reference.source_counts())
         if self.tracker:
             self.tracker.reference_counts(counts)
-        return index, counts
+        return reference, counts
 
     def _execute_evaluation(
         self,
-        index: EmbeddingTable,
+        reference: EmbeddingTable,
         reference_source_counts: dict[str, int],
         batches: Iterable[EmbeddingBatch],
     ) -> EvaluationReport:
         predictions = evaluate_batches(
             batches,
-            query=index.query,
-            class_counts=index.class_counts(),
+            query=reference.query,
+            class_counts=reference.class_counts(),
             k=self.config.k,
             expected_count=len(self.dataset.validation_set()),
         )
         report = EvaluationReport(
             config=self.config,
-            table=index.name,
-            dimension=index.dimension,
+            table=reference.name,
+            dimension=reference.dimension,
             reference_source_counts=reference_source_counts,
             predictions=predictions,
             metrics=metrics(predictions, self.classes),

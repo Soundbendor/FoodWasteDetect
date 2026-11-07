@@ -49,15 +49,15 @@ def run_sweep(
     # ExperimentConfig requires a usable validation table whenever sweep_dimensions is set.
     assert validation_source is not None
     sources = (config.lancedb.table, validation_source)
-    validation_index = EmbeddingTable.open(
+    validation_cache = EmbeddingTable.open(
         config.lancedb.uri, validation_source, "validation_cache"
     )
-    reference_index = EmbeddingTable.open(config.lancedb.uri, config.lancedb.table, "reference")
-    source_width = reference_index.dimension
-    if validation_index.dimension != source_width:
+    reference_table = EmbeddingTable.open(config.lancedb.uri, config.lancedb.table, "reference")
+    source_width = reference_table.dimension
+    if validation_cache.dimension != source_width:
         raise ValueError(
             f"Source vector widths must match: reference has {source_width}, "
-            f"validation cache has {validation_index.dimension}"
+            f"validation cache has {validation_cache.dimension}"
         )
     validate_sweep(sources, dimensions, source_width)
     output = Path(config.output_dir).expanduser().resolve() / datetime.now(UTC).strftime(
@@ -73,7 +73,7 @@ def run_sweep(
         settings["output_dir"] = str(output / f"d{dimension}")
         effective = ExperimentConfig.model_validate(settings)
         if dimension != source_width:
-            pairs = ((reference_index, reference), (validation_index, validation))
+            pairs = ((reference_table, reference), (validation_cache, validation))
             for source, destination in pairs:
                 source.derive_prefix(
                     destination, dimension, batch_size=effective.embedding.batch_size

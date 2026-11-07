@@ -298,8 +298,8 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(report['reference_source_counts'], {'generated_description': 2})
             self.assertEqual(report['metrics']['evaluated'], 2)
             self.assertFalse((exp.output / 'descriptions.json').exists())
-            table = self.client.open_table(cfg['lancedb']['table']).to_arrow().to_pylist()
-            self.assertEqual({row['value'] for row in table}, {'Apple stored', 'Pear stored'})
+            reference = EmbeddingTable.open(self.db_path, cfg['lancedb']['table'], 'reference')
+            self.assertEqual({record.value for record, _ in reference.rows()}, {'Apple stored', 'Pear stored'})
         self.assertEqual(path.read_text(), content)
         self.describer_constructor.assert_not_called()
 

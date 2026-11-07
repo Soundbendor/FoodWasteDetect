@@ -62,7 +62,7 @@ class IndexBuilder:
 
     def _insert_text_records(
         self,
-        index: EmbeddingTable,
+        table: EmbeddingTable,
         records: list[PointRecord],
     ) -> None:
         """Embed and save text references in batches."""
@@ -71,12 +71,12 @@ class IndexBuilder:
         ) as progress:
             for batch in batched(records, self.batch_size, strict=False):
                 vectors = self.embedder.encode_text([record.value for record in batch])
-                index.append(batch, vectors)
+                table.append(batch, vectors)
                 progress.update(len(batch))
 
     def _insert_image_records(
         self,
-        index: EmbeddingTable,
+        table: EmbeddingTable,
         dataset: Dataset,
         *,
         split: Literal["train", "val"],
@@ -93,7 +93,7 @@ class IndexBuilder:
                     )
                 ]
                 vectors = self.embedder.encode_images(batch["image"])
-                index.append(records, vectors)
+                table.append(records, vectors)
                 progress.update(len(records))
 
     def _prepare_reference_inputs(self) -> tuple[Dataset | None, list[PointRecord]]:
@@ -143,26 +143,26 @@ class IndexBuilder:
             expected.extend(("training_image", identity) for identity in images["source_id"])
         if not expected:
             raise ValueError("No reference records selected - check dataset and config.")
-        index = self._open_or_create(self.table, "reference")
-        absent = index.missing(expected)
+        table = self._open_or_create(self.table, "reference")
+        absent = table.missing(expected)
         pending = frozenset(absent)
         records = [r for r in records if r.source_key in pending]
         if images is not None:
             images = self._pending_images(images, "training_image", absent)
-        self._insert_references(index, records, images)
+        self._insert_references(table, records, images)
         logging.info("Verifying and optimizing the reference table...")
-        index.mark_complete(expected)
-        return index
+        table.mark_complete(expected)
+        return table
 
     def _insert_references(
         self,
-        index: EmbeddingTable,
+        table: EmbeddingTable,
         records: list[PointRecord],
         images: Dataset | None,
     ) -> None:
-        self._insert_text_records(index, records)
+        self._insert_text_records(table, records)
         if images is not None:
-            self._insert_image_records(index, images, split="train")
+            self._insert_image_records(table, images, split="train")
 
     def build_validation_cache(self, table_name: str) -> EmbeddingTable:
         """Complete missing validation embeddings and return the unoptimized cache.

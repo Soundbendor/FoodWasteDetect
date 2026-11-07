@@ -44,9 +44,9 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 the encoder loads on first use; `IndexBuilder` prepares and persists reference
 tables or validation caches; `EmbeddingTable` performs every table operation,
 including prefix-table derivation, and refuses legacy tables. Domain terms are
-defined in the [glossary](../../GLOSSARY.md). The cached dimension sweep in `experiments.matryoshka` keeps only sweep
-policy and delegates
-validation evaluation to `Experiment.evaluate_cached()`.
+defined in the [glossary](../../GLOSSARY.md). The cached dimension sweep in
+`experiments.matryoshka` keeps only sweep policy and delegates validation
+evaluation to `Experiment.evaluate_cached()`.
 `experiments.evaluation` computes predictions from supplied batches; `Experiment`
 writes a complete local report before `Tracker` publishes it. Direct
 `Experiment(config: ExperimentConfig)` calls have no W&B run unless a tracker is supplied.

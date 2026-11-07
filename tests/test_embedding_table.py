@@ -1,9 +1,21 @@
 """Embedding table contracts on temporary LanceDB, observed through the module interface."""
 
-import numpy as np
-import pytest
+import multiprocessing
+from unittest.mock import Mock, patch
 
-from classification.retrieval.embedding_table import EmbeddingTable, PrefixSource
+import lancedb
+import numpy as np
+import pyarrow as pa
+import pytest
+from lancedb.db import LanceDBConnection
+
+from classification.retrieval.embedding_table import (
+    EmbeddingTable,
+    EmbeddingTableError,
+    LegacyTableError,
+    PrefixSource,
+)
+from classification.retrieval.voting import classify
 from classification.schemas import PointRecord
 
 
@@ -20,9 +32,6 @@ def test_new_table_header_round_trips_on_reopen(tmp_path, role):
 
 def legacy_table(uri, name, metadata):
     """Write a table the way earlier code did: the same columns, a foreign header."""
-    import lancedb
-    import pyarrow as pa
-
     fields = [pa.field(column, pa.string(), nullable=False)
               for column in ("id", "class", "source_kind", "source_identity", "value")]
     fields.append(pa.field("vector", pa.list_(pa.float32(), 2), nullable=False))
@@ -52,8 +61,6 @@ def legacy_table(uri, name, metadata):
 )
 @pytest.mark.parametrize("role", ["reference", "validation_cache"])
 def test_tables_without_a_valid_header_are_refused_as_legacy(tmp_path, metadata, role):
-    from classification.retrieval.embedding_table import EmbeddingTableError, LegacyTableError
-
     legacy_table(tmp_path / "db", "old", metadata)
 
     for open_table in (
@@ -73,8 +80,6 @@ def test_tables_without_a_valid_header_are_refused_as_legacy(tmp_path, metadata,
     ("reference", "validation_cache"), ("validation_cache", "reference"),
 ])
 def test_opening_under_the_wrong_role_fails(tmp_path, stored, requested):
-    from classification.retrieval.embedding_table import EmbeddingTableError, LegacyTableError
-
     EmbeddingTable.create(tmp_path / "db", "table", stored, 2, snapshot="")
 
     for open_table in (
@@ -89,8 +94,6 @@ def test_opening_under_the_wrong_role_fails(tmp_path, stored, requested):
 
 
 def test_validation_caches_refuse_queries_and_reference_tables_refuse_vector_fetches(tmp_path):
-    from classification.retrieval.embedding_table import EmbeddingTableError
-
     cache = EmbeddingTable.create(tmp_path / "db", "cache", "validation_cache", 2, snapshot="")
     reference = EmbeddingTable.create(tmp_path / "db", "reference", "reference", 2, snapshot="")
 
@@ -148,8 +151,6 @@ def test_existing_names_are_never_recreated(tmp_path):
 
 
 def test_full_width_vectors_round_trip_with_cosine_search(tmp_path):
-    from classification.retrieval.voting import classify
-
     table = EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2048, snapshot="")
     records = [PointRecord(label, "class_name", label, label) for label in ("A", "B")]
     vectors = np.zeros((2, 2048), dtype=np.float32)
@@ -167,8 +168,6 @@ def test_full_width_vectors_round_trip_with_cosine_search(tmp_path):
 
 
 def test_count_mismatch_and_bad_vectors_append_nothing(tmp_path):
-    import pyarrow as pa
-
     table = EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2, snapshot="")
     record = PointRecord("A", "class_name", "A", "A")
     assert table.query(np.array([1., 0.]), 10) == []
@@ -215,8 +214,6 @@ def concurrent_reader(uri, barrier, queue):
 
 
 def test_concurrent_readers_preserve_the_table(tmp_path):
-    import multiprocessing
-
     table, records, vectors = populated(tmp_path / "db")
     ctx = multiprocessing.get_context("spawn")
     barrier, queue = ctx.Barrier(3), ctx.Queue()
@@ -314,8 +311,6 @@ def test_optimize_preserves_rows_header_and_search(tmp_path):
 
 
 def test_open_or_create_computes_the_dimension_only_when_creating(tmp_path):
-    from unittest.mock import Mock
-
     dimension = Mock(return_value=3)
     created = EmbeddingTable.open_or_create(
         tmp_path / "db", "lazy", "reference", dimension, snapshot="kept"
@@ -362,10 +357,6 @@ def four_rows(tmp_path, role):
 
 @pytest.mark.parametrize("role", ["reference", "validation_cache"])
 def test_mark_complete_states_the_missing_count_before_optimizing(tmp_path, role):
-    from unittest.mock import patch
-
-    from classification.retrieval.embedding_table import EmbeddingTableError
-
     table, keys = four_rows(tmp_path, role)
     expected = keys + [(keys[0][0], "absent"), ("training_image", "0"), (keys[0][0], "absent")]
 
@@ -378,8 +369,6 @@ def test_mark_complete_states_the_missing_count_before_optimizing(tmp_path, role
 
 @pytest.mark.parametrize(("role", "optimized"), [("reference", True), ("validation_cache", False)])
 def test_mark_complete_optimizes_only_reference_tables(tmp_path, role, optimized):
-    from unittest.mock import patch
-
     table, keys = four_rows(tmp_path, role)
     before = table.rows()
 
@@ -450,8 +439,6 @@ def test_prefix_of_a_validation_cache_is_a_validation_cache(tmp_path):
 
 
 def test_prefix_wider_than_source_fails_before_writing(source):
-    from classification.retrieval.embedding_table import EmbeddingTableError
-
     with pytest.raises(EmbeddingTableError, match="exceeds the stored width 4"):
         source.derive_prefix("too_wide", 5, batch_size=1)
 
@@ -475,8 +462,6 @@ def test_existing_prefix_is_reused_without_copying_again(source):
 
 
 def test_legacy_destination_is_refused_and_left_unchanged(source):
-    from classification.retrieval.embedding_table import LegacyTableError
-
     legacy_table(source.uri, "source_d2", None)
 
     with pytest.raises(LegacyTableError):
@@ -500,10 +485,6 @@ def test_prefix_streams_every_row_without_a_result_limit(source):
     ("operation", "existing"), [("open_table", True), ("create_table", False)]
 )
 def test_storage_errors_propagate_without_cleanup(source, monkeypatch, operation, existing):
-    from unittest.mock import Mock
-
-    from lancedb.db import LanceDBConnection
-
     if existing:
         source.derive_prefix("destination", 2, batch_size=1)
     drop = Mock()
