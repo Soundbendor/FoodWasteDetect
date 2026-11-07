@@ -9,7 +9,7 @@ from classification.experiments.artifacts import write_json
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
-from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.embedding_table import EmbeddingTable
 from classification.tracking import Tracker
 
 
@@ -49,8 +49,10 @@ def run_sweep(
     # ExperimentConfig requires a usable validation table whenever sweep_dimensions is set.
     assert validation_source is not None
     sources = (config.lancedb.table, validation_source)
-    validation_index = LanceDBIndex.open(config.lancedb.uri, validation_source)
-    reference_index = LanceDBIndex.open(config.lancedb.uri, config.lancedb.table)
+    validation_index = EmbeddingTable.open(
+        config.lancedb.uri, validation_source, "validation_cache"
+    )
+    reference_index = EmbeddingTable.open(config.lancedb.uri, config.lancedb.table, "reference")
     source_width = reference_index.dimension
     if validation_index.dimension != source_width:
         raise ValueError(

@@ -25,8 +25,10 @@ selection and image ownership use [data](data.md); for scoring use
 | `report_types.py`   | Index summary and evaluation report models                                                                |
 | `matryoshka.py`     | Cached dimension sweep policy, derived table names, and sweep summary                              |
 
-`LanceDBIndex` owns database operations, including the streaming derivation of
-prefix tables for the sweep; `matryoshka.py` does not import LanceDB or Arrow. CLI parsing stays
+`EmbeddingTable` ([embedding tables](retrieval.md#embedding-tables)) owns every
+table operation, including the streaming derivation of prefix tables for the sweep;
+`matryoshka.py` does not import LanceDB or Arrow. Terms follow the
+[glossary](../../GLOSSARY.md). CLI parsing stays
 in [cli.py](cli.md); neither experiment module has its own command-line parser.
 Use concrete module imports; `__init__.py` does not import backends.
 
@@ -82,8 +84,8 @@ It affects images only. Every class must have a selected training reference when
 images are enabled; selected image decoding can still fail later. Compare
 complete retrieval strategies: changing sources changes reference counts.
 
-`IndexBuilder.build_reference_table()` sequences three `LanceDBIndex` storage
-operations; it makes no other storage calls and never mutates the experiment
+`IndexBuilder.build_reference_table()` sequences three `EmbeddingTable`
+operations on a reference table; it makes no other storage calls and never mutates the experiment
 configuration. New and resumed builds follow one flow:
 
 1. Prepare and validate inputs: the capped unbatched training selection, class
@@ -91,19 +93,21 @@ configuration. New and resumed builds follow one flow:
    source keys are every prepared text record and selected training image. An
    empty expected set fails before any table exists. Validation failures happen
    before a table is created or the encoder is constructed.
-2. `open_or_create()` opens the table, or creates it when absent. The dimension
-   is supplied lazily as `embedder.dimension` and computed only when creating,
-   so resuming never constructs the encoder for that reason.
-3. `missing()` scans all `(source_kind, source_identity)` metadata once, without
+2. `open_or_create(..., "reference", ...)` opens the table, or creates it with a
+   header and creation snapshot when absent. Opening a legacy table, or a
+   validation cache under the reference name, fails. The dimension is supplied
+   lazily as `embedder.dimension` and computed only when creating, so resuming
+   never constructs the encoder for that reason.
+3. `missing()` scans all source keys once, without
    a result limit, and returns the expected keys that are absent. Only those text
    records and images are embedded, preserving the original dataset splits and
    order. Caps apply before filtering by missing keys. A table with no missing
    keys never constructs the encoder.
 4. Encode each text/image batch and append its strictly paired records/vectors
    once. Advance progress only after a successful append.
-5. `mark_complete(expected, optimize=True)` verifies that every expected key is
-   present, failing with the number of missing keys otherwise, and only then
-   optimizes the table. A no-work resume is verified and optimized again.
+5. `mark_complete(expected)` verifies that every expected key is present,
+   failing with the number of missing keys otherwise, and only then optimizes
+   the reference table. A no-work resume is verified and optimized again.
    The builder returns the table to `Experiment` for summary publication.
 
 Image records are built directly from column-oriented batches, with strict
@@ -120,14 +124,16 @@ writer and finish building/optimization before concurrent readers. Shared jobs
 need a filesystem path visible to all nodes and separate evaluation output
 directories.
 
-### Table creation metadata
+### Creation snapshot
 
-New reference tables and validation caches store the full `ExperimentConfig` as
-JSON under the Arrow schema key `classification.build`. The snapshot is the
-configuration exactly as supplied; the configuration has no dimension setting,
-and the stored width comes from the table itself (`LanceDBIndex.dimension`). The
-snapshot remains unchanged on resume, even when the current configuration
-differs, and prefix tables copy it verbatim.
+New reference tables and validation caches store the full `ExperimentConfig` JSON
+as their creation snapshot, beside the store-owned
+[header](retrieval.md#header). The snapshot is the configuration exactly as
+supplied; the configuration has no dimension setting, and the dimension comes from
+the table header (`EmbeddingTable.dimension`). The snapshot remains unchanged on
+resume, even when the current configuration differs, and prefix tables copy it
+verbatim. Tables written before the header existed are refused as legacy and must
+be rebuilt under a new name ([ADR-0001](../adr/0001-embedding-table-header.md)).
 
 ## Validation caching
 
@@ -136,11 +142,12 @@ configuration enforces the [validation-table rule](cli.md#validation-table) at
 load time. All backends share this path. Cache records use `validation_image`;
 they never join reference searches.
 
-Evaluation opens references first, then calls
-`IndexBuilder.build_validation_cache()`. It uses the same storage operations as a
-reference build: `open_or_create()` with a lazy dimension, `missing()` over every
-validation-split `validation_image` key, appends of the missing batches, and
-`mark_complete(expected, optimize=False)`. Completion fails with the number of
+Evaluation opens the reference table first, then calls
+`IndexBuilder.build_validation_cache()`. It uses the same operations as a
+reference build on a validation cache: `open_or_create(..., "validation_cache",
+...)` with a lazy dimension, `missing()` over every validation-split
+`validation_image` key, appends of the missing batches, and
+`mark_complete(expected)`, which never optimizes a validation cache. Completion fails with the number of
 missing keys before any vectors are fetched. `Experiment` then fetches vectors in
 metadata order. Complete caches need neither image decoding nor a model/client.
 Disabled caching recomputes validation embeddings. Validation caches are never
@@ -155,20 +162,22 @@ For paid backends, restarting can repeat requests from the unfinished batch;
 `build_vector_database()` returns and writes `index.json` only after the
 reference table is marked complete and optimized. It contains `table`, resolved
 `uri`, `dimension` (the table's stored vector width), `source_counts` (read from
-the table with `LanceDBIndex.source_counts()`, duplicates included), and the
+the table with `EmbeddingTable.source_counts()`, duplicates included), and the
 unmodified `config`, including defaults. Writers return an `IndexSummary`.
 Evaluation never reads `index.json`: a missing, stale, mismatched, or malformed
 summary has no effect on reports. Before evaluating, `evaluate()` and
 `evaluate_cached()` read `reference_source_counts` from the reference table with
-`LanceDBIndex.source_counts()`, which counts every stored row, duplicates included.
+`EmbeddingTable.source_counts()`, which counts every stored row, duplicates included.
 The field is always present and never null.
 
 `evaluate()` and `evaluate_cached()` share `_execute_evaluation()`. The latter
 reads existing cached vectors regardless of the cache flag, without completing or
 mutating the cache. `Experiment` prepares validation batches; it opens or completes
 the cache and constructs the metadata iterator eagerly, then fetches vectors lazily.
-Ordinary evaluation prepares references first; cached-only evaluation prepares the
-cache first. Missing vectors fail during consumption after reference preparation. `evaluation.evaluate_batches()` consumes
+Evaluation opens the reference table with role `reference` and the cache with role
+`validation_cache`, so a table opened under the wrong role fails. Ordinary
+evaluation prepares references first; cached-only evaluation prepares the cache
+first. Missing vectors fail during consumption after reference preparation. `evaluation.evaluate_batches()` consumes
 these batches through a supplied query callable, owns progress and completeness
 checks, and returns predictions. It performs no report writes or tracking.
 `Experiment` assembles an `EvaluationReport` model with typed configuration,
@@ -197,13 +206,14 @@ request retries are separately documented in [encoders](encoders.md).
 details.
 
 Keep the explicitly deferred scope: artifact compatibility checks, hashes,
-manifest/table-content validation, automatic table naming, migration, rollback,
+manifest/table-content validation, automatic table naming, rollback,
 and Git/model/code revision, dependency-version, or timestamp provenance
 metadata are not implemented. This includes nested text-encoder revisions; UTC
 output directory names remain in use. Changing models, dimensions, prompts,
 descriptions, source inputs, or caps requires fresh tables and output
 directories with all enabled references rebuilt. Existing tables are reused by
-identity without verifying compatibility. Preserve historical data and
+source key without verifying encoder or input compatibility; tables without a
+valid header are refused, never migrated. Preserve historical data and
 collections; the separate CLIP/Qdrant experiment is unaffected.
 
 ## Cached Matryoshka sweep
@@ -213,9 +223,9 @@ This is a cached prefix experiment, not a guarantee of Matryoshka quality.
 Set `sweep_dimensions` to a nonempty list of unique positive integers in the
 order to evaluate them. Existing configurations must supply this field for the
 sweep; other stages and historical snapshots may omit it. The shipped Gemini
-configuration uses 768, 1536, and 3072. The source reference and validation
-vector fields must be fixed-size lists of the same positive width, checked
-through `LanceDBIndex.dimension` before anything is derived; all targets must fit
+configuration uses 768, 1536, and 3072. The sweep opens the reference table
+and the validation cache under their roles and requires their header dimensions to
+match before anything is derived; all targets must fit
 that stored width, including when the sources are already truncated.
 The sweep makes no embedding requests and performs no completeness validation. Missing cached
 vectors fail instead of being regenerated. Evaluation uses the configured `k` and
@@ -228,9 +238,10 @@ pairing the reference table with the validation cache, and the loop over
 dimensions. Beyond the validation-table rule, both source names and all derived names must
 be distinct, even if the stored width is not requested. A target equal to the
 stored width uses the original tables; each smaller target calls
-`LanceDBIndex.derive_prefix()` on both sources. The
-[storage contract](retrieval.md#prefix-tables) defines how derived tables are
-copied, reused, and annotated. Reference switches and image caps remain recorded
+`EmbeddingTable.derive_prefix()` on both sources. The
+[prefix-table contract](retrieval.md#prefix-tables) defines how prefix tables are
+copied, reused, and given headers that record their source table and source
+dimension. Reference switches and image caps remain recorded
 but do not filter stored rows. The sweep delegates cached validation preparation
 to `Experiment.evaluate_cached()`.
 
@@ -259,8 +270,9 @@ batches and query callables. For saved-vocabulary/reference construction, use
 `tests/test_classification.py` with synthetic encoders/images, mocked Ollama,
 and temporary LanceDB tables. It covers selection, pairing, partial/complete
 resumes, cache reuse, failures, and publication ordering. For sweep changes use
-`tests/test_matroyshka_sweep.py`; scoring is covered in
-`tests/test_retrieval.py`, tracking in `tests/test_tracking.py`.
+`tests/test_matroyshka_sweep.py`; embedding table behavior is covered in
+`tests/test_embedding_table.py`, scoring in `tests/test_retrieval.py`, and
+tracking in `tests/test_tracking.py`.
 
 These tests establish neither real-checkpoint behavior nor cloud, GPU, HPC, or
 shared-storage compatibility. Consult the [verification log](../experiments.md)

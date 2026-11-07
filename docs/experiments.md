@@ -18,6 +18,37 @@ For hardware acceptance, read the [V100 procedure](#v100-kernel-check) together
 with the current encoder's hardware constraints. Procedures here retain the root
 guide's explicit authorization requirements.
 
+## Embedding table header (2026-11-06)
+
+**Every existing embedding table must be rebuilt under a new name.** This
+includes the Gemini Embedding 2 reference tables and validation caches; budget
+their Vertex requests before rebuilding. The storage module is now
+`retrieval/embedding_table.py`, with `EmbeddingTable` replacing `LanceDBIndex` and
+`SourceKey` replacing `SourceIdentity`. New tables record a header with the schema
+version (1), role, dimension, and, for prefix tables, the source table and source
+dimension. The creation snapshot moves to its own key and is copied verbatim into
+prefix tables. Tables without that header, including every table written before
+this change, raise `LegacyTableError` on open
+([ADR-0001](adr/0001-embedding-table-header.md)). No table was read or migrated.
+
+Checks ran in the existing `default` and `jina-cpu` CPU environments, installed in
+the worktree from the committed lockfile, with no manifest or lockfile changes:
+
+```sh
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default lint
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default format-check
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default typecheck
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default test -q
+```
+
+The same commands ran with `-e jina-cpu`. Ruff, the format check, and scoped ty
+passed in both. The default suite passed 568 tests and 310 subtests with two
+skips. The Jina suite passed 567 tests and 310 subtests with three skips. Both
+reported the existing Sentence Transformers deprecation warning. The test task hid
+GPUs and set Hugging Face offline mode. Inputs were synthetic, with temporary
+local LanceDB databases and mocked models, Vertex, Ollama, and W&B. No model or
+dataset downloads, GPU work, live cloud requests, or shared storage were used.
+
 ## Classification responsibility refactor (2026-11-03)
 
 The refactor separates owned Ollama sessions from description requests, shares

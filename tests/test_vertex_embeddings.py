@@ -468,7 +468,7 @@ def test_index_builder_direct_build_and_complete_resume(transport, resume_config
     counts = index.source_counts()
     assert counts == {"class_name": 1, "generated_description": 2, "training_image": 13}
     cache = builder.build_validation_cache(resume_config["lancedb"]["validation_table"])
-    assert len(cache.get_record_ids()) == 13
+    assert sum(cache.source_counts().values()) == 13
     before = len(requests)
     resumed = Experiment(ExperimentConfig.model_validate(resume_config))
     resumed_builder = resumed._index_builder()
@@ -482,13 +482,15 @@ def test_index_builder_direct_build_and_complete_resume(transport, resume_config
 
 
 def test_resume_all_sources_and_complete_validation(transport, resume_config, monkeypatch):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.schemas import PointRecord
     from classification.experiments.classification import Experiment
 
     config = resume_config
     config["n_imgs_per_class"] = 12
-    index = LanceDBIndex.create(config["lancedb"]["uri"], config["lancedb"]["table"], 128)
+    index = EmbeddingTable.create(
+        config["lancedb"]["uri"], config["lancedb"]["table"], "reference", 128, snapshot=""
+    )
     initial = [PointRecord("Apple", "class_name", "Apple", "Apple"),
                PointRecord("Apple", "generated_description", "Apple:1", "round")]
     initial += [PointRecord("Apple", "training_image", f"foodx251:train:{i}.png", "old")
@@ -503,14 +505,14 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     assert len(requests) == 2  # one description and the twelfth capped image
     assert summary["source_counts"] == {
         "class_name": 1, "generated_description": 2, "training_image": 12}
-    index = LanceDBIndex.open(index.uri, index.name)
-    assert len(index.get_record_ids()) == 15
-    assert set(old_ids) <= {r["id"] for r in index.table.search().limit(None).to_list()}
+    index = EmbeddingTable.open(index.uri, index.name, "reference")
+    assert sum(index.source_counts().values()) == 15
+    assert set(old_ids) <= {record.id for record, _ in index.rows()}
     report = experiment.evaluate().model_dump(mode="json")
     assert len(requests) == 15
     assert [r["source_id"] for r in report["predictions"]] == [
         f"foodx251:val:{i}.png" for i in range(13)]
-    assert {kind for kind, _ in index.get_record_ids()} == {
+    assert set(index.source_counts()) == {
         "class_name", "generated_description", "training_image"}
     (experiment.output / "index.json").unlink()
     # Cached runs must work even when all image files are missing.
@@ -528,7 +530,7 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
 @pytest.mark.parametrize("stage", ["reference", "validation"])
 @pytest.mark.parametrize("batch_size, committed", [(20, 0), (2, 2)])
 def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batch_size, committed):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.experiments.classification import Experiment
 
     config = resume_config
@@ -552,8 +554,9 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
         action()
     assert not list(experiment.output.glob("evaluation_*/report.json"))
     table = config["lancedb"]["validation_table" if stage == "validation" else "table"]
-    index = LanceDBIndex.open(config["lancedb"]["uri"], table)
-    saved = set(index.get_record_ids())
+    role = "validation_cache" if stage == "validation" else "reference"
+    index = EmbeddingTable.open(config["lancedb"]["uri"], table, role)
+    saved = {record.source_key for record, _ in index.rows()}
     assert len(saved) == committed
     expected = {}
     if stage == "reference":
@@ -581,13 +584,13 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
             with Image.open(BytesIO(base64.urlsafe_b64decode(part["inlineData"]["data"]))) as image:
                 submitted.append(image.getpixel((0, 0))[0])
     assert Counter(submitted) == Counter(value for key, value in expected.items() if key not in saved)
-    index = LanceDBIndex.open(index.uri, index.name)
-    assert len(index.get_record_ids()) == total
+    index = EmbeddingTable.open(index.uri, index.name, role)
+    assert sum(index.source_counts().values()) == total
 
 
 @pytest.mark.parametrize("value", [False, True])
 def test_cache_toggle_boolean(transport, resume_config, value):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.experiments.classification import Experiment
 
     resume_config["cache_validation_embeddings"] = value
@@ -597,13 +600,13 @@ def test_cache_toggle_boolean(transport, resume_config, value):
     experiment.evaluate()
     uri, name = resume_config["lancedb"]["uri"], resume_config["lancedb"]["validation_table"]
     if value:
-        assert len(LanceDBIndex.open(uri, name).get_record_ids()) == 13
+        assert sum(EmbeddingTable.open(uri, name, "validation_cache").source_counts().values()) == 13
     else:
-        assert not LanceDBIndex.exists(uri, name)
+        assert not EmbeddingTable.exists(uri, name)
 
 
 def test_default_cache_disabled_and_local_cache_supported(transport, resume_config):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.experiments.classification import Experiment
 
     resume_config.pop("cache_validation_embeddings")
@@ -611,7 +614,7 @@ def test_default_cache_disabled_and_local_cache_supported(transport, resume_conf
     experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
     experiment.evaluate()
-    assert not LanceDBIndex.exists(resume_config["lancedb"]["uri"],
+    assert not EmbeddingTable.exists(resume_config["lancedb"]["uri"],
                                    resume_config["lancedb"]["validation_table"])
     from classification.experiments.classification import Experiment
 
@@ -623,14 +626,14 @@ def test_default_cache_disabled_and_local_cache_supported(transport, resume_conf
     local._embedder = Mock(dimension=128)
     local._embedder.encode_text.side_effect = lambda inputs: np.ones((len(inputs), 128))
     local._embedder.encode_images.side_effect = lambda images: np.ones((len(images), 128))
-    append = LanceDBIndex.append
+    append = EmbeddingTable.append
     batch_sizes = []
 
     def save(index, records, vectors):
         batch_sizes.append(len(records))
         append(index, records, vectors)
 
-    with patch.object(LanceDBIndex, "append", save):
+    with patch.object(EmbeddingTable, "append", save):
         local.build_vector_database()
         assert local.evaluate().model_dump(mode="json")["metrics"]["evaluated"] == 13
     assert batch_sizes == [3, 13, 13]
@@ -654,13 +657,13 @@ def test_cached_report_failure_keeps_vectors(transport, resume_config):
 
 
 def test_progress_and_storage_failure_resume(transport, resume_config, progress_bars):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.experiments.classification import Experiment
 
     transport(lambda request: response())
     tracker = Mock()
     experiment = Experiment(ExperimentConfig.model_validate(resume_config), tracker=tracker)
-    original = LanceDBIndex.append
+    original = EmbeddingTable.append
     calls = 0
 
     def append(index, records, vectors):
@@ -670,7 +673,7 @@ def test_progress_and_storage_failure_resume(transport, resume_config, progress_
             raise OSError("disk")
         original(index, records, vectors)
 
-    with patch.object(LanceDBIndex, "append", append), pytest.raises(OSError, match="disk"):
+    with patch.object(EmbeddingTable, "append", append), pytest.raises(OSError, match="disk"):
         experiment.build_vector_database()
     assert calls == 2
     assert not (experiment.output / "index.json").exists()
@@ -690,7 +693,7 @@ def test_progress_and_storage_failure_resume(transport, resume_config, progress_
 
 
 def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config, progress_bars):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.schemas import PointRecord
     from classification.experiments.classification import Experiment
 
@@ -701,11 +704,15 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
         "".join(f"{i}.png,{i % 2}\n" for i in range(13))
     )
     config["k"] = 1
-    reference = LanceDBIndex.create(config["lancedb"]["uri"], config["lancedb"]["table"], 128)
+    uri = config["lancedb"]["uri"]
+    reference = EmbeddingTable.create(uri, config["lancedb"]["table"], "reference", 128, snapshot="")
     vectors = np.eye(2, 128, dtype=np.float32)
-    reference.append([PointRecord(label, "class_name", label, label)
-                      for label in ("Apple", "Banana")], vectors)
-    cache = LanceDBIndex.create(config["lancedb"]["uri"], config["lancedb"]["validation_table"], 128)
+    labels = [PointRecord(label, "class_name", label, label) for label in ("Apple", "Banana")]
+    reference.append(labels, vectors)
+    reference.mark_complete(record.source_key for record in labels)
+    cache = EmbeddingTable.create(
+        uri, config["lancedb"]["validation_table"], "validation_cache", 128, snapshot=""
+    )
     # Seed a partial cache in reverse order; new responses also finish out of order.
     for i in reversed(range(0, 13, 2)):
         cache.append([PointRecord("Apple", "validation_image", f"foodx251:val:{i}.png", "old")],
@@ -744,14 +751,17 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
 
 
 def test_reference_summary_counts_all_stored_rows(transport, resume_config):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.schemas import PointRecord
     from classification.experiments.classification import Experiment
 
     transport(lambda request: response())
     tracker = Mock()
     experiment = Experiment(ExperimentConfig.model_validate(resume_config), tracker=tracker)
-    index = LanceDBIndex.create(resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"], 128)
+    index = EmbeddingTable.create(
+        resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"], "reference", 128,
+        snapshot="",
+    )
     # Counts include duplicate and unrequested stored rows; filtering is a set.
     index.append([PointRecord("Apple", "class_name", identity, identity)
                   for identity in ("Apple", "Apple", "old")], np.ones((3, 128)))
@@ -764,32 +774,34 @@ def test_reference_summary_counts_all_stored_rows(transport, resume_config):
 
 def test_reference_inputs_fail_before_table_creation(transport, resume_config):
     from classification.experiments.classification import Experiment
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
 
     transport(lambda request: response())
     Path(resume_config["descriptions_file"]).unlink()
     experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     with pytest.raises(FileNotFoundError):
         experiment.build_vector_database()
-    assert not LanceDBIndex.exists(resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"])
+    assert not EmbeddingTable.exists(resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"])
     assert experiment._embedder is None
 
 
 def test_validation_cache_completes_before_classification(transport, resume_config):
-    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.retrieval.embedding_table import EmbeddingTable
     from classification.experiments.classification import Experiment
 
     transport(lambda request: response())
     experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
-    original = LanceDBIndex.query
+    original = EmbeddingTable.query
 
     def query(index, vector, k):
-        cache = LanceDBIndex.open(index.uri, resume_config["lancedb"]["validation_table"])
-        assert len(cache.get_record_ids()) == 13
+        cache = EmbeddingTable.open(
+            index.uri, resume_config["lancedb"]["validation_table"], "validation_cache"
+        )
+        assert sum(cache.source_counts().values()) == 13
         return original(index, vector, k)
 
-    with patch.object(LanceDBIndex, "query", query):
+    with patch.object(EmbeddingTable, "query", query):
         experiment.evaluate()
 
 

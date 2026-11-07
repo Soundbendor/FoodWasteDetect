@@ -13,7 +13,7 @@ from classification.experiments.evaluation import extract_batch_metadata, predic
 from classification.experiments.config import ExperimentConfig
 from config_helpers import config_data, updated
 from classification.schemas import Neighbor, PointRecord
-from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.embedding_table import EmbeddingTable
 
 
 def available(*modules):
@@ -189,7 +189,7 @@ class ExperimentTests(unittest.TestCase):
     def test_creation_metadata_survives_partial_and_changed_complete_resumes(self):
         exp = self.experiment()
         exp.batch_size = 1
-        original = LanceDBIndex.append
+        original = EmbeddingTable.append
         calls = 0
 
         def fail_second(index, records, vectors):
@@ -199,21 +199,20 @@ class ExperimentTests(unittest.TestCase):
                 raise RuntimeError('partial')
             original(index, records, vectors)
 
-        with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
+        with patch.object(EmbeddingTable, 'append', side_effect=fail_second, autospec=True):
             with self.assertRaisesRegex(RuntimeError, 'partial'):
                 exp.build_vector_database()
         name = exp.config.lancedb.table
-        snapshot = self.client.open_table(name).schema.metadata
-        document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
-        self.assertEqual(document, exp.config)
+        snapshot = EmbeddingTable.open(self.db_path, name, 'reference').creation_snapshot
+        self.assertEqual(ExperimentConfig.model_validate_json(snapshot), exp.config)
         exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
         with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
             exp.build_vector_database()
-        self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
+        self.assertEqual(EmbeddingTable.open(self.db_path, name, 'reference').creation_snapshot, snapshot)
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
             exp.build_vector_database()
-        self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
+        self.assertEqual(EmbeddingTable.open(self.db_path, name, 'reference').creation_snapshot, snapshot)
 
     def test_cached_evaluation_reuses_vectors_when_cache_flag_is_disabled(self):
         exp = self.experiment()
@@ -223,7 +222,7 @@ class ExperimentTests(unittest.TestCase):
         before = exp.config.model_dump()
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')):
+             patch.object(EmbeddingTable, 'append', side_effect=AssertionError('append')):
             report = exp.evaluate_cached()
         self.assertEqual(report.metrics['evaluated'], 2)
         self.assertEqual(exp.config.model_dump(), before)
@@ -232,7 +231,7 @@ class ExperimentTests(unittest.TestCase):
     def test_validation_creation_snapshot_and_lazy_resume(self):
         exp = self.experiment()
         exp.batch_size = 1
-        original = LanceDBIndex.append
+        original = EmbeddingTable.append
         calls = 0
 
         def fail_second(index, records, vectors):
@@ -242,20 +241,19 @@ class ExperimentTests(unittest.TestCase):
                 raise RuntimeError('partial')
             original(index, records, vectors)
 
-        with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
+        with patch.object(EmbeddingTable, 'append', side_effect=fail_second, autospec=True):
             with self.assertRaisesRegex(RuntimeError, 'partial'):
                 exp._index_builder().build_validation_cache('cache')
-        snapshot = self.client.open_table('cache').schema.metadata
-        document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
-        self.assertEqual(document, exp.config)
+        snapshot = EmbeddingTable.open(self.db_path, 'cache', 'validation_cache').creation_snapshot
+        self.assertEqual(ExperimentConfig.model_validate_json(snapshot), exp.config)
         exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
         with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
             cache = exp._index_builder().build_validation_cache('cache')
-        self.assertEqual(cache.table.schema.metadata, snapshot)
+        self.assertEqual((cache.role, cache.creation_snapshot), ('validation_cache', snapshot))
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
             resumed = exp._index_builder().build_validation_cache('cache')
-        self.assertEqual(resumed.table.schema.metadata, snapshot)
+        self.assertEqual(resumed.creation_snapshot, snapshot)
 
     def test_malformed_snapshots_do_not_block_resumes(self):
         import numpy as np
@@ -264,32 +262,28 @@ class ExperimentTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 name = 'incomplete' if payload == '{}' else 'malformed'
                 exp = self.experiment(name=name)
-                reference = LanceDBIndex.create(
-                    self.db_path, exp.config.lancedb.table, 2,
-                    metadata={'classification.build': payload},
+                reference = EmbeddingTable.create(
+                    self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot=payload,
                 )
                 cache_name = name + '_cache'
-                cache = LanceDBIndex.create(
-                    self.db_path, cache_name, 2, metadata={'classification.build': payload},
+                cache = EmbeddingTable.create(
+                    self.db_path, cache_name, 'validation_cache', 2, snapshot=payload,
                 )
                 reference.append([PointRecord('Apple', 'class_name', 'Apple', 'Apple')],
                                  np.array([[1., 0.]]))
                 cache.append([PointRecord('Apple', 'validation_image', '0', self.rows[0]['fname'])],
                              np.array([[1., 0.]]))
-                expected = {b'classification.build': payload.encode()}
                 with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
                     exp.build_vector_database()
                     exp._index_builder().build_validation_cache(cache_name)
-                self.assertEqual(reference.table.schema.metadata, expected)
-                self.assertEqual(cache.table.schema.metadata, expected)
                 exp._embedder = None
                 with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
                     exp.build_vector_database()
                     exp._index_builder().build_validation_cache(cache_name)
-                for table in (exp.config.lancedb.table, cache_name):
-                    reopened = self.client.open_table(table)
-                    self.assertEqual(reopened.schema.metadata, expected)
-                    self.assertEqual(reopened.count_rows(), 2)
+                for table, role in ((exp.config.lancedb.table, 'reference'), (cache_name, 'validation_cache')):
+                    reopened = EmbeddingTable.open(self.db_path, table, role)
+                    self.assertEqual(reopened.creation_snapshot, payload)
+                    self.assertEqual(len(reopened.rows()), 2)
 
     def test_shared_descriptions_are_read_only_across_runs(self):
         path = self.root / 'shared vocabulary.json'
@@ -343,7 +337,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_index_missing_default_descriptions_never_starts_ollama(self):
         exp = self.experiment((False, False, True))
-        with patch.object(LanceDBIndex, 'create') as create:
+        with patch.object(EmbeddingTable, 'create') as create:
             with self.assertRaises(FileNotFoundError):
                 exp.build_vector_database()
             create.assert_not_called()
@@ -393,7 +387,7 @@ class ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'No reference records selected'):
             exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
-        self.assertFalse(LanceDBIndex.exists(self.db_path, exp.config.lancedb.table))
+        self.assertFalse(EmbeddingTable.exists(self.db_path, exp.config.lancedb.table))
         self.embedder_constructor.assert_not_called()
 
     def test_description_rejects_invalid_timeouts_before_session_construction(self):
@@ -482,7 +476,7 @@ class ExperimentTests(unittest.TestCase):
     def test_image_insertion_rejects_mismatched_record_columns_before_encoding(self):
         exp = self.experiment((True, False, False))
         builder = exp._index_builder()
-        index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
+        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
         for split in ('train', 'val'):
             for field in ('class', 'source_id', 'fname'):
                 with self.subTest(split=split, field=field):
@@ -494,7 +488,7 @@ class ExperimentTests(unittest.TestCase):
                     batch[field].pop()
                     with patch.object(self.dataset, 'iter_dataset_batches', return_value=iter([batch])), \
                          patch.object(exp.embedder, 'encode_images') as encode, \
-                         patch.object(LanceDBIndex, 'append') as append:
+                         patch.object(EmbeddingTable, 'append') as append:
                         with self.assertRaises(ValueError):
                             builder._insert_image_records(
                                 index, self.dataset.train_set(), split=split
@@ -509,7 +503,7 @@ class ExperimentTests(unittest.TestCase):
                     exp = self.experiment((True, False, False), f'{stage}-{type(error).__name__}')
                     if stage == 'evaluate':
                         exp.build_vector_database()
-                    with patch.object(LanceDBIndex, method, side_effect=error):
+                    with patch.object(EmbeddingTable, method, side_effect=error):
                         with self.assertRaises(type(error)) as raised:
                             getattr(exp, stage)()
                     self.assertIs(raised.exception, error)
@@ -539,7 +533,7 @@ class ExperimentTests(unittest.TestCase):
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
         exp.config = updated(exp.config, 'lancedb.table', exp.config.lancedb.table + '_new')
-        append = LanceDBIndex.append
+        append = EmbeddingTable.append
         calls = 0
 
         def fail_second(index, records, vectors):
@@ -549,7 +543,7 @@ class ExperimentTests(unittest.TestCase):
                 raise ConnectionError('second append failed')
             return append(index, records, vectors)
 
-        with patch.object(LanceDBIndex, 'append', new=fail_second):
+        with patch.object(EmbeddingTable, 'append', new=fail_second):
             with self.assertRaisesRegex(ConnectionError, 'second append'):
                 exp.build_vector_database()
         self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
@@ -561,7 +555,7 @@ class ExperimentTests(unittest.TestCase):
         exp.config = updated(exp.config, 'n_imgs_per_class', 1)
         with self.assertRaisesRegex(ValueError, 'Missing usable training references'):
             exp.build_vector_database()
-        self.assertFalse(LanceDBIndex.exists(self.db_path, exp.config.lancedb.table))
+        self.assertFalse(EmbeddingTable.exists(self.db_path, exp.config.lancedb.table))
         self.assertFalse((exp.output / 'index.json').exists())
 
     def test_artifact_formats_and_direct_loading_remain_compatible(self):
@@ -588,15 +582,16 @@ class ExperimentTests(unittest.TestCase):
 
     def test_evaluation_depth_counts_and_empty_table_metrics(self):
         import numpy as np
-        from classification.retrieval.lancedb import LanceDBIndex
+        from classification.retrieval.embedding_table import EmbeddingTable
         from classification.schemas import PointRecord
 
         exp = self.experiment()
         exp.config = updated(exp.config, 'k', 1)
-        index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
+        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
         records = [PointRecord('Apple', 'description', str(i), '') for i in range(7)]
         index.append(records, np.tile([1., 0.], (7, 1)))
-        with patch.object(exp, '_lancedb_adapter', return_value=index), \
+        index.mark_complete(record.source_key for record in records)
+        with patch.object(exp, '_reference_table', return_value=index), \
              patch.object(index, 'class_counts', wraps=index.class_counts) as counts, \
              patch.object(index, 'query', wraps=index.query) as query:
             report = exp.evaluate().model_dump(mode="json")
@@ -607,7 +602,7 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(report['metrics'][key], 0.5)
         self.assertEqual(report['predictions'][0]['retrieval_metrics']['relevant_reference_count'], 7)
         exp.config = updated(exp.config, 'lancedb.table', 'empty')
-        LanceDBIndex.create(index.uri, 'empty', 2)
+        EmbeddingTable.create(index.uri, 'empty', 'reference', 2, snapshot='').mark_complete([])
         report = exp.evaluate().model_dump(mode="json")
         self.assertEqual(report['metrics']['evaluated'], 2)
         self.assertEqual(report['metrics']['map_at_r'], 0)
@@ -657,7 +652,7 @@ class ExperimentTests(unittest.TestCase):
         self.embedder_constructor = self.enterContext(patch('classification.experiments.classification.EmbeddingModel', side_effect=Embedder))
         self.describer_constructor = self.enterContext(patch('classification.experiments.classification.DescriberLLM', side_effect=Describer))
         self.client_constructor = self.enterContext(patch(
-            'classification.retrieval.lancedb.LanceDBConnection', wraps=lancedb.db.LanceDBConnection
+            'classification.retrieval.embedding_table.LanceDBConnection', wraps=lancedb.db.LanceDBConnection
         ))
 
     def experiment(self, flags=(False, True, False), name='run'):
@@ -727,7 +722,7 @@ class ExperimentTests(unittest.TestCase):
         rows = self.interleaved_training()
         exp = self.experiment((True, True, False), 'resume-filtered')
         exp.config = updated(exp.config, 'n_imgs_per_class', 2)
-        index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
+        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
         saved = [
             PointRecord(rows[i]['class'], 'training_image', rows[i]['source_id'], rows[i]['fname'])
             for i in (0, 1, 4)
@@ -854,20 +849,14 @@ class ExperimentTests(unittest.TestCase):
             artifact = exp.build_vector_database().model_dump(mode="json")
         self.assertEqual(artifact['source_counts'], {'class_name': 2, 'generated_description': 10})
 
-    def test_point_records_round_trip_through_lancedb(self):
+    def test_point_records_round_trip_through_an_embedding_table(self):
         exp = self.experiment()
         records = [PointRecord(label, 'class_name', label, label) for label in ['Apple', 'Pear']]
-        self.assertTrue(all(isinstance(record, PointRecord) for record in records))
-        index = LanceDBIndex.create(self.db_path, 'record_round_trip', 2)
+        index = EmbeddingTable.create(self.db_path, 'record_round_trip', 'reference', 2, snapshot='')
         vectors = exp.embedder.encode_text([record.value for record in records])
         index.append(records, vectors)
-        stored = self.client.open_table('record_round_trip').to_arrow().to_pylist()
-        payloads = {point['id']: {k: v for k, v in point.items() if k != 'vector'} for point in stored}
-        for record in records:
-            self.assertEqual(payloads[record.id], {
-                'id': record.id, 'class': record.label, 'source_kind': record.source_kind,
-                'source_identity': record.source_identity, 'value': record.value,
-            })
+        reopened = EmbeddingTable.open(self.db_path, 'record_round_trip', 'reference')
+        self.assertEqual([record for record, _ in reopened.rows()], records)
         neighbor = index.query(vectors[0], 1)[0]
         self.assertEqual((neighbor['id'], neighbor['label']), (records[0].id, records[0].label))
 
@@ -895,8 +884,8 @@ class ExperimentTests(unittest.TestCase):
         artifact = exp.build_vector_database().model_dump(mode="json")
         previous = (exp.output / 'index.json').read_bytes()
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')), \
-             patch.object(LanceDBIndex, 'optimize', side_effect=OSError('optimize')):
+             patch.object(EmbeddingTable, 'append', side_effect=AssertionError('append')), \
+             patch.object(EmbeddingTable, 'optimize', side_effect=OSError('optimize')):
             exp._embedder = None
             with self.assertRaisesRegex(OSError, 'optimize'):
                 exp.build_vector_database()
@@ -922,20 +911,20 @@ class ExperimentTests(unittest.TestCase):
 
     def test_lost_appends_fail_completion_with_missing_count(self):
         exp = self.experiment((True, True, False))
-        with patch.object(LanceDBIndex, 'append'), \
-             patch.object(LanceDBIndex, 'optimize', side_effect=AssertionError('optimize')):
+        with patch.object(EmbeddingTable, 'append'), \
+             patch.object(EmbeddingTable, 'optimize', side_effect=AssertionError('optimize')):
             with self.assertRaisesRegex(ValueError, 'missing 4 of 4 expected source keys'):
                 exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
         exp.build_vector_database()
         exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
         exp.config = updated(exp.config, 'cache_validation_embeddings', True)
-        with patch.object(LanceDBIndex, 'append'), \
-             patch.object(LanceDBIndex, 'optimize', side_effect=AssertionError('optimize')):
+        with patch.object(EmbeddingTable, 'append'), \
+             patch.object(EmbeddingTable, 'optimize', side_effect=AssertionError('optimize')):
             with self.assertRaisesRegex(ValueError, "'cache' is missing 2 of 2 expected"):
                 exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
-        with patch.object(LanceDBIndex, 'optimize', side_effect=AssertionError('optimize')):
+        with patch.object(EmbeddingTable, 'optimize', side_effect=AssertionError('optimize')):
             self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
 
     def test_stale_or_mismatched_summaries_do_not_affect_reported_counts(self):
@@ -969,7 +958,7 @@ class ExperimentTests(unittest.TestCase):
     def test_evaluation_counts_a_resumed_reference_table(self):
         exp = self.experiment((True, True, False))
         exp.batch_size = 1
-        append = LanceDBIndex.append
+        append = EmbeddingTable.append
         calls = 0
 
         def fail_second(index, records, vectors):
@@ -979,7 +968,7 @@ class ExperimentTests(unittest.TestCase):
                 raise ConnectionError('second append failed')
             return append(index, records, vectors)
 
-        with patch.object(LanceDBIndex, 'append', new=fail_second):
+        with patch.object(EmbeddingTable, 'append', new=fail_second):
             with self.assertRaisesRegex(ConnectionError, 'second append'):
                 exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
@@ -998,8 +987,8 @@ class ExperimentTests(unittest.TestCase):
         try:
             for path in paths:
                 path.chmod(0o555 if path.is_dir() else 0o444)
-            with patch.object(LanceDBIndex, 'create', side_effect=AssertionError('write')), \
-                 patch.object(LanceDBIndex, 'append', side_effect=AssertionError('write')):
+            with patch.object(EmbeddingTable, 'create', side_effect=AssertionError('write')), \
+                 patch.object(EmbeddingTable, 'append', side_effect=AssertionError('write')):
                 self.assertEqual(self.experiment().evaluate().metrics['evaluated'], 2)
             reopened = self.client.open_table(artifact['table'])
             self.assertEqual(reopened.version, version)
@@ -1020,7 +1009,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_table_lookup_failure_propagates_without_building(self):
         exp = self.experiment()
-        with patch.object(LanceDBIndex, 'exists', side_effect=ConnectionError('offline')) as exists:
+        with patch.object(EmbeddingTable, 'exists', side_effect=ConnectionError('offline')) as exists:
             with self.assertRaisesRegex(ConnectionError, 'offline'):
                 exp.build_vector_database()
         exists.assert_called_once_with(exp.config.lancedb.uri, exp.config.lancedb.table)
@@ -1050,7 +1039,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_query_failure_and_empty_evaluation(self):
         exp = self.experiment(); exp.build_vector_database()
-        with patch('classification.retrieval.lancedb.LanceDBIndex.query', side_effect=ConnectionError('offline')):
+        with patch('classification.retrieval.embedding_table.EmbeddingTable.query', side_effect=ConnectionError('offline')):
             with self.assertRaises(ConnectionError): exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
         self.dataset.splits['validation'] = self.dataset.splits['validation'].select([])
@@ -1079,7 +1068,7 @@ class ExperimentTests(unittest.TestCase):
 
     def test_empty_retrieval(self):
         exp = self.experiment(); exp.build_vector_database()
-        with patch('classification.retrieval.lancedb.LanceDBIndex.query', return_value=[]):
+        with patch('classification.retrieval.embedding_table.EmbeddingTable.query', return_value=[]):
             report = exp.evaluate().model_dump(mode="json")
         self.assertEqual(report['metrics']['majority_vote_accuracy'], 0)
         self.assertTrue(all(p['prediction'] is None for p in report['predictions']))

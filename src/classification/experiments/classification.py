@@ -23,7 +23,7 @@ from classification.experiments.report_types import (
 )
 from classification.llm.generate_descriptors import DescriberLLM
 from classification.llm.ollama import OllamaSession
-from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.embedding_table import EmbeddingTable
 from classification.retrieval.metrics import metrics
 from classification.tracking import Tracker
 
@@ -84,9 +84,9 @@ class Experiment:
             batch_size=self.batch_size,
         )
 
-    def _lancedb_adapter(self) -> LanceDBIndex:
+    def _reference_table(self) -> EmbeddingTable:
         options = self.config.lancedb
-        return LanceDBIndex.open(uri=options.uri, table=options.table)
+        return EmbeddingTable.open(options.uri, options.table, "reference")
 
     def _evaluation_batches(
         self,
@@ -146,7 +146,7 @@ class Experiment:
         index = self._index_builder().build_reference_table()
         return self._publish_index(index)
 
-    def _publish_index(self, index: LanceDBIndex) -> IndexSummary:
+    def _publish_index(self, index: EmbeddingTable) -> IndexSummary:
         """Write index.json before publishing the table's source counts to the tracker."""
         counts = dict(index.source_counts())
         artifact = IndexSummary(
@@ -170,7 +170,7 @@ class Experiment:
         if table is None:
             raise ValueError("lancedb.validation_table is required for cached evaluation")
         if cached_only:
-            cache = LanceDBIndex.open(uri=options.uri, table=table)
+            cache = EmbeddingTable.open(options.uri, table, "validation_cache")
         else:
             cache = self._index_builder().build_validation_cache(table)
         metadata = self.dataset.iter_batches("val", self.batch_size, decode=False)
@@ -196,9 +196,9 @@ class Experiment:
         index, counts = self._prepare_evaluation()
         return self._execute_evaluation(index, counts, batches)
 
-    def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict[str, int]]:
+    def _prepare_evaluation(self) -> tuple[EmbeddingTable, dict[str, int]]:
         """Open the reference table and publish its stored source-kind counts."""
-        index = self._lancedb_adapter()
+        index = self._reference_table()
         counts = dict(index.source_counts())
         if self.tracker:
             self.tracker.reference_counts(counts)
@@ -206,7 +206,7 @@ class Experiment:
 
     def _execute_evaluation(
         self,
-        index: LanceDBIndex,
+        index: EmbeddingTable,
         reference_source_counts: dict[str, int],
         batches: Iterable[EmbeddingBatch],
     ) -> EvaluationReport:

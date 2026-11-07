@@ -25,7 +25,7 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 | `cli.py`, `__main__.py` | Parse once, resolve YAML overrides, validate shared settings, and dispatch stages within native W&B contexts. Read [CLI](../../docs/classification/cli.md) when changing commands, configuration, or dispatch. |
 | `tracking.py` | Publish resolved configuration, reference counts, and completed evaluation results. Read [tracking](../../docs/classification/tracking.md) when changing W&B lifecycle, artifacts, summaries, or progress. |
 | `datasets/image_dataset.py` | Load local FoodX251 metadata and select/decode ordered batches. Read [data](../../docs/classification/data.md) when changing splits, identities, image caps, or image ownership. |
-| `schemas.py` | Shared reference, neighbor, prediction, and retrieval-metric records. Read [data](../../docs/classification/data.md#shared-records) when changing fields or record/vector associations. |
+| `schemas.py` | Shared records (`PointRecord` and its `SourceKey`), neighbor, prediction, and retrieval-metric types. Read [data](../../docs/classification/data.md#shared-records) when changing fields or record/vector associations. |
 | `__init__.py` | Package description; no backend imports. |
 | `pyproject.toml`, `pixi.lock`, `.python-version`, `MANIFEST.in` | Standalone packaging, environment selection, tasks, and source-distribution inputs. Read [development](../../docs/development.md) before environment or packaging changes. |
 | `README.md` | Installation and running commands; edits require explicit approval under the root guide. |
@@ -37,13 +37,14 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 | `encoders/` | Shared batch interface, local Sentence Transformers, Vertex requests | [Guide](encoders/AGENTS.md); [model protocols](../../docs/classification/encoders.md) for model, dimension, device, or request changes. |
 | `experiments/` | Orchestration, reference/cache construction, artifacts, configuration, dimension sweeps | [Guide](experiments/AGENTS.md); [experiment contracts](../../docs/classification/experiments.md) for stage ordering, resumption, or report changes. |
 | `llm/` | Class-description prompts, structured responses, and owned Ollama processes | [Guide](llm/AGENTS.md); [descriptions](../../docs/classification/data.md#class-descriptions-and-ollama) for vocabulary generation or service lifecycle changes. |
-| `retrieval/` | LanceDB adapter, voting, classification and ranking metrics | [Guide](retrieval/AGENTS.md); [retrieval contracts](../../docs/classification/retrieval.md) for storage, search, scores, or evaluation changes. |
+| `retrieval/` | Embedding tables (LanceDB), voting, classification and ranking metrics | [Guide](retrieval/AGENTS.md); [retrieval contracts](../../docs/classification/retrieval.md) for storage, search, scores, or evaluation changes. |
 | `scripts/` | Explicit maintenance and real-model checks | [Guide](scripts/AGENTS.md); [scripts](../../docs/classification/scripts.md) for smoke checks or Slurm submission changes. |
 
 `Experiment` composes these responsibilities: metadata loads during construction;
-the encoder loads on first use; `IndexBuilder` prepares and persists references or
-validation caches; `LanceDBIndex` performs storage operations, including prefix-table
-derivation. The cached dimension sweep in `experiments.matryoshka` keeps only sweep
+the encoder loads on first use; `IndexBuilder` prepares and persists reference
+tables or validation caches; `EmbeddingTable` performs every table operation,
+including prefix-table derivation, and refuses legacy tables. Domain terms are
+defined in the [glossary](../../GLOSSARY.md). The cached dimension sweep in `experiments.matryoshka` keeps only sweep
 policy and delegates
 validation evaluation to `Experiment.evaluate_cached()`.
 `experiments.evaluation` computes predictions from supplied batches; `Experiment`

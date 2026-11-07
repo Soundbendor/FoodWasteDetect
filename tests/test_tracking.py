@@ -412,7 +412,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
     assert bar.disable  # Context exit closes the bar.
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
-        patch("classification.experiments.classification.LanceDBIndex.query", side_effect=[[], failure]),
+        patch("classification.experiments.classification.EmbeddingTable.query", side_effect=[[], failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.evaluate()
@@ -479,7 +479,7 @@ def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_
     exp.batch_size = 1
     exp.tracker = Tracker(sdk)
     with (
-        patch("classification.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),
+        patch("classification.experiments.classification.EmbeddingTable.append", side_effect=[None, failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.build_vector_database()

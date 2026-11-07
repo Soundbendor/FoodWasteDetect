@@ -1,98 +1,127 @@
-# Storage, voting, and evaluation metrics
+# Embedding tables, voting, and evaluation metrics
 
-Read this document when changing LanceDB access, label assignment, or evaluation
+Read this document when changing embedding tables, label assignment, or evaluation
 definitions. [Experiments](experiments.md) owns selection, persistence orchestration,
-and publication; [tracking](tracking.md) owns W&B summaries and tables.
+and publication; [tracking](tracking.md) owns W&B summaries and tables. Terms
+follow the [glossary](../../GLOSSARY.md).
 
 | Module | Responsibility |
 | --- | --- |
-| `retrieval/lancedb.py` | `LanceDBIndex`: table lifecycle, build operations (open or create, missing keys, mark complete), appends, identity/vector reads, counts, optimization, and search |
+| `retrieval/embedding_table.py` | `EmbeddingTable`: headed table lifecycle, role checks, build operations (open or create, missing keys, mark complete), appends, record and vector reads, counts, optimization, search, and prefix-table derivation |
 | `retrieval/voting.py` | Pure `classify()` majority vote |
 | `retrieval/metrics.py` | Pure per-query ranking and aggregate classification/retrieval metrics |
-| `schemas.py` | `PointRecord`, source identity, neighbor, prediction, and retrieval-metric types |
+| `schemas.py` | `PointRecord`, `SourceKey`, neighbor, prediction, and retrieval-metric types |
 
-## LanceDB storage
+## Embedding tables
+
+`retrieval/embedding_table.py` is the only module that knows storage column names,
+schema metadata keys, the record-to-row mapping, or LanceDB and Arrow calls. Callers,
+including the sweep, use `EmbeddingTable` operations and never import LanceDB or
+Arrow. The design decision is recorded in
+[ADR-0001](../adr/0001-embedding-table-header.md).
 
 `lancedb.uri` is a filesystem path resolved from the working directory with `~`
-expansion, independently of `output_dir`. `exists()` and `open()` do not create
-missing database directories. `LanceDBIndex.open(uri, table)` and
-`LanceDBIndex.create(uri, table, dimension, *, metadata=None)` return an index with an open
-`LanceTable`; `LanceDBIndex.exists(uri, table)` checks storage without constructing
-an index. `LanceDBIndex.open_or_create(uri, table, dimension, *, metadata=None)`
-opens an existing table, or creates one when the name is absent; `dimension` is a
-callable invoked only when creating, and `metadata` is ignored for an existing
-table. Each factory uses the local `LanceDBConnection` directly. Index methods
-can therefore use their table without an unopened state or repeated guards.
-Creation uses an explicit Arrow schema with
-non-null string fields `id`, `class`, `source_kind`, `source_identity`, and `value`,
-plus a fixed-length float32 `vector`. `mode="create", exist_ok=False` refuses
-overwrites. `PointRecord` supplies UUIDs and maps its `label` to stored `class`.
+expansion, independently of `output_dir`. `EmbeddingTable.exists(uri, name)` and
+`open()` do not create missing database directories.
+
+| Factory | Contract |
+| --- | --- |
+| `open(uri, name, role)` | Open an existing table; a missing directory raises `FileNotFoundError`, a missing table propagates LanceDB's `ValueError` |
+| `create(uri, name, role, dimension, *, snapshot)` | Create an empty table with a header and the verbatim creation snapshot; an existing name is refused |
+| `open_or_create(uri, name, role, dimension, *, snapshot)` | Open an existing table under `role`, or create one; `dimension` is a callable invoked only when creating, and `snapshot` is ignored for an existing table |
+
+`role` is `"reference"` or `"validation_cache"`.
+
+### Header
+
+Every table created by this module records a store-owned header in its schema
+metadata. The header is written once and never rewritten:
+
+- `schema_version` (currently `SCHEMA_VERSION = 1`);
+- `role`: reference table or validation cache;
+- `dimension`: the fixed vector width;
+- for prefix tables, `source_table` and `source_dimension`.
+
+The creation snapshot is stored verbatim under its own key and never parsed or
+rewritten; the retired `classification.build` key is no longer written or read.
+`role`, `dimension`, `prefix_source` (a `PrefixSource(table, dimension)` or `None`),
+and `creation_snapshot` read these values back.
+
+Opening a table fails with `LegacyTableError` when the header is absent, malformed,
+records another schema version, lacks a creation snapshot, or disagrees with the
+stored columns or vector width. The message tells the researcher to rebuild under a
+new table name and cites ADR-0001; there is no migration. Opening a valid table under
+the other role fails with `EmbeddingTableError`. Both errors are `ValueError`
+subclasses, and `LegacyTableError` subclasses `EmbeddingTableError`.
+
+### Rows and appends
+
+Rows hold non-null strings `id`, `class`, `source_kind`, `source_identity`, and
+`value`, plus a fixed-length float32 `vector`. `PointRecord` supplies UUIDs and
+exposes `source_key`; it does not know column names. The module maps `label` to the
+stored `class`.
 
 `append()` checks record/vector counts, pairs rows strictly, and asks the backend
 to reject bad vectors. It adds completed batches without application write
 retries. Compatibility checks and transaction/rollback guarantees are outside the
 current scope; follow [experiment persistence](experiments.md#reference-builds-and-resumption).
 
-Builds resume and finish through two operations over expected source keys
-(`(source_kind, source_identity)` pairs):
+Builds resume and finish through two operations over expected source keys:
 
 - `missing(keys)` performs one metadata-only scan and returns the requested keys
   that are absent, each once, in first-request order.
-- `mark_complete(expected, *, optimize)` raises `ValueError` stating how many of
-  the expected keys are missing when any are absent, without optimizing. Extra
-  stored rows are allowed. Only after the check passes does `optimize=True`
-  call `optimize()`. Reference builds pass `True`; validation caches pass `False`.
+- `mark_complete(expected)` raises `EmbeddingTableError` stating how many of the
+  expected keys are missing when any are absent, without optimizing. Extra stored
+  rows are allowed. After the check passes, reference tables call `optimize()`;
+  validation caches are never optimized. The role comes from the header.
 
 | Read operation | Contract |
 | --- | --- |
-| `get_record_ids()` | Unlimited metadata-only scan of `(source_kind, source_identity)`; includes every stored row |
-| `class_counts()` | Stream only the class column without a result limit; every source type and duplicate row counts |
-| `source_counts()` | Stream only the `source_kind` column without a result limit; every stored row, including duplicate source keys, counts. |
-| `fetch_vectors(identities)` | Select requested identities and return float32 vectors in caller order, including repeated requests; missing identities fail |
-| `query(vector, k)` | Exact cosine neighbors in backend order, as `id`, `label`, and similarity `score` |
+| `class_counts()` | Stream only the class column without a result limit; every source kind and duplicate row counts |
+| `source_counts()` | Stream only the source-kind column without a result limit; every stored row, including duplicate source keys, counts |
+| `rows()` | Every stored `PointRecord` with its float32 vector, in storage order; for inspection and small tables |
+| `fetch_vectors(keys)` | Validation caches only. Return float32 vectors in caller order, including repeated requests; missing keys raise `KeyError` |
+| `query(vector, k)` | Reference tables only. Exact cosine neighbours in backend order, as `id`, `label`, and similarity `score` |
 
-`fetch_vectors()` escapes single quotes in identity predicates and uses both kind
-and identity. Empty input returns shape `(0, table dimension)`. It performs no
-duplicate-row or compatibility validation; identity resumption is not content
+`query()` on a validation cache and `fetch_vectors()` on a reference table raise
+`EmbeddingTableError`. `fetch_vectors()` escapes single quotes in key predicates
+and matches both kind and identity. Empty input returns shape `(0, dimension)`. It
+performs no duplicate-row validation; source-key resumption is not content
 verification.
 
 ### Prefix tables
 
-`dimension` reads the stored width and raises `ValueError` unless the schema has a
-positive fixed-size `vector` field. `derive_prefix(destination, dimension, *,
-batch_size)` returns an index over a table in the same database:
+`derive_prefix(destination, dimension, *, batch_size)` returns a prefix table in
+the same database:
 
-- An existing destination is reused if it opens, without reading the source or
-  its snapshot.
-- A prefix wider than the stored width raises `ValueError` before anything is
-  written. A prefix equal to the stored width copies vectors unchanged.
+- An existing destination is opened under the source's role without reading the
+  source; a legacy destination raises `LegacyTableError` and is left unchanged.
+- A prefix wider than the source dimension raises `EmbeddingTableError` before
+  anything is written. A prefix equal to the source dimension copies vectors
+  unchanged.
 - Otherwise one streaming `create_table()` call, with no query-result limit,
-  retains every row, UUID, and row metadata value. Only vectors change to exact
-  float32 prefixes and fixed-size Arrow types; no normalization is applied.
-- Schema metadata, including the creation snapshot (see
-  [table creation metadata](experiments.md#table-creation-metadata)), is copied
-  verbatim without parsing; absent snapshots remain absent. The derived width is
-  read from the prefix table's `dimension`.
+  retains every row, record ID, and row metadata value. Only vectors change to
+  exact float32 prefixes; no normalization is applied.
+- The new header keeps the source's role, records the prefix dimension, and records
+  the source table and source dimension. A prefix of a prefix records its immediate
+  source. The creation snapshot is copied verbatim, so it is identical to the
+  source's.
 
 Open, create, and stream failures propagate without scan, repair, overwrite, or
 cleanup; this is not a crash durability guarantee.
 
 `optimize()` delegates to LanceDB defaults. Reference builds invoke it only
-through `mark_complete(..., optimize=True)`; validation caches and evaluation
-never call it. The recorded LanceDB 0.40.0
-policy compacts files and retains seven days of historical versions with
-`delete_unverified=False`; the application supplies no custom policy. See the
-[verification log](../experiments.md#unified-experiment-pipeline-november-2-2026)
-for that version's observed behavior.
+through `mark_complete()`; validation caches and evaluation never call it. The
+recorded LanceDB 0.40.0 policy compacts files and retains seven days of historical
+versions with `delete_unverified=False`; the application supplies no custom policy.
+See the [verification log](../experiments.md#unified-experiment-pipeline-november-2-2026)
+for that version's observed behavior. Appends and optimization preserve the header
+and creation snapshot.
 
 Use one completed writer/build before concurrent readers, with a filesystem
 visible to every node. Concurrent writes to the same table are unsupported.
 The separate CLIP/YOLO Qdrant backend remains outside this package; rebuild new
 references instead of migrating or changing old Qdrant collections.
-
-Creation `metadata` attaches string pairs to the Arrow schema without adding row
-columns; appends, optimization, and reopening preserve it. For experiment snapshots,
-read [table creation metadata](experiments.md#table-creation-metadata).
 
 ## Exact retrieval and voting
 
@@ -171,10 +200,12 @@ an empty validation split before publishing a report.
 
 ## Verification
 
-`tests/test_retrieval.py` uses synthetic vectors and temporary real LanceDB
-tables. It checks schema/row preservation, bad-vector rejection, exact cosine
+`tests/test_embedding_table.py` uses synthetic vectors and temporary real LanceDB
+tables through the `EmbeddingTable` interface. It checks header round trips,
+legacy refusal, role checks, row preservation, bad-vector rejection, exact cosine
 ordering, negative scores, unlimited scans, ordered fetches, concurrent readers,
-optimization, vote ties, abstentions, and hand-calculated ranking denominators.
+completion, optimization, and prefix derivation. `tests/test_retrieval.py` checks
+vote ties, abstentions, and hand-calculated ranking denominators.
 `tests/test_classification.py` checks that deeper rankings do not expand saved
 voting support. `tests/test_matroyshka_sweep.py` and `tests/test_tracking.py` cover
 metric propagation. Historical reports remain unchanged when metrics evolve.

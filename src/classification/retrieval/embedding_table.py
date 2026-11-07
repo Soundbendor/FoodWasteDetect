@@ -1,0 +1,444 @@
+"""Embedding tables: headed LanceDB tables of records and vectors, with exact cosine search.
+
+This module is the only place that knows storage column names, schema metadata keys, the
+record-to-row mapping, or LanceDB and Arrow calls. Callers work in domain terms: roles,
+source keys, records, and vectors.
+"""
+
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal, Self
+
+import numpy as np
+import pyarrow as pa
+from lancedb.db import LanceDBConnection
+from lancedb.table import LanceTable
+from numpy.typing import NDArray
+from pydantic import BaseModel, ConfigDict, PositiveInt, ValidationError
+
+from classification.schemas import Neighbor, PointRecord, SourceKey
+
+type TableRole = Literal["reference", "validation_cache"]
+
+# Version of the store-owned header format; tables recording another version are legacy.
+SCHEMA_VERSION = 1
+_HEADER_KEY = "classification.embedding_table"
+_SNAPSHOT_KEY = "classification.creation_snapshot"
+_ADR = "docs/adr/0001-embedding-table-header.md"
+
+_STRING_COLUMNS = ("id", "class", "source_kind", "source_identity", "value")
+_VECTOR = "vector"
+
+
+class EmbeddingTableError(ValueError):
+    """An embedding table cannot be used as requested."""
+
+
+class LegacyTableError(EmbeddingTableError):
+    """A table lacks a valid header for the current schema version and must be rebuilt."""
+
+
+@dataclass(frozen=True)
+class PrefixSource:
+    """The table a prefix table was derived from, and that table's dimension."""
+
+    table: str
+    dimension: int
+
+
+class _Header(BaseModel):
+    """Store-owned table header, written once at creation and never rewritten."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    schema_version: int
+    role: TableRole
+    dimension: PositiveInt
+    source_table: str | None = None
+    source_dimension: PositiveInt | None = None
+
+    @property
+    def prefix_source(self) -> PrefixSource | None:
+        if self.source_table is None or self.source_dimension is None:
+            return None
+        return PrefixSource(self.source_table, self.source_dimension)
+
+
+class EmbeddingTable:
+    """A reference table or validation cache stored in one local LanceDB table.
+
+    Every table carries a header recording its schema version, role, dimension, and,
+    for prefix tables, the source table and source dimension. The experiment's
+    creation snapshot is stored verbatim beside it. Opening a table without a valid
+    header raises ``LegacyTableError``; opening it under another role raises
+    ``EmbeddingTableError``.
+
+    Attributes:
+        uri: Resolved database directory.
+        name: Table name.
+    """
+
+    def __init__(self, uri: Path, table: LanceTable, header: _Header) -> None:
+        self.uri = uri
+        self.name = table.name
+        self._table = table
+        self._header = header
+
+    @staticmethod
+    def exists(uri: str | Path, name: str) -> bool:
+        """Check for a table without creating a missing database directory."""
+        path = _resolve(uri)
+        return path.is_dir() and name in LanceDBConnection(path)
+
+    @classmethod
+    def open(cls, uri: str | Path, name: str, role: TableRole) -> Self:
+        """Open an existing table under the given role, without creating storage.
+
+        Raises:
+            FileNotFoundError: If the database directory does not exist.
+            LegacyTableError: If the table has no valid current header.
+            EmbeddingTableError: If the table's role differs from ``role``.
+        """
+        path = _resolve(uri)
+        if not path.is_dir():
+            raise FileNotFoundError(f"LanceDB database does not exist: {path}")
+        table = LanceDBConnection(path).open_table(name)
+        header = _read_header(table)
+        if header.role != role:
+            raise EmbeddingTableError(
+                f"Table {name!r} is a {header.role} table, not a {role} table"
+            )
+        return cls(path, table, header)
+
+    @classmethod
+    def create(
+        cls, uri: str | Path, name: str, role: TableRole, dimension: int, *, snapshot: str
+    ) -> Self:
+        """Create an empty table with a header and creation snapshot; refuse existing names.
+
+        Args:
+            uri: Local database directory, created when absent.
+            name: Table name.
+            role: Reference table or validation cache.
+            dimension: Fixed vector width.
+            snapshot: Creation snapshot, stored verbatim and never rewritten.
+        """
+        header = _Header(schema_version=SCHEMA_VERSION, role=role, dimension=dimension)
+        return cls._create(_resolve(uri), name, header, snapshot)
+
+    @classmethod
+    def _create(
+        cls,
+        path: Path,
+        name: str,
+        header: _Header,
+        snapshot: str,
+        rows: pa.RecordBatchReader | None = None,
+    ) -> Self:
+        schema = _schema(header, snapshot)
+        table = LanceDBConnection(path).create_table(
+            name, data=rows, schema=schema, mode="create", exist_ok=False
+        )
+        return cls(path, table, header)
+
+    @classmethod
+    def open_or_create(
+        cls,
+        uri: str | Path,
+        name: str,
+        role: TableRole,
+        dimension: Callable[[], int],
+        *,
+        snapshot: str,
+    ) -> Self:
+        """Open an existing table under ``role``, or create one when the name is absent.
+
+        Args:
+            uri: Local database directory.
+            name: Table name.
+            role: Reference table or validation cache.
+            dimension: Returns the vector width; called only when creating, so an
+                existing table never constructs an encoder.
+            snapshot: Creation snapshot; ignored for an existing table.
+
+        Returns:
+            The opened or created table.
+        """
+        if cls.exists(uri, name):
+            return cls.open(uri, name, role)
+        return cls.create(uri, name, role, dimension(), snapshot=snapshot)
+
+    @property
+    def role(self) -> TableRole:
+        """Return the role recorded in the header."""
+        return self._header.role
+
+    @property
+    def dimension(self) -> int:
+        """Return the vector width recorded in the header."""
+        return self._header.dimension
+
+    @property
+    def prefix_source(self) -> PrefixSource | None:
+        """Return the source of a prefix table, or None for a directly built table."""
+        return self._header.prefix_source
+
+    @property
+    def creation_snapshot(self) -> str:
+        """Return the creation snapshot exactly as it was written."""
+        return _metadata(self._table)[_SNAPSHOT_KEY]
+
+    def derive_prefix(self, destination: str, dimension: int, *, batch_size: int) -> Self:
+        """Open or create a prefix table holding this table's rows at a smaller dimension.
+
+        An existing destination is opened under this table's role without reading this
+        table. Otherwise one streaming creation copies every row, record ID, and
+        metadata value, replacing each vector with its exact float32 prefix. The new
+        header keeps this table's role and records this table as the source; the
+        creation snapshot is copied verbatim.
+
+        Args:
+            destination: Name of the prefix table in the same database.
+            dimension: Prefix width, at most this table's dimension.
+            batch_size: Rows per streamed batch.
+
+        Returns:
+            The prefix table.
+
+        Raises:
+            EmbeddingTableError: If ``dimension`` exceeds this table's dimension.
+        """
+        if type(self).exists(self.uri, destination):
+            return type(self).open(self.uri, destination, self.role)
+        if dimension > self.dimension:
+            raise EmbeddingTableError(
+                f"Prefix width {dimension} exceeds the stored width {self.dimension} "
+                f"of table {self.name!r}"
+            )
+        header = _Header(
+            schema_version=SCHEMA_VERSION,
+            role=self.role,
+            dimension=dimension,
+            source_table=self.name,
+            source_dimension=self.dimension,
+        )
+        snapshot = self.creation_snapshot
+        schema = _schema(header, snapshot)
+        rows = pa.RecordBatchReader.from_batches(
+            schema, _prefix_batches(self._table, schema, dimension, batch_size)
+        )
+        return type(self)._create(self.uri, destination, header, snapshot, rows)
+
+    def append(
+        self,
+        records: Sequence[PointRecord],
+        vectors: np.ndarray[tuple[int, int], np.dtype[np.float32 | np.float64]],
+    ) -> None:
+        """Append records paired with vectors; malformed vectors fail backend validation.
+
+        Raises:
+            ValueError: If the record and vector counts differ; nothing is written.
+        """
+        if len(records) != len(vectors):
+            raise ValueError("Record/vector count mismatch")
+        self._table.add(
+            [_row(record, vector) for record, vector in zip(records, vectors, strict=True)],
+            on_bad_vectors="error",
+        )
+
+    def mark_complete(self, expected: Iterable[SourceKey]) -> None:
+        """Verify that every expected source key is stored; optimize reference tables.
+
+        Validation caches are never optimized.
+
+        Args:
+            expected: Source keys the finished table must contain; repeats count once.
+                Extra stored rows are allowed.
+
+        Raises:
+            EmbeddingTableError: If any expected key is absent, stating how many;
+                nothing is optimized.
+        """
+        unique = set(expected)
+        absent = self.missing(unique)
+        if absent:
+            raise EmbeddingTableError(
+                f"Table {self.name!r} is missing {len(absent)} of {len(unique)} "
+                "expected source keys; resume the build before using it"
+            )
+        if self.role == "reference":
+            self.optimize()
+
+    def optimize(self) -> None:
+        """Compact with LanceDB's default maintenance and version-retention policy."""
+        self._table.optimize()
+
+    def class_counts(self) -> Counter[str]:
+        """Count every stored row by class label without reading vectors."""
+        return self._column_counts("class")
+
+    def source_counts(self) -> Counter[str]:
+        """Count every stored row, including duplicate source keys, by source kind.
+
+        Streams only the source-kind column; vectors are never read.
+        """
+        return self._column_counts("source_kind")
+
+    def _column_counts(self, column: str) -> Counter[str]:
+        counts: Counter[str] = Counter()
+        for batch in self._table.search().select([column]).limit(None).to_batches():
+            counts.update(batch.column(0).to_pylist())
+        return counts
+
+    def missing(self, keys: Iterable[SourceKey]) -> list[SourceKey]:
+        """Return requested source keys absent from the table.
+
+        Args:
+            keys: Source keys; repeats are allowed.
+
+        Returns:
+            Each absent key once, in first-request order, from one metadata-only
+            scan that never reads vectors.
+        """
+        rows = self._table.search().select(["source_kind", "source_identity"]).limit(None)
+        stored = frozenset((row["source_kind"], row["source_identity"]) for row in rows.to_list())
+        return [key for key in dict.fromkeys(keys) if key not in stored]
+
+    def rows(self) -> list[tuple[PointRecord, NDArray[np.float32]]]:
+        """Read every stored record with its vector, in storage order.
+
+        Intended for inspection and small tables; it loads every vector.
+        """
+        return [
+            (_record(row), np.asarray(row[_VECTOR], dtype=np.float32))
+            for row in self._table.search().limit(None).to_list()
+        ]
+
+    def fetch_vectors(self, keys: Sequence[SourceKey]) -> NDArray[np.float32]:
+        """Fetch validation-cache vectors in the requested key order, including repeats.
+
+        Empty input returns shape ``(0, dimension)``.
+
+        Raises:
+            EmbeddingTableError: If this table is not a validation cache.
+            KeyError: If a requested key is absent; storage errors propagate.
+        """
+        self._require_role("validation_cache", "fetch vectors from")
+        if not keys:
+            return np.empty((0, self.dimension), dtype=np.float32)
+
+        def literal(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        predicate = " OR ".join(
+            f"(source_kind = {literal(kind)} AND source_identity = {literal(identity)})"
+            for kind, identity in keys
+        )
+        rows = (
+            self._table.search()
+            .where(predicate)
+            .select(["source_kind", "source_identity", _VECTOR])
+            .limit(None)
+            .to_list()
+        )
+        vectors = {(row["source_kind"], row["source_identity"]): row[_VECTOR] for row in rows}
+        return np.asarray([vectors[key] for key in keys], dtype=np.float32)
+
+    def query(
+        self, vector: np.ndarray[tuple[int], np.dtype[np.float32 | np.float64]], k: int
+    ) -> list[Neighbor]:
+        """Retrieve exact cosine neighbours from a reference table, in backend order.
+
+        Raises:
+            EmbeddingTableError: If this table is not a reference table.
+        """
+        self._require_role("reference", "query")
+        points = (
+            self._table.search(vector.tolist())
+            .distance_type("cosine")
+            .bypass_vector_index()
+            .limit(k)
+            .to_list()
+        )
+        return [
+            Neighbor(id=p["id"], label=p["class"], score=1 - float(p["_distance"])) for p in points
+        ]
+
+    def _require_role(self, role: TableRole, action: str) -> None:
+        if self.role != role:
+            raise EmbeddingTableError(
+                f"Cannot {action} table {self.name!r}: it is a {self.role} table, not a {role} table"
+            )
+
+
+def _resolve(uri: str | Path) -> Path:
+    return Path(uri).expanduser().resolve()
+
+
+def _schema(header: _Header, snapshot: str) -> pa.Schema:
+    fields = [pa.field(name, pa.string(), nullable=False) for name in _STRING_COLUMNS]
+    fields.append(pa.field(_VECTOR, pa.list_(pa.float32(), header.dimension), nullable=False))
+    metadata = {_HEADER_KEY: header.model_dump_json(), _SNAPSHOT_KEY: snapshot}
+    return pa.schema(fields, metadata=metadata)
+
+
+def _metadata(table: LanceTable) -> dict[str, str]:
+    raw = table.schema.metadata or {}
+    return {key.decode(): value.decode() for key, value in raw.items()}
+
+
+def _read_header(table: LanceTable) -> _Header:
+    """Parse and check the header; any missing, stale, or inconsistent header is legacy."""
+    metadata = _metadata(table)
+    try:
+        header = _Header.model_validate_json(metadata[_HEADER_KEY])
+    except (KeyError, ValidationError):
+        header = None
+    if (
+        header is None
+        or header.schema_version != SCHEMA_VERSION
+        or _SNAPSHOT_KEY not in metadata
+        or table.schema.remove_metadata() != _schema(header, "").remove_metadata()
+    ):
+        raise LegacyTableError(
+            f"Table {table.name!r} has no valid embedding table header for schema version "
+            f"{SCHEMA_VERSION}. Rebuild it under a new table name; legacy tables are "
+            f"refused, never migrated (ADR-0001, {_ADR})."
+        )
+    return header
+
+
+def _row(record: PointRecord, vector: NDArray[Any]) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "class": record.label,
+        "source_kind": record.source_kind,
+        "source_identity": record.source_identity,
+        "value": record.value,
+        _VECTOR: vector.tolist(),
+    }
+
+
+def _record(row: dict[str, Any]) -> PointRecord:
+    return PointRecord(
+        label=row["class"],
+        source_kind=row["source_kind"],
+        source_identity=row["source_identity"],
+        value=row["value"],
+        id=row["id"],
+    )
+
+
+def _prefix_batches(
+    source: LanceTable, schema: pa.Schema, dimension: int, batch_size: int
+) -> Iterator[pa.RecordBatch]:
+    """Stream every source row, replacing only the vector column with its prefix."""
+    position = schema.get_field_index(_VECTOR)
+    vector_type = schema.field(position).type
+    for batch in source.search().limit(None).to_batches(batch_size=batch_size):
+        vectors = np.asarray(batch.column(position).to_pylist(), dtype=np.float32)
+        arrays = list(batch.columns)
+        arrays[position] = pa.array(vectors[:, :dimension].tolist(), type=vector_type)
+        yield pa.RecordBatch.from_arrays(arrays, schema=schema)

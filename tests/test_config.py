@@ -1,5 +1,6 @@
 """Strict configuration validation without datasets, encoders, or services."""
 
+import json
 from itertools import product
 from pathlib import Path
 
@@ -221,3 +222,46 @@ def test_optional_services_and_report_serialization():
 def test_python_api_requires_model():
     with pytest.raises(TypeError, match="ExperimentConfig"):
         Experiment(config_data())
+
+
+@pytest.mark.parametrize("flags", list(product([False, True], repeat=3))[1:])
+@pytest.mark.parametrize("cap", [None, 3])
+@pytest.mark.parametrize("truncate", [None, 2])
+def test_full_config_json_round_trip(flags, cap, truncate):
+    config = ExperimentConfig.model_validate(
+        config_data(
+            dataset={"name": "FoodX251", "root": "/synthetic/raw"},
+            embedding={
+                "model_id": "jinaai/jina-clip-v2",
+                "truncate_dim": truncate,
+                "device": "cpu",
+                "vertex": {"project": "synthetic-project"},
+            },
+            **dict(
+                zip(
+                    ("embed_images", "embed_class_labels", "embed_descriptions"), flags, strict=True
+                )
+            ),
+            n_imgs_per_class=cap,
+            description_count=5,
+            k=99,
+            ollama=dict(
+                binary_path="/synthetic/ollama",
+                host="http://localhost:11434",
+                startup_timeout=10.0,
+                request_timeout=30.0,
+            ),
+        )
+    )
+    encoded = config.model_dump_json()
+    assert ExperimentConfig.model_validate_json(encoded) == config
+    settings = json.loads(encoded)
+    assert settings == config.model_dump(mode="json")
+    assert "vector_dimension" not in settings
+    assert settings["embedding"]["batch_size"] == 32
+    assert settings["embedding"]["vertex"]["location"] == "global"
+    assert settings["embedding"]["vertex"]["project"] == "synthetic-project"
+    assert settings["ollama"]["llm"] is None
+    assert settings["descriptions_file"] is None
+    assert settings["lancedb"]["validation_table"] is None
+    assert settings["cache_validation_embeddings"] is False
