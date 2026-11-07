@@ -12,17 +12,19 @@ from lancedb.db import LanceDBConnection
 from classification.retrieval.embedding_table import (
     EmbeddingTable,
     EmbeddingTableError,
+    IncompatibleTableError,
     IncompleteTableError,
     LegacyTableError,
     PrefixSource,
 )
 from classification.retrieval.voting import classify
 from classification.schemas import PointRecord
+from table_helpers import SYNTHETIC_ENCODER, SYNTHETIC_INPUTS, fingerprints
 
 
 @pytest.mark.parametrize("role", ["reference", "validation_cache"])
 def test_new_table_header_round_trips_on_reopen(tmp_path, role):
-    created = EmbeddingTable.create(tmp_path / "db", "table", role, 3, snapshot='{"kept": 1}')
+    created = EmbeddingTable.create(tmp_path / "db", "table", role, 3, snapshot='{"kept": 1}', **fingerprints(role))
 
     reopened = EmbeddingTable.open(tmp_path / "db", "table", role)
 
@@ -53,12 +55,29 @@ def legacy_table(uri, name, metadata):
         },
         {
             "classification.embedding_table": (
-                '{"schema_version": 1, "role": "reference", "dimension": 3}'
+                '{"schema_version": 1, "role": "reference", "dimension": 2}'
+            ),
+            "classification.creation_snapshot": "",
+        },
+        {
+            "classification.embedding_table": (
+                '{"schema_version": 2, "role": "reference", "dimension": 3,'
+                ' "encoder": {}, "inputs": {}}'
+            ),
+            "classification.creation_snapshot": "",
+        },
+        {
+            "classification.embedding_table": (
+                '{"schema_version": 2, "role": "validation_cache", "dimension": 2,'
+                ' "encoder": {}, "inputs": {}}'
             ),
             "classification.creation_snapshot": "",
         },
     ],
-    ids=["no-metadata", "old-snapshot-only", "malformed", "other-version", "wrong-width"],
+    ids=[
+        "no-metadata", "old-snapshot-only", "malformed", "other-version",
+        "before-fingerprints", "wrong-width", "cache-with-inputs",
+    ],
 )
 @pytest.mark.parametrize("role", ["reference", "validation_cache"])
 def test_tables_without_a_valid_header_are_refused_as_legacy(tmp_path, metadata, role):
@@ -67,8 +86,7 @@ def test_tables_without_a_valid_header_are_refused_as_legacy(tmp_path, metadata,
     for open_table in (
         lambda: EmbeddingTable.open(tmp_path / "db", "old", role),
         lambda: EmbeddingTable.open_or_create(
-            tmp_path / "db", "old", role, lambda: 2, snapshot="new"
-        ),
+            tmp_path / "db", "old", role, lambda: 2, snapshot="new", **fingerprints(role)),
     ):
         with pytest.raises(LegacyTableError, match="Rebuild it under a new table name") as error:
             open_table()
@@ -81,13 +99,12 @@ def test_tables_without_a_valid_header_are_refused_as_legacy(tmp_path, metadata,
     ("reference", "validation_cache"), ("validation_cache", "reference"),
 ])
 def test_opening_under_the_wrong_role_fails(tmp_path, stored, requested):
-    EmbeddingTable.create(tmp_path / "db", "table", stored, 2, snapshot="")
+    EmbeddingTable.create(tmp_path / "db", "table", stored, 2, snapshot="", **fingerprints(stored))
 
     for open_table in (
         lambda: EmbeddingTable.open(tmp_path / "db", "table", requested),
         lambda: EmbeddingTable.open_or_create(
-            tmp_path / "db", "table", requested, lambda: 2, snapshot=""
-        ),
+            tmp_path / "db", "table", requested, lambda: 2, snapshot="", **fingerprints(requested)),
     ):
         with pytest.raises(EmbeddingTableError, match=f"is a {stored} table") as error:
             open_table()
@@ -95,8 +112,8 @@ def test_opening_under_the_wrong_role_fails(tmp_path, stored, requested):
 
 
 def test_validation_caches_refuse_queries_and_reference_tables_refuse_vector_fetches(tmp_path):
-    cache = EmbeddingTable.create(tmp_path / "db", "cache", "validation_cache", 2, snapshot="")
-    reference = EmbeddingTable.create(tmp_path / "db", "reference", "reference", 2, snapshot="")
+    cache = EmbeddingTable.create(tmp_path / "db", "cache", "validation_cache", 2, snapshot="", **fingerprints("validation_cache"))
+    reference = EmbeddingTable.create(tmp_path / "db", "reference", "reference", 2, snapshot="", **fingerprints("reference"))
 
     with pytest.raises(EmbeddingTableError, match="Cannot query table 'cache'"):
         cache.query(np.ones(2), 1)
@@ -113,7 +130,7 @@ def vectors_of(table):
 
 
 def populated(uri, role="reference", dtype=np.float32):
-    table = EmbeddingTable.create(uri, "fixture", role, 2, snapshot="")
+    table = EmbeddingTable.create(uri, "fixture", role, 2, snapshot="", **fingerprints(role))
     kind = "class_name" if role == "reference" else "validation_image"
     records = [PointRecord(label, kind, label, label) for label in ("A", "B", "C")]
     vectors = np.array([[3., 0.], [1., 1.], [-2., 0.]], dtype=dtype)
@@ -145,14 +162,14 @@ def test_existing_names_are_never_recreated(tmp_path):
     table, records, _ = populated(tmp_path / "db")
 
     with pytest.raises(ValueError):
-        EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2, snapshot="other")
+        EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2, snapshot="other", **fingerprints("reference"))
 
     assert records_of(table) == records
     assert table.creation_snapshot == ""
 
 
 def test_full_width_vectors_round_trip_with_cosine_search(tmp_path):
-    table = EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2048, snapshot="")
+    table = EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2048, snapshot="", **fingerprints("reference"))
     records = [PointRecord(label, "class_name", label, label) for label in ("A", "B")]
     vectors = np.zeros((2, 2048), dtype=np.float32)
     vectors[0, -1] = 3
@@ -169,7 +186,7 @@ def test_full_width_vectors_round_trip_with_cosine_search(tmp_path):
 
 
 def test_count_mismatch_and_bad_vectors_append_nothing(tmp_path):
-    table = EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2, snapshot="")
+    table = EmbeddingTable.create(tmp_path / "db", "fixture", "reference", 2, snapshot="", **fingerprints("reference"))
     record = PointRecord("A", "class_name", "A", "A")
     assert table.query(np.array([1., 0.]), 10) == []
 
@@ -200,8 +217,8 @@ def test_database_paths_resolve_home_and_working_directory(tmp_path, monkeypatch
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
 
-    home = EmbeddingTable.create("~/fixtures", "home", "reference", 2, snapshot="")
-    relative = EmbeddingTable.create("fixtures", "relative", "reference", 2, snapshot="")
+    home = EmbeddingTable.create("~/fixtures", "home", "reference", 2, snapshot="", **fingerprints("reference"))
+    relative = EmbeddingTable.create("fixtures", "relative", "reference", 2, snapshot="", **fingerprints("reference"))
 
     assert home.uri == tmp_path / "home" / "fixtures"
     assert relative.uri == tmp_path / "fixtures"
@@ -247,7 +264,7 @@ def test_concurrent_readers_preserve_the_table(tmp_path):
 
 
 def test_vector_fetch_preserves_requested_order_repeats_and_quotes(tmp_path):
-    table = EmbeddingTable.create(tmp_path / "db", "vectors", "validation_cache", 3, snapshot="")
+    table = EmbeddingTable.create(tmp_path / "db", "vectors", "validation_cache", 3, snapshot="", **fingerprints("validation_cache"))
     records = [PointRecord("Apple", "validation_image", f"quoted'{i}", "value") for i in range(26)]
     vectors = np.asarray([[i + 1, i + 2, i + 3] for i in range(26)], dtype=np.float32)
     order = np.random.default_rng(12).permutation(26)
@@ -270,7 +287,7 @@ def test_record_exposes_its_source_key():
 
 
 def test_class_counts_stream_every_row(tmp_path):
-    table = EmbeddingTable.create(tmp_path, "counts", "reference", 2, snapshot="")
+    table = EmbeddingTable.create(tmp_path, "counts", "reference", 2, snapshot="", **fingerprints("reference"))
     assert table.class_counts() == {}
     records = [PointRecord("A" if i % 2 else "B", kind, str(i), "")
                for kind in ("class_name", "description", "training_image") for i in range(1100)]
@@ -281,7 +298,7 @@ def test_class_counts_stream_every_row(tmp_path):
 
 
 def test_source_counts_stream_every_row_including_duplicate_source_keys(tmp_path):
-    table = EmbeddingTable.create(tmp_path, "counts", "reference", 2, snapshot="")
+    table = EmbeddingTable.create(tmp_path, "counts", "reference", 2, snapshot="", **fingerprints("reference"))
     assert table.source_counts() == {}
     records = [PointRecord("A", kind, str(i), "")
                for kind, total in (("class_name", 2), ("training_image", 1500)) for i in range(total)]
@@ -295,7 +312,7 @@ def test_source_counts_stream_every_row_including_duplicate_source_keys(tmp_path
 
 
 def test_optimize_preserves_rows_header_and_search(tmp_path):
-    table = EmbeddingTable.create(tmp_path / "db", "references", "reference", 2, snapshot="kept")
+    table = EmbeddingTable.create(tmp_path / "db", "references", "reference", 2, snapshot="kept", **fingerprints("reference"))
     for i in range(32):
         table.append([PointRecord(str(i), "class_name", str(i), str(i))],
                      np.asarray([[1.0, i + 1.0]], dtype=np.float32))
@@ -314,16 +331,14 @@ def test_optimize_preserves_rows_header_and_search(tmp_path):
 def test_open_or_create_computes_the_dimension_only_when_creating(tmp_path):
     dimension = Mock(return_value=3)
     created = EmbeddingTable.open_or_create(
-        tmp_path / "db", "lazy", "reference", dimension, snapshot="kept"
-    )
+        tmp_path / "db", "lazy", "reference", dimension, snapshot="kept", **fingerprints("reference"))
     assert created.dimension == 3
     dimension.assert_called_once_with()
     created.append([PointRecord("A", "class_name", "A", "A")], np.ones((1, 3)))
 
     reopened = EmbeddingTable.open_or_create(
         tmp_path / "db", "lazy", "reference", Mock(side_effect=AssertionError("encoder")),
-        snapshot="replaced",
-    )
+        snapshot="replaced", **fingerprints("reference"))
 
     assert reopened.dimension == 3
     assert len(reopened.rows()) == 1
@@ -331,7 +346,7 @@ def test_open_or_create_computes_the_dimension_only_when_creating(tmp_path):
 
 
 def test_missing_reports_absent_source_keys_once_in_request_order(tmp_path):
-    table = EmbeddingTable.create(tmp_path / "db", "keys", "reference", 2, snapshot="")
+    table = EmbeddingTable.create(tmp_path / "db", "keys", "reference", 2, snapshot="", **fingerprints("reference"))
     assert table.missing([]) == []
     table.append(
         [PointRecord("A", "class_name", "A", "A"), PointRecord("A", "training_image", "it's", "f")],
@@ -350,7 +365,7 @@ def test_missing_reports_absent_source_keys_once_in_request_order(tmp_path):
 
 def four_rows(tmp_path, role):
     kind = "class_name" if role == "reference" else "validation_image"
-    table = EmbeddingTable.create(tmp_path / "db", "table", role, 2, snapshot="")
+    table = EmbeddingTable.create(tmp_path / "db", "table", role, 2, snapshot="", **fingerprints(role))
     for i in range(4):
         table.append([PointRecord("A", kind, str(i), str(i))], np.ones((1, 2)))
     return table, [(kind, str(i)) for i in range(4)]
@@ -459,6 +474,130 @@ def test_tables_written_before_completion_markers_open_as_incomplete(tmp_path):
     assert EmbeddingTable.open_complete(table.uri, "table", "reference", expected=list).is_complete
 
 
+# Fingerprints
+
+
+@pytest.mark.parametrize("role", ["reference", "validation_cache"])
+def test_fingerprints_round_trip_on_reopen(tmp_path, role):
+    EmbeddingTable.create(tmp_path / "db", "table", role, 2, snapshot="", **fingerprints(role))
+
+    reopened = EmbeddingTable.open(tmp_path / "db", "table", role)
+
+    assert reopened.encoder_fingerprint == SYNTHETIC_ENCODER
+    expected_inputs = SYNTHETIC_INPUTS if role == "reference" else None
+    assert reopened.inputs_fingerprint == expected_inputs
+
+
+def test_reference_tables_require_inputs_and_caches_refuse_them(tmp_path):
+    with pytest.raises(EmbeddingTableError, match="requires an inputs fingerprint"):
+        EmbeddingTable.create(
+            tmp_path / "db", "reference", "reference", 2, snapshot="",
+            encoder=SYNTHETIC_ENCODER, inputs=None,
+        )
+    with pytest.raises(EmbeddingTableError, match="has no inputs fingerprint"):
+        EmbeddingTable.create(
+            tmp_path / "db", "cache", "validation_cache", 2, snapshot="",
+            encoder=SYNTHETIC_ENCODER, inputs=SYNTHETIC_INPUTS,
+        )
+    assert not EmbeddingTable.exists(tmp_path / "db", "reference")
+    assert not EmbeddingTable.exists(tmp_path / "db", "cache")
+
+
+@pytest.mark.parametrize("role", ["reference", "validation_cache"])
+def test_resuming_with_a_different_encoder_lists_each_differing_setting(tmp_path, role):
+    EmbeddingTable.create(tmp_path / "db", "table", role, 2, snapshot="", **fingerprints(role))
+    current = fingerprints(role)
+    current["encoder"] = dict(SYNTHETIC_ENCODER, **{
+        "embedding.model_id": "other", "embedding.truncate_dim": 64,
+    })
+
+    with pytest.raises(IncompatibleTableError) as error:
+        EmbeddingTable.open_or_create(
+            tmp_path / "db", "table", role, Mock(side_effect=AssertionError("encoder")),
+            snapshot="", **current,
+        )
+
+    assert error.value.differences == {
+        "embedding.model_id": ("synthetic", "other"),
+        "embedding.truncate_dim": (None, 64),
+    }
+    message = str(error.value)
+    assert "embedding.model_id: stored 'synthetic', required 'other'" in message
+    assert "embedding.truncate_dim: stored None, required 64" in message
+    assert "new table name" in message
+    assert isinstance(error.value, EmbeddingTableError)
+    assert not isinstance(error.value, LegacyTableError)
+
+
+def test_resuming_a_reference_table_with_different_inputs_fails(tmp_path):
+    EmbeddingTable.create(
+        tmp_path / "db", "table", "reference", 2, snapshot="", **fingerprints("reference")
+    )
+    changed = dict(SYNTHETIC_INPUTS, **{"n_imgs_per_class": 5, "vocabulary_sha256": "abc"})
+
+    with pytest.raises(IncompatibleTableError) as error:
+        EmbeddingTable.open_or_create(
+            tmp_path / "db", "table", "reference", lambda: 2, snapshot="",
+            encoder=SYNTHETIC_ENCODER, inputs=changed,
+        )
+
+    assert error.value.differences == {
+        "n_imgs_per_class": (None, 5),
+        "vocabulary_sha256": (None, "abc"),
+    }
+
+
+@pytest.mark.parametrize("role", ["reference", "validation_cache"])
+def test_resuming_with_matching_fingerprints_reopens_the_table(tmp_path, role):
+    EmbeddingTable.create(tmp_path / "db", "table", role, 2, snapshot="kept", **fingerprints(role))
+
+    reopened = EmbeddingTable.open_or_create(
+        tmp_path / "db", "table", role, lambda: 3, snapshot="new", **fingerprints(role)
+    )
+
+    assert (reopened.dimension, reopened.creation_snapshot) == (2, "kept")
+
+
+def test_opening_a_complete_table_requires_the_given_encoder_and_dimension(tmp_path):
+    table = EmbeddingTable.create(
+        tmp_path / "db", "table", "reference", 2, snapshot="", **fingerprints("reference")
+    )
+    table.mark_complete([])
+    other = dict(SYNTHETIC_ENCODER, **{"embedding.model_id": "other"})
+
+    def open_complete(**required):
+        return EmbeddingTable.open_complete(
+            tmp_path / "db", "table", "reference", expected=list, **required
+        )
+
+    with pytest.raises(IncompatibleTableError) as error:
+        open_complete(encoder=other, dimension=3)
+    assert error.value.differences == {
+        "embedding.model_id": ("synthetic", "other"),
+        "dimension": (2, 3),
+    }
+    with pytest.raises(IncompatibleTableError, match="dimension: stored 2, required 3"):
+        open_complete(dimension=3)
+    assert open_complete(encoder=SYNTHETIC_ENCODER, dimension=2).is_complete
+    assert open_complete().is_complete
+
+
+def test_require_compatible_compares_against_another_tables_values(tmp_path):
+    reference = EmbeddingTable.create(
+        tmp_path / "db", "reference", "reference", 2, snapshot="", **fingerprints("reference")
+    )
+    cache = EmbeddingTable.create(
+        tmp_path / "db", "cache", "validation_cache", 2, snapshot="",
+        encoder=dict(SYNTHETIC_ENCODER, **{"embedding.vertex.classification_prompt": True}),
+    )
+
+    reference.require_compatible(dimension=cache.dimension)
+    with pytest.raises(IncompatibleTableError) as error:
+        reference.require_compatible(encoder=cache.encoder_fingerprint, dimension=cache.dimension)
+
+    assert error.value.differences == {"embedding.vertex.classification_prompt": (None, True)}
+
+
 # Prefix tables
 
 
@@ -471,7 +610,7 @@ PREFIX_VECTORS = np.array([[0.1, 0.2, 0.3, 0.4], [-1.5, 2.25, 1e-8, 7.0]], dtype
 
 @pytest.fixture
 def source(tmp_path):
-    table = EmbeddingTable.create(tmp_path / "db", "source", "reference", 4, snapshot="snapshot")
+    table = EmbeddingTable.create(tmp_path / "db", "source", "reference", 4, snapshot="snapshot", **fingerprints("reference"))
     table.append(PREFIX_ROWS, PREFIX_VECTORS)
     return table
 
@@ -493,7 +632,7 @@ def test_prefix_keeps_records_and_replaces_vectors_with_float32_prefixes(source)
 
 @pytest.mark.parametrize("snapshot", ['{"embedding": {"truncate_dim": 3}}', "{broken", ""])
 def test_prefix_creation_snapshot_is_identical_to_its_source(tmp_path, snapshot):
-    source = EmbeddingTable.create(tmp_path / "db", "source", "reference", 4, snapshot=snapshot)
+    source = EmbeddingTable.create(tmp_path / "db", "source", "reference", 4, snapshot=snapshot, **fingerprints("reference"))
     source.append(PREFIX_ROWS, PREFIX_VECTORS)
 
     derived = source.derive_prefix("source_d2", 2, batch_size=1)
@@ -506,8 +645,27 @@ def test_prefix_creation_snapshot_is_identical_to_its_source(tmp_path, snapshot)
     assert EmbeddingTable.open(source.uri, "source", "reference").creation_snapshot == snapshot
 
 
+def test_prefix_tables_inherit_their_sources_fingerprints(source, tmp_path):
+    cache = EmbeddingTable.create(
+        tmp_path / "db", "cache", "validation_cache", 4, snapshot="",
+        **fingerprints("validation_cache"),
+    )
+
+    reference_prefix = source.derive_prefix("source_d2", 2, batch_size=1)
+    cache_prefix = cache.derive_prefix("cache_d2", 2, batch_size=1)
+
+    for table in (reference_prefix, EmbeddingTable.open(source.uri, "source_d2", "reference")):
+        assert table.encoder_fingerprint == source.encoder_fingerprint == SYNTHETIC_ENCODER
+        assert table.inputs_fingerprint == source.inputs_fingerprint == SYNTHETIC_INPUTS
+    assert cache_prefix.encoder_fingerprint == SYNTHETIC_ENCODER
+    assert cache_prefix.inputs_fingerprint is None
+    reference_prefix.require_compatible(
+        encoder=cache_prefix.encoder_fingerprint, dimension=cache_prefix.dimension
+    )
+
+
 def test_prefix_of_a_validation_cache_is_a_validation_cache(tmp_path):
-    cache = EmbeddingTable.create(tmp_path / "db", "cache", "validation_cache", 4, snapshot="")
+    cache = EmbeddingTable.create(tmp_path / "db", "cache", "validation_cache", 4, snapshot="", **fingerprints("validation_cache"))
     keys = [("validation_image", "b"), ("validation_image", "a")]
     cache.append([PointRecord("A", kind, identity, "") for kind, identity in keys], PREFIX_VECTORS)
 

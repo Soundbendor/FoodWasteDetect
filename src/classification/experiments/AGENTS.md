@@ -13,12 +13,15 @@ source-dimension checks) and derives prefix tables through
 | Task | Read before changing |
 | --- | --- |
 | Stages, configuration, or description inputs | [Experiment lifecycle](../../../docs/classification/experiments.md#lifecycle-and-configuration) |
+| Fingerprinted settings or incompatible-table refusal | [Fingerprints and incompatible tables](../../../docs/classification/experiments.md#fingerprints-and-incompatible-tables) |
 | Reference selection, restart behavior, or validation caching | [Builds and resumption](../../../docs/classification/experiments.md#reference-builds-and-resumption), [validation caching](../../../docs/classification/experiments.md#validation-caching) |
 | JSON output or failure handling | [Artifact and failure contract](../../../docs/classification/experiments.md#artifact-and-failure-contract) |
 | Cached dimension sweeps | [Matryoshka sweep](../../../docs/classification/experiments.md#cached-matryoshka-sweep) |
 | Query depth, voting, or reported metrics | [Retrieval contract](../../../docs/classification/retrieval.md) |
 | Progress bars or W&B publication | [Tracking](../../../docs/classification/tracking.md) |
 
+`fingerprints.py` alone decides which settings change vectors; pass its
+fingerprints to every `EmbeddingTable` resume or evaluation open.
 `Experiment.evaluate()` completes and marks an enabled cache; `evaluate_cached()`
 reads existing vectors regardless of the cache flag. Evaluation opens tables with
 `EmbeddingTable.open_complete()`, supplying expected keys from `IndexBuilder`;

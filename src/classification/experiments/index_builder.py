@@ -13,15 +13,17 @@ from classification.datasets.image_dataset import FoodX251ImageDataset
 from classification.encoders.base import Embedder
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions, text_references
-from classification.retrieval.embedding_table import EmbeddingTable, TableRole
+from classification.experiments.fingerprints import encoder_fingerprint, inputs_fingerprint
+from classification.retrieval.embedding_table import EmbeddingTable, Fingerprint, TableRole
 from classification.schemas import PointRecord, SourceKey
 
 
 class IndexBuilder:
     """Build or resume reference tables and validation caches by source key.
 
-    Request the encoder only for missing source keys. Persist each completed batch
-    before advancing progress; propagate failures without rollback.
+    Resume only tables whose fingerprints match the configuration. Request the
+    encoder only for missing source keys. Persist each completed batch before
+    advancing progress; propagate failures without rollback.
     """
 
     def __init__(
@@ -48,17 +50,6 @@ class IndexBuilder:
     @property
     def embedder(self) -> Embedder:
         return self._get_embedder()
-
-    def _get_text_inputs(self) -> list[PointRecord]:
-        """Read enabled descriptions and construct text references without generation."""
-        descriptions = (
-            load_descriptions(self.descriptions_path) if self.config.embed_descriptions else None
-        )
-        return text_references(
-            self.classes,
-            include_class_labels=self.config.embed_class_labels,
-            descriptions=descriptions,
-        )
 
     def _insert_text_records(
         self,
@@ -96,7 +87,10 @@ class IndexBuilder:
                 table.append(records, vectors)
                 progress.update(len(records))
 
-    def _prepare_reference_inputs(self) -> tuple[Dataset | None, list[PointRecord]]:
+    def _prepare_reference_inputs(
+        self,
+    ) -> tuple[Dataset | None, list[PointRecord], Fingerprint]:
+        """Select images, read the vocabulary once, and fingerprint the inputs."""
         images = None
         if self.config.embed_images:
             images = self.dataset.select_images(
@@ -106,7 +100,15 @@ class IndexBuilder:
             missing = set(self.classes) - set(images["class"])
             if missing:
                 raise ValueError(f"Missing usable training references for {missing}")
-        return images, self._get_text_inputs()
+        vocabulary = (
+            load_descriptions(self.descriptions_path) if self.config.embed_descriptions else None
+        )
+        records = text_references(
+            self.classes,
+            include_class_labels=self.config.embed_class_labels,
+            descriptions=vocabulary,
+        )
+        return images, records, inputs_fingerprint(self.config, vocabulary)
 
     def expected_reference_keys(self) -> list[SourceKey]:
         """Return the source keys a complete reference table holds under this configuration.
@@ -121,7 +123,8 @@ class IndexBuilder:
         Raises:
             ValueError: If selected training images do not cover every class.
         """
-        return _reference_keys(*self._prepare_reference_inputs())
+        images, records, _ = self._prepare_reference_inputs()
+        return _reference_keys(images, records)
 
     def expected_validation_keys(self) -> list[SourceKey]:
         """Return the source keys a complete validation cache holds.
@@ -131,14 +134,21 @@ class IndexBuilder:
         """
         return _validation_keys(self.dataset.validation_set())
 
-    def _open_or_create(self, table: str, role: TableRole) -> EmbeddingTable:
-        """Open the named table, creating it with the encoder width only when absent."""
+    def _open_or_create(
+        self, table: str, role: TableRole, inputs: Fingerprint | None = None
+    ) -> EmbeddingTable:
+        """Resume the named table if its fingerprints match, or create it when absent.
+
+        The encoder width is computed only when creating.
+        """
         return EmbeddingTable.open_or_create(
             self.uri,
             table,
             role,
             lambda: self.embedder.dimension,
             snapshot=self.config.model_dump_json(),
+            encoder=encoder_fingerprint(self.config),
+            inputs=inputs,
         )
 
     def _pending_images(self, images: Dataset, kind: str, missing: list[SourceKey]) -> Dataset:
@@ -151,7 +161,8 @@ class IndexBuilder:
         """Build or resume the reference table, then optimize it and mark it complete.
 
         Reference inputs are validated before the table is opened or the encoder is
-        constructed. A table already marked complete is returned without a
+        constructed. An existing table must record the configuration's encoder and
+        inputs fingerprints. A table already marked complete is returned without a
         missing-key scan, optimization, or encoder. Otherwise only missing source
         keys are embedded.
 
@@ -160,14 +171,15 @@ class IndexBuilder:
 
         Raises:
             ValueError: If no reference inputs are selected.
+            IncompatibleTableError: If an existing table records other fingerprints.
             IncompleteTableError: If expected source keys are still missing after
                 insertion.
         """
-        images, records = self._prepare_reference_inputs()
+        images, records, inputs = self._prepare_reference_inputs()
         expected = _reference_keys(images, records)
         if not expected:
             raise ValueError("No reference records selected - check dataset and config.")
-        table = self._open_or_create(self.table, "reference")
+        table = self._open_or_create(self.table, "reference", inputs)
         if table.is_complete:
             logging.info("Reference table %r is already complete", table.name)
             return table
@@ -194,7 +206,8 @@ class IndexBuilder:
     def build_validation_cache(self, table_name: str) -> EmbeddingTable:
         """Complete missing validation embeddings, then mark the unoptimized cache complete.
 
-        A cache already marked complete is returned without a missing-key scan or
+        An existing cache must record the configuration's encoder fingerprint. A
+        cache already marked complete is returned without a missing-key scan or
         encoder.
 
         Args:
@@ -204,6 +217,8 @@ class IndexBuilder:
             The complete validation cache, never optimized.
 
         Raises:
+            IncompatibleTableError: If an existing cache records another encoder
+                fingerprint.
             IncompleteTableError: If validation source keys are still missing after
                 insertion.
         """

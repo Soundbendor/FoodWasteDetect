@@ -7,7 +7,7 @@ follow the [glossary](../../GLOSSARY.md).
 
 | Module | Responsibility |
 | --- | --- |
-| `retrieval/embedding_table.py` | `EmbeddingTable`: headed table lifecycle, role checks, completion markers, build operations (open or create, missing keys, mark complete), appends, record and vector reads, counts, optimization, search, and prefix-table derivation |
+| `retrieval/embedding_table.py` | `EmbeddingTable`: headed table lifecycle, role checks, fingerprint and dimension compatibility, completion markers, build operations (open or create, missing keys, mark complete), appends, record and vector reads, counts, optimization, search, and prefix-table derivation |
 | `retrieval/voting.py` | Pure `classify()` majority vote |
 | `retrieval/metrics.py` | Pure per-query ranking and aggregate classification/retrieval metrics |
 | `schemas.py` | `PointRecord`, `SourceKey`, neighbor, prediction, and retrieval-metric types |
@@ -27,9 +27,9 @@ expansion, independently of `output_dir`. `EmbeddingTable.exists(uri, name)` and
 | Factory | Contract |
 | --- | --- |
 | `open(uri, name, role)` | Open an existing table; a missing directory raises `FileNotFoundError`, a missing table propagates LanceDB's `ValueError` |
-| `open_complete(uri, name, role, *, expected)` | Open an existing table for reading, as `open()`, and require it to be [complete](#completion); `expected` is a callable invoked only for an incomplete table |
-| `create(uri, name, role, dimension, *, snapshot)` | Create an empty table with a header and the verbatim creation snapshot; an existing name is refused |
-| `open_or_create(uri, name, role, dimension, *, snapshot)` | Open an existing table under `role`, or create one; `dimension` is a callable invoked only when creating, and `snapshot` is ignored for an existing table |
+| `open_complete(uri, name, role, *, expected, encoder=None, dimension=None)` | Open an existing table for reading, as `open()`, require any given encoder fingerprint and dimension ([compatibility](#fingerprints-and-compatibility)), then require it to be [complete](#completion); `expected` is a callable invoked only for an incomplete table |
+| `create(uri, name, role, dimension, *, snapshot, encoder, inputs=None)` | Create an empty table with a header, its fingerprints, and the verbatim creation snapshot; an existing name is refused |
+| `open_or_create(uri, name, role, dimension, *, snapshot, encoder, inputs=None)` | Resume an existing table under `role` whose fingerprints equal `encoder` and `inputs`, or create one; `dimension` is a callable invoked only when creating, and `snapshot` is ignored for an existing table |
 
 `role` is `"reference"` or `"validation_cache"`.
 
@@ -38,25 +38,68 @@ expansion, independently of `output_dir`. `EmbeddingTable.exists(uri, name)` and
 Every table created by this module records a store-owned header in its schema
 metadata. The header is written once and never rewritten:
 
-- `schema_version` (currently `SCHEMA_VERSION = 1`);
+- `schema_version` (currently `SCHEMA_VERSION = 2`);
 - `role`: reference table or validation cache;
 - `dimension`: the fixed vector width;
+- `encoder` and `inputs`: the [fingerprints](#fingerprints-and-compatibility);
+  `inputs` is present on reference tables only;
 - for prefix tables, `source_table` and `source_dimension`.
 
 The creation snapshot is stored verbatim under its own key and never parsed or
 rewritten; the retired `classification.build` key is no longer written or read.
-`role`, `dimension`, `prefix_source` (a `PrefixSource(table, dimension)` or `None`),
+`role`, `dimension`, `encoder_fingerprint`, `inputs_fingerprint` (`None` for a
+validation cache), `prefix_source` (a `PrefixSource(table, dimension)` or `None`),
 and `creation_snapshot` read these values back.
 
 Opening a table fails with `LegacyTableError` when the header is absent, malformed,
-records another schema version, lacks a creation snapshot, or disagrees with the
-stored columns or vector width. The message tells the researcher to rebuild under a
+records another schema version, lacks a creation snapshot, disagrees with the
+stored columns or vector width, or has an inputs fingerprint that does not match
+its role. Schema version 2 added the fingerprints, so every table written under
+version 1, before fingerprints existed, is refused as legacy. The message tells the researcher to rebuild under a
 new table name and cites ADR-0001; there is no migration. Opening a valid table under
 the other role fails with `EmbeddingTableError`. An incomplete table fails with
 `IncompleteTableError` where completion is required. All three are `ValueError`
-subclasses; `LegacyTableError` and `IncompleteTableError` subclass
-`EmbeddingTableError`. The completion marker is not part of the header, so it
-does not change the schema version.
+subclasses; `LegacyTableError`, `IncompatibleTableError`, and
+`IncompleteTableError` subclass `EmbeddingTableError`. The completion marker is not
+part of the header, so it does not change the schema version.
+
+### Fingerprints and compatibility
+
+Each table records two fingerprints in its header when it is created. They are
+flat mappings from a setting name to a string, integer, boolean, or null value.
+The store compares them generically; `experiments/fingerprints.py` computes them
+from the experiment configuration
+([experiments](experiments.md#fingerprints-and-incompatible-tables)), naming each
+setting by its configuration path:
+
+- **Encoder fingerprint**, on every table: `embedding.model_id`,
+  `embedding.truncate_dim`, and `embedding.vertex.classification_prompt`.
+- **Inputs fingerprint**, on reference tables only: `dataset.name`,
+  `embed_images`, `embed_class_labels`, `embed_descriptions`, `n_imgs_per_class`,
+  and `vocabulary_sha256`, the SHA-256 of the loaded vocabulary as canonical
+  JSON (sorted class keys, description order kept, no insignificant whitespace,
+  UTF-8), or null when descriptions are disabled.
+
+`create()` refuses a reference table without an inputs fingerprint and a
+validation cache with one, with `EmbeddingTableError`, before writing anything.
+
+`require_compatible(*, encoder=None, inputs=None, dimension=None)` compares the
+stored values with each argument that is given. Fingerprints are compared
+setting by setting, and a setting absent from one side compares as null. Any
+difference raises `IncompatibleTableError`, whose message lists every differing
+setting as `<setting>: stored <value>, required <value>` and tells the researcher
+to use a new table name. The `differences` attribute maps each setting to its
+stored and required values; a dimension mismatch appears as `dimension`. There
+is no override.
+
+- `open_or_create()` requires both fingerprints to equal the current ones before
+  resuming an existing table, so one table never mixes vectors or reference inputs
+  from two configurations.
+- `open_complete()` checks any given encoder fingerprint and dimension before
+  completion, so an incompatible table fails without a key scan.
+- Settings outside the fingerprints never block: device, batch size, Vertex
+  project and location, concurrency, attempts, request timeout, dataset root,
+  output directory, `k`, validation caching, and table names.
 
 ### Rows and appends
 
@@ -67,8 +110,9 @@ stored `class`.
 
 `append()` checks record/vector counts, pairs rows strictly, and asks the backend
 to reject bad vectors. It adds completed batches without application write
-retries. Compatibility checks and transaction/rollback guarantees are outside the
-current scope; follow [experiment persistence](experiments.md#reference-builds-and-resumption).
+retries. Compatibility is checked when a table is opened, not per append;
+transaction and rollback guarantees are outside the current scope. Follow
+[experiment persistence](experiments.md#reference-builds-and-resumption).
 
 Builds resume and finish through two operations over expected source keys:
 
@@ -138,10 +182,12 @@ the same database:
   retains every row, record ID, and row metadata value. Only vectors change to
   exact float32 prefixes; no normalization is applied. When the source is
   complete, the new prefix is marked complete after the copy finishes.
-- The new header keeps the source's role, records the prefix dimension, and records
-  the source table and source dimension. A prefix of a prefix records its immediate
-  source. The creation snapshot is copied verbatim, so it is identical to the
-  source's.
+- The new header keeps the source's role and fingerprints, records the prefix
+  dimension, and records the source table and source dimension. A prefix of a
+  prefix records its immediate source. The creation snapshot is copied verbatim,
+  so it is identical to the source's. Because fingerprints are inherited, a
+  reference prefix and a validation-cache prefix of the same width derived from
+  compatible sources are compatible with each other.
 
 Open, create, and stream failures propagate without scan, repair, overwrite, or
 cleanup; this is not a crash durability guarantee.
@@ -242,7 +288,9 @@ an empty validation split before publishing a report.
 
 `tests/test_embedding_table.py` uses synthetic vectors and temporary real LanceDB
 tables through the `EmbeddingTable` interface. It checks header round trips,
-legacy refusal, role checks, row preservation, bad-vector rejection, exact cosine
+legacy refusal (including schema-version-1 headers), role checks, fingerprint
+round trips, inheritance, and mismatch refusal on resume and on open for
+evaluation, row preservation, bad-vector rejection, exact cosine
 ordering, negative scores, unlimited scans, ordered fetches, concurrent readers,
 completion markers (persistence across reopen, invalidation by appends, refusal
 with a missing count, tables without markers), optimization, and prefix

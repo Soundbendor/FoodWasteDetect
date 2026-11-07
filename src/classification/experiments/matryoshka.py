@@ -59,6 +59,8 @@ def run_sweep(
             f"Source vector widths must match: reference has {source_width}, "
             f"validation cache has {validation_cache.dimension}"
         )
+    # Every prefix inherits these fingerprints, so a mismatch fails before any derivation.
+    reference_table.require_compatible(encoder=validation_cache.encoder_fingerprint)
     validate_sweep(sources, dimensions, source_width)
     output = Path(config.output_dir).expanduser().resolve() / datetime.now(UTC).strftime(
         "matroyshka_sweep_%Y%m%dT%H%M%S_%fZ"

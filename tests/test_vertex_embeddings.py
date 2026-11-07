@@ -13,6 +13,7 @@ import httpx
 import numpy as np
 import pytest
 from config_helpers import config_data, updated
+from table_helpers import fingerprints
 from classification.experiments.config import ExperimentConfig
 import yaml
 from google import genai
@@ -458,6 +459,12 @@ def resume_config(tmp_path):
     return config
 
 
+def table_fingerprints(role, config):
+    """Fingerprints the experiment computes for ``config`` and its saved vocabulary."""
+    vocabulary = json.loads(Path(config["descriptions_file"]).read_text())["descriptions"]
+    return fingerprints(role, config, vocabulary)
+
+
 def test_index_builder_direct_build_and_complete_resume(transport, resume_config):
     from classification.experiments.classification import Experiment
 
@@ -489,7 +496,8 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     config = resume_config
     config["n_imgs_per_class"] = 12
     index = EmbeddingTable.create(
-        config["lancedb"]["uri"], config["lancedb"]["table"], "reference", 128, snapshot=""
+        config["lancedb"]["uri"], config["lancedb"]["table"], "reference", 128, snapshot="",
+        **table_fingerprints("reference", config),
     )
     initial = [PointRecord("Apple", "class_name", "Apple", "Apple"),
                PointRecord("Apple", "generated_description", "Apple:1", "round")]
@@ -704,13 +712,17 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
     )
     config["k"] = 1
     uri = config["lancedb"]["uri"]
-    reference = EmbeddingTable.create(uri, config["lancedb"]["table"], "reference", 128, snapshot="")
+    reference = EmbeddingTable.create(
+        uri, config["lancedb"]["table"], "reference", 128, snapshot="",
+        **table_fingerprints("reference", config),
+    )
     vectors = np.eye(2, 128, dtype=np.float32)
     labels = [PointRecord(label, "class_name", label, label) for label in ("Apple", "Banana")]
     reference.append(labels, vectors)
     reference.mark_complete(record.source_key for record in labels)
     cache = EmbeddingTable.create(
-        uri, config["lancedb"]["validation_table"], "validation_cache", 128, snapshot=""
+        uri, config["lancedb"]["validation_table"], "validation_cache", 128, snapshot="",
+        **table_fingerprints("validation_cache", config),
     )
     # Seed a partial cache in reverse order; new responses also finish out of order.
     for i in reversed(range(0, 13, 2)):
@@ -759,7 +771,7 @@ def test_reference_summary_counts_all_stored_rows(transport, resume_config):
     experiment = Experiment(ExperimentConfig.model_validate(resume_config), tracker=tracker)
     index = EmbeddingTable.create(
         resume_config["lancedb"]["uri"], resume_config["lancedb"]["table"], "reference", 128,
-        snapshot="",
+        snapshot="", **table_fingerprints("reference", resume_config),
     )
     # Counts include duplicate and unrequested stored rows; filtering is a set.
     index.append([PointRecord("Apple", "class_name", identity, identity)

@@ -32,6 +32,25 @@ The experiment configuration recorded when an embedding table was created, kept
 exactly as written for provenance; a prefix table carries its source's snapshot.
 _Avoid_: build metadata, table config
 
+**Encoder fingerprint**:
+The encoder settings recorded in an embedding table's header when it is created
+(model ID, truncation dimension, and the Vertex classification-prompt flag).
+Vectors are comparable only between tables with equal encoder fingerprints and
+dimensions.
+_Avoid_: model metadata, encoder config
+
+**Inputs fingerprint**:
+The reference-input settings recorded in a reference table's header when it is
+created: dataset name, reference-source switches, per-class image cap, and the
+vocabulary digest. Validation caches have none.
+_Avoid_: source config, reference metadata
+
+**Incompatible table**:
+An embedding table whose fingerprints or dimension differ from what a resume or
+evaluation requires. It is refused with each differing setting listed; the fix
+is a new table name, never an override.
+_Avoid_: mismatched index, stale table
+
 **Complete table**:
 An embedding table whose build has finished, so it holds every source key it is
 expected to hold. It carries a completion marker at its current version; any

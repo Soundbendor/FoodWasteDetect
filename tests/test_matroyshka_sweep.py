@@ -19,10 +19,12 @@ from classification.experiments import matryoshka as sweep
 from classification.experiments.classification import Experiment
 from classification.retrieval.embedding_table import (
     EmbeddingTable,
+    IncompatibleTableError,
     IncompleteTableError,
     PrefixSource,
 )
 from classification.schemas import PointRecord
+from table_helpers import fingerprints
 
 ROLES = {'reference': 'reference', 'validation': 'validation_cache'}
 
@@ -46,7 +48,7 @@ def sources(tmp_path, monkeypatch):
         ('validation', 'validation_cache', 'validation_image', ['second', 'first'],
          np.stack([query * 2, query])),
     ):
-        table = EmbeddingTable.create(uri, name, role, 3072, snapshot=f'{{"created": "{name}"}}')
+        table = EmbeddingTable.create(uri, name, role, 3072, snapshot=f'{{"created": "{name}"}}', **fingerprints(role))
         records = [
             PointRecord(label, kind, identity, f'kept-{i}', id=f'{name}-{i}')
             for i, (identity, label) in enumerate(zip(identities, ['A', 'B'], strict=True))
@@ -152,6 +154,10 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
                 [vector for _, vector in rows], [vector[:dimension] for _, vector in snapshots[source]]
             )
             assert table.creation_snapshot == f'{{"created": "{source}"}}'
+            # Prefixes inherit the sources' fingerprints, not the sweep configuration's.
+            source_table = stored(uri, source)
+            assert table.encoder_fingerprint == source_table.encoder_fingerprint
+            assert table.inputs_fingerprint == source_table.inputs_fingerprint
     assert [item['majority_vote_accuracy'] for item in summary] == [1, 0, 1]
     for name, snapshot in snapshots.items():
         after = stored(uri, name).rows()
@@ -289,6 +295,24 @@ def test_mismatched_source_widths_fail_before_writes(sources, monkeypatch):
     prepare, evaluate = Mock(), Mock()
     monkeypatch.setattr(EmbeddingTable, 'derive_prefix', prepare)
     with pytest.raises(ValueError, match='widths must match'):
+        sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+    prepare.assert_not_called()
+    evaluate.assert_not_called()
+
+
+def test_sources_from_different_encoders_fail_before_writes(sources, monkeypatch):
+    config, connection, vectors, _ = sources
+    other = fingerprints('validation_cache')
+    other['encoder'] = dict(other['encoder'], **{'embedding.model_id': 'other'})
+    cache = EmbeddingTable.create(connection.uri, 'other_val', 'validation_cache', 3072,
+                                  snapshot='', **other)
+    records = [PointRecord('A', 'validation_image', identity, '') for identity in ('first', 'second')]
+    cache.append(records, vectors)
+    cache.mark_complete(record.source_key for record in records)
+    config['lancedb']['validation_table'] = 'other_val'
+    prepare, evaluate = Mock(), Mock()
+    monkeypatch.setattr(EmbeddingTable, 'derive_prefix', prepare)
+    with pytest.raises(IncompatibleTableError, match="embedding.model_id: stored 'synthetic', required 'other'"):
         sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
     prepare.assert_not_called()
     evaluate.assert_not_called()

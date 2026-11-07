@@ -6,7 +6,7 @@ source keys, records, and vectors.
 """
 
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -21,9 +21,12 @@ from pydantic import BaseModel, ConfigDict, PositiveInt, ValidationError
 from classification.schemas import Neighbor, PointRecord, SourceKey
 
 type TableRole = Literal["reference", "validation_cache"]
+type FingerprintValue = str | int | bool | None
+# Vector-affecting settings by name, such as configuration paths; compared generically.
+type Fingerprint = Mapping[str, FingerprintValue]
 
 # Version of the store-owned header format; tables recording another version are legacy.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _HEADER_KEY = "classification.embedding_table"
 _SNAPSHOT_KEY = "classification.creation_snapshot"
 _ADR = "docs/adr/0001-embedding-table-header.md"
@@ -45,6 +48,20 @@ class EmbeddingTableError(ValueError):
 
 class LegacyTableError(EmbeddingTableError):
     """A table lacks a valid header for the current schema version and must be rebuilt."""
+
+
+class IncompatibleTableError(EmbeddingTableError):
+    """A table's fingerprints or dimension differ from the values a caller requires.
+
+    Attributes:
+        differences: Each differing setting mapped to its stored and required values.
+    """
+
+    def __init__(
+        self, message: str, *, differences: dict[str, tuple[FingerprintValue, FingerprintValue]]
+    ) -> None:
+        super().__init__(message)
+        self.differences = differences
 
 
 class IncompleteTableError(EmbeddingTableError):
@@ -75,6 +92,8 @@ class _Header(BaseModel):
     schema_version: int
     role: TableRole
     dimension: PositiveInt
+    encoder: dict[str, FingerprintValue]
+    inputs: dict[str, FingerprintValue] | None
     source_table: str | None = None
     source_dimension: PositiveInt | None = None
 
@@ -88,11 +107,13 @@ class _Header(BaseModel):
 class EmbeddingTable:
     """A reference table or validation cache stored in one local LanceDB table.
 
-    Every table carries a header recording its schema version, role, dimension, and,
-    for prefix tables, the source table and source dimension. The experiment's
-    creation snapshot is stored verbatim beside it. Opening a table without a valid
-    header raises ``LegacyTableError``; opening it under another role raises
-    ``EmbeddingTableError``.
+    Every table carries a header recording its schema version, role, dimension,
+    encoder fingerprint, inputs fingerprint (reference tables only), and, for prefix
+    tables, the source table and source dimension. The experiment's creation snapshot
+    is stored verbatim beside it. Opening a table without a valid header raises
+    ``LegacyTableError``; opening it under another role raises
+    ``EmbeddingTableError``; resuming it, or opening it for evaluation, with
+    different fingerprints or dimension raises ``IncompatibleTableError``.
 
     Attributes:
         uri: Resolved database directory.
@@ -155,11 +176,13 @@ class EmbeddingTable:
         role: TableRole,
         *,
         expected: Callable[[], Iterable[SourceKey]],
+        encoder: Fingerprint | None = None,
+        dimension: int | None = None,
     ) -> Self:
         """Open an existing complete table for reading under the given role.
 
         A complete table opens without computing the expected keys or scanning
-        stored ones.
+        stored ones. Compatibility is checked before completion.
 
         Args:
             uri: Local database directory.
@@ -167,6 +190,8 @@ class EmbeddingTable:
             role: The role the caller requires.
             expected: Returns the source keys the finished table must contain; called
                 only for an incomplete table, to state how many are missing.
+            encoder: Encoder fingerprint the table must record; None skips the check.
+            dimension: Vector width the table must record; None skips the check.
 
         Returns:
             The opened complete table.
@@ -175,17 +200,28 @@ class EmbeddingTable:
             FileNotFoundError: If the database directory does not exist.
             LegacyTableError: If the table has no valid current header.
             EmbeddingTableError: If the table's role differs from ``role``.
+            IncompatibleTableError: If ``encoder`` or ``dimension`` differs from the
+                stored value, listing each difference.
             IncompleteTableError: If the table is not marked complete at its current
                 version, stating how many expected source keys are missing.
         """
         table = cls.open(uri, name, role)
+        table.require_compatible(encoder=encoder, dimension=dimension)
         if not table.is_complete:
             raise table._incomplete(expected())
         return table
 
     @classmethod
     def create(
-        cls, uri: str | Path, name: str, role: TableRole, dimension: int, *, snapshot: str
+        cls,
+        uri: str | Path,
+        name: str,
+        role: TableRole,
+        dimension: int,
+        *,
+        snapshot: str,
+        encoder: Fingerprint,
+        inputs: Fingerprint | None = None,
     ) -> Self:
         """Create an empty table with a header and creation snapshot; refuse existing names.
 
@@ -195,11 +231,29 @@ class EmbeddingTable:
             role: Reference table or validation cache.
             dimension: Fixed vector width.
             snapshot: Creation snapshot, stored verbatim and never rewritten.
+            encoder: Encoder fingerprint recorded in the header.
+            inputs: Inputs fingerprint; required for reference tables and None for
+                validation caches.
 
         Returns:
             The new, empty table.
+
+        Raises:
+            EmbeddingTableError: If ``inputs`` does not match the role; nothing is
+                written.
         """
-        header = _Header(schema_version=SCHEMA_VERSION, role=role, dimension=dimension)
+        if (role == "reference") != (inputs is not None):
+            requirement = "requires an" if role == "reference" else "has no"
+            raise EmbeddingTableError(
+                f"Table {name!r}: a {role} table {requirement} inputs fingerprint"
+            )
+        header = _Header(
+            schema_version=SCHEMA_VERSION,
+            role=role,
+            dimension=dimension,
+            encoder=dict(encoder),
+            inputs=None if inputs is None else dict(inputs),
+        )
         return cls._create(_resolve(uri), name, header, snapshot)
 
     @classmethod
@@ -226,8 +280,13 @@ class EmbeddingTable:
         dimension: Callable[[], int],
         *,
         snapshot: str,
+        encoder: Fingerprint,
+        inputs: Fingerprint | None = None,
     ) -> Self:
-        """Open an existing table under ``role``, or create one when the name is absent.
+        """Open an existing table under ``role`` to resume it, or create one when absent.
+
+        Resuming requires the stored fingerprints to equal ``encoder`` and ``inputs``,
+        so one table never mixes vectors from two configurations.
 
         Args:
             uri: Local database directory.
@@ -236,13 +295,24 @@ class EmbeddingTable:
             dimension: Returns the vector width; called only when creating, so an
                 existing table never constructs an encoder.
             snapshot: Creation snapshot; ignored for an existing table.
+            encoder: Encoder fingerprint of the current configuration.
+            inputs: Inputs fingerprint of the current configuration; required for
+                reference tables and None for validation caches.
 
         Returns:
             The opened or created table.
+
+        Raises:
+            IncompatibleTableError: If an existing table records different
+                fingerprints, listing each differing setting.
         """
         if cls.exists(uri, name):
-            return cls.open(uri, name, role)
-        return cls.create(uri, name, role, dimension(), snapshot=snapshot)
+            table = cls.open(uri, name, role)
+            table.require_compatible(encoder=encoder, inputs=inputs)
+            return table
+        return cls.create(
+            uri, name, role, dimension(), snapshot=snapshot, encoder=encoder, inputs=inputs
+        )
 
     @property
     def role(self) -> TableRole:
@@ -255,9 +325,60 @@ class EmbeddingTable:
         return self._header.dimension
 
     @property
+    def encoder_fingerprint(self) -> dict[str, FingerprintValue]:
+        """Return a copy of the encoder fingerprint recorded in the header."""
+        return dict(self._header.encoder)
+
+    @property
+    def inputs_fingerprint(self) -> dict[str, FingerprintValue] | None:
+        """Return a copy of the inputs fingerprint, or None for a validation cache."""
+        inputs = self._header.inputs
+        return None if inputs is None else dict(inputs)
+
+    @property
     def prefix_source(self) -> PrefixSource | None:
         """Return the source of a prefix table, or None for a directly built table."""
         return self._header.prefix_source
+
+    def require_compatible(
+        self,
+        *,
+        encoder: Fingerprint | None = None,
+        inputs: Fingerprint | None = None,
+        dimension: int | None = None,
+    ) -> None:
+        """Require stored fingerprints and dimension to equal the given values.
+
+        Fingerprints are compared setting by setting; an absent setting compares as
+        None. There is no override: different values need a new table name.
+
+        Args:
+            encoder: Required encoder fingerprint; None skips the check.
+            inputs: Required inputs fingerprint; None skips the check.
+            dimension: Required vector width; None skips the check.
+
+        Raises:
+            IncompatibleTableError: If any value differs, listing each differing
+                setting with its stored and required values.
+        """
+        differences: dict[str, tuple[FingerprintValue, FingerprintValue]] = {}
+        if encoder is not None:
+            differences.update(_differences(self._header.encoder, encoder))
+        if inputs is not None:
+            differences.update(_differences(self._header.inputs or {}, inputs))
+        if dimension is not None and dimension != self.dimension:
+            differences["dimension"] = (self.dimension, dimension)
+        if differences:
+            listed = "; ".join(
+                f"{key}: stored {stored!r}, required {required!r}"
+                for key, (stored, required) in differences.items()
+            )
+            raise IncompatibleTableError(
+                f"Table {self.name!r} is incompatible: {listed}. Settings that change "
+                "vectors cannot change for an existing table; use a new table name "
+                f"(ADR-0001, {_ADR}).",
+                differences=differences,
+            )
 
     @property
     def is_complete(self) -> bool:
@@ -284,6 +405,7 @@ class EmbeddingTable:
         header keeps this table's role and records this table as the source; the
         creation snapshot is copied verbatim. A new prefix of a complete table is
         marked complete once the copy finishes; a prefix of an incomplete table is not.
+        The prefix inherits this table's encoder and inputs fingerprints.
 
         Args:
             destination: Name of the prefix table in the same database.
@@ -307,6 +429,8 @@ class EmbeddingTable:
             schema_version=SCHEMA_VERSION,
             role=self.role,
             dimension=dimension,
+            encoder=self._header.encoder,
+            inputs=self._header.inputs,
             source_table=self.name,
             source_dimension=self.dimension,
         )
@@ -527,6 +651,7 @@ def _read_header(table: LanceTable) -> _Header:
     if (
         header is None
         or header.schema_version != SCHEMA_VERSION
+        or (header.role == "reference") != (header.inputs is not None)
         or _SNAPSHOT_KEY not in metadata
         or table.schema.remove_metadata() != _schema(header, "").remove_metadata()
     ):
@@ -536,6 +661,17 @@ def _read_header(table: LanceTable) -> _Header:
             f"refused, never migrated (ADR-0001, {_ADR})."
         )
     return header
+
+
+def _differences(
+    stored: Mapping[str, FingerprintValue], required: Fingerprint
+) -> dict[str, tuple[FingerprintValue, FingerprintValue]]:
+    """Return each setting whose stored and required values differ, in sorted order."""
+    return {
+        key: (stored.get(key), required.get(key))
+        for key in sorted(stored.keys() | required.keys())
+        if stored.get(key) != required.get(key)
+    }
 
 
 def _row(record: PointRecord, vector: NDArray[Any]) -> dict[str, Any]:

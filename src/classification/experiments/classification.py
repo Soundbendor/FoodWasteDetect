@@ -16,6 +16,7 @@ from classification.experiments.batches import EmbeddingBatch
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions
 from classification.experiments.evaluation import evaluate_batches
+from classification.experiments.fingerprints import encoder_fingerprint
 from classification.experiments.index_builder import IndexBuilder
 from classification.experiments.report_types import (
     EvaluationReport,
@@ -23,7 +24,7 @@ from classification.experiments.report_types import (
 )
 from classification.llm.generate_descriptors import DescriberLLM
 from classification.llm.ollama import OllamaSession
-from classification.retrieval.embedding_table import EmbeddingTable
+from classification.retrieval.embedding_table import EmbeddingTable, Fingerprint
 from classification.retrieval.metrics import metrics
 from classification.tracking import Tracker
 
@@ -84,19 +85,27 @@ class Experiment:
             batch_size=self.batch_size,
         )
 
-    def _reference_table(self) -> EmbeddingTable:
+    def _reference_table(
+        self, *, encoder: Fingerprint, dimension: int | None = None
+    ) -> EmbeddingTable:
+        """Open the complete reference table, requiring the validation vectors' encoder."""
         options = self.config.lancedb
         return EmbeddingTable.open_complete(
             options.uri,
             options.table,
             "reference",
             expected=self._index_builder().expected_reference_keys,
+            encoder=encoder,
+            dimension=dimension,
         )
 
-    def _evaluation_batches(
-        self,
-    ) -> Iterator[EmbeddingBatch]:
-        """Encode uncached validation images in bounded batches."""
+    def _evaluation_batches(self, reference: EmbeddingTable) -> Iterator[EmbeddingBatch]:
+        """Encode uncached validation images in bounded batches.
+
+        The encoder's width must equal the reference table's before any image is
+        encoded.
+        """
+        reference.require_compatible(dimension=self.embedder.dimension)
         for batch in self.dataset.iter_batches("val", self.batch_size):
             vectors = self.embedder.encode_images(batch.pop("image"))
             yield batch, vectors
@@ -167,22 +176,14 @@ class Experiment:
             self.tracker.reference_counts(counts)
         return artifact
 
-    def _prepare_validation_batches(self, *, cached_only: bool) -> Iterator[EmbeddingBatch]:
-        if not cached_only and not self.config.cache_validation_embeddings:
-            return self._evaluation_batches()
-        options = self.config.lancedb
-        table = options.validation_table
+    def _validation_table(self) -> str:
+        table = self.config.lancedb.validation_table
         if table is None:
             raise ValueError("lancedb.validation_table is required for cached evaluation")
-        if cached_only:
-            cache = EmbeddingTable.open_complete(
-                options.uri,
-                table,
-                "validation_cache",
-                expected=self._index_builder().expected_validation_keys,
-            )
-        else:
-            cache = self._index_builder().build_validation_cache(table)
+        return table
+
+    def _cached_batches(self, cache: EmbeddingTable) -> Iterator[EmbeddingBatch]:
+        """Pair validation metadata, read eagerly, with lazily fetched cached vectors."""
         metadata = self.dataset.iter_batches("val", self.batch_size, decode=False)
         return (
             (
@@ -195,20 +196,46 @@ class Experiment:
         )
 
     def evaluate(self) -> EvaluationReport:
-        """Complete optional validation caching, then classify the full split."""
-        reference, counts = self._prepare_evaluation()
-        batches = self._prepare_validation_batches(cached_only=False)
+        """Complete optional validation caching, then classify the full split.
+
+        The reference table must record the configured encoder fingerprint, and the
+        validation vectors' width must equal its dimension, before any validation
+        image is encoded.
+        """
+        reference, counts = self._prepare_evaluation(encoder=encoder_fingerprint(self.config))
+        if self.config.cache_validation_embeddings:
+            cache = self._index_builder().build_validation_cache(self._validation_table())
+            reference.require_compatible(
+                encoder=cache.encoder_fingerprint, dimension=cache.dimension
+            )
+            batches = self._cached_batches(cache)
+        else:
+            batches = self._evaluation_batches(reference)
         return self._execute_evaluation(reference, counts, batches)
 
     def evaluate_cached(self) -> EvaluationReport:
-        """Classify the validation split using existing cached vectors only."""
-        batches = self._prepare_validation_batches(cached_only=True)
-        reference, counts = self._prepare_evaluation()
+        """Classify the validation split using existing cached vectors only.
+
+        The reference table must record the validation cache's encoder fingerprint
+        and dimension; the configured encoder settings are not consulted.
+        """
+        cache = EmbeddingTable.open_complete(
+            self.config.lancedb.uri,
+            self._validation_table(),
+            "validation_cache",
+            expected=self._index_builder().expected_validation_keys,
+        )
+        batches = self._cached_batches(cache)
+        reference, counts = self._prepare_evaluation(
+            encoder=cache.encoder_fingerprint, dimension=cache.dimension
+        )
         return self._execute_evaluation(reference, counts, batches)
 
-    def _prepare_evaluation(self) -> tuple[EmbeddingTable, dict[str, int]]:
-        """Open the reference table and publish its stored source-kind counts."""
-        reference = self._reference_table()
+    def _prepare_evaluation(
+        self, *, encoder: Fingerprint, dimension: int | None = None
+    ) -> tuple[EmbeddingTable, dict[str, int]]:
+        """Open a compatible reference table and publish its stored source-kind counts."""
+        reference = self._reference_table(encoder=encoder, dimension=dimension)
         counts = dict(reference.source_counts())
         if self.tracker:
             self.tracker.reference_counts(counts)

@@ -13,7 +13,12 @@ from classification.experiments.evaluation import extract_batch_metadata, predic
 from classification.experiments.config import ExperimentConfig
 from config_helpers import config_data, updated
 from classification.schemas import Neighbor, PointRecord
-from classification.retrieval.embedding_table import EmbeddingTable, IncompleteTableError
+from classification.retrieval.embedding_table import (
+    EmbeddingTable,
+    IncompatibleTableError,
+    IncompleteTableError,
+)
+from table_helpers import fingerprints
 
 
 def available(*modules):
@@ -186,7 +191,7 @@ class DatasetTests(unittest.TestCase):
 @unittest.skipUnless(available('lancedb', 'numpy', 'pandas', 'PIL', 'datasets'), 'requires datasets, lancedb and CPU fixture dependencies')
 class ExperimentTests(unittest.TestCase):
 
-    def test_creation_metadata_survives_partial_and_changed_complete_resumes(self):
+    def test_creation_metadata_survives_partial_resumes_and_changed_configs_are_refused(self):
         exp = self.experiment()
         exp.batch_size = 1
         original = EmbeddingTable.append
@@ -205,12 +210,15 @@ class ExperimentTests(unittest.TestCase):
         name = exp.config.lancedb.table
         snapshot = EmbeddingTable.open(self.db_path, name, 'reference').creation_snapshot
         self.assertEqual(ExperimentConfig.model_validate_json(snapshot), exp.config)
+        original = exp.config
         exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
-        with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             self.assertRaisesRegex(IncompatibleTableError, 'embedding.truncate_dim: stored None, required 100'):
             exp.build_vector_database()
         self.assertEqual(EmbeddingTable.open(self.db_path, name, 'reference').creation_snapshot, snapshot)
-        exp._embedder = None
-        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
+        exp.config = original
+        with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
             exp.build_vector_database()
         self.assertEqual(EmbeddingTable.open(self.db_path, name, 'reference').creation_snapshot, snapshot)
 
@@ -246,7 +254,11 @@ class ExperimentTests(unittest.TestCase):
                 exp._index_builder().build_validation_cache('cache')
         snapshot = EmbeddingTable.open(self.db_path, 'cache', 'validation_cache').creation_snapshot
         self.assertEqual(ExperimentConfig.model_validate_json(snapshot), exp.config)
-        exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
+        original = exp.config
+        exp.config = updated(exp.config, 'embedding.vertex.classification_prompt', True)
+        with self.assertRaisesRegex(IncompatibleTableError, 'classification_prompt: stored False, required True'):
+            exp._index_builder().build_validation_cache('cache')
+        exp.config = original
         with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
             cache = exp._index_builder().build_validation_cache('cache')
         self.assertEqual((cache.role, cache.creation_snapshot), ('validation_cache', snapshot))
@@ -264,10 +276,12 @@ class ExperimentTests(unittest.TestCase):
                 exp = self.experiment(name=name)
                 reference = EmbeddingTable.create(
                     self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot=payload,
+                    **fingerprints('reference', exp.config),
                 )
                 cache_name = name + '_cache'
                 cache = EmbeddingTable.create(
                     self.db_path, cache_name, 'validation_cache', 2, snapshot=payload,
+                    **fingerprints('validation_cache', exp.config),
                 )
                 reference.append([PointRecord('Apple', 'class_name', 'Apple', 'Apple')],
                                  np.array([[1., 0.]]))
@@ -314,7 +328,7 @@ class ExperimentTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             exp.run()
         with self.assertRaises(FileNotFoundError):
-            exp._index_builder()._get_text_inputs()
+            exp._index_builder().expected_reference_keys()
         self.describer_constructor.assert_not_called()
         self.embedder_constructor.assert_not_called()
         self.client_constructor.assert_not_called()
@@ -476,7 +490,8 @@ class ExperimentTests(unittest.TestCase):
     def test_image_insertion_rejects_mismatched_record_columns_before_encoding(self):
         exp = self.experiment((True, False, False))
         builder = exp._index_builder()
-        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
+        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='',
+                                      **fingerprints('reference'))
         for split in ('train', 'val'):
             for field in ('class', 'source_id', 'fname'):
                 with self.subTest(split=split, field=field):
@@ -587,7 +602,8 @@ class ExperimentTests(unittest.TestCase):
 
         exp = self.experiment()
         exp.config = updated(exp.config, 'k', 1)
-        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
+        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='',
+                                      **fingerprints('reference', exp.config))
         records = [PointRecord('Apple', 'description', str(i), '') for i in range(7)]
         index.append(records, np.tile([1., 0.], (7, 1)))
         index.mark_complete(record.source_key for record in records)
@@ -602,7 +618,8 @@ class ExperimentTests(unittest.TestCase):
             self.assertEqual(report['metrics'][key], 0.5)
         self.assertEqual(report['predictions'][0]['retrieval_metrics']['relevant_reference_count'], 7)
         exp.config = updated(exp.config, 'lancedb.table', 'empty')
-        EmbeddingTable.create(index.uri, 'empty', 'reference', 2, snapshot='').mark_complete([])
+        EmbeddingTable.create(index.uri, 'empty', 'reference', 2, snapshot='',
+                              **fingerprints('reference', exp.config)).mark_complete([])
         report = exp.evaluate().model_dump(mode="json")
         self.assertEqual(report['metrics']['evaluated'], 2)
         self.assertEqual(report['metrics']['map_at_r'], 0)
@@ -722,7 +739,8 @@ class ExperimentTests(unittest.TestCase):
         rows = self.interleaved_training()
         exp = self.experiment((True, True, False), 'resume-filtered')
         exp.config = updated(exp.config, 'n_imgs_per_class', 2)
-        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
+        index = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='',
+                                      **fingerprints('reference', exp.config))
         saved = [
             PointRecord(rows[i]['class'], 'training_image', rows[i]['source_id'], rows[i]['fname'])
             for i in (0, 1, 4)
@@ -852,7 +870,8 @@ class ExperimentTests(unittest.TestCase):
     def test_point_records_round_trip_through_an_embedding_table(self):
         exp = self.experiment()
         records = [PointRecord(label, 'class_name', label, label) for label in ['Apple', 'Pear']]
-        index = EmbeddingTable.create(self.db_path, 'record_round_trip', 'reference', 2, snapshot='')
+        index = EmbeddingTable.create(self.db_path, 'record_round_trip', 'reference', 2, snapshot='',
+                                      **fingerprints('reference'))
         vectors = exp.embedder.encode_text([record.value for record in records])
         index.append(records, vectors)
         reopened = EmbeddingTable.open(self.db_path, 'record_round_trip', 'reference')
@@ -1049,10 +1068,12 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment()
         exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
         # Fill both tables the way earlier code left them: every key, no marker.
-        reference = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='')
+        reference = EmbeddingTable.create(self.db_path, exp.config.lancedb.table, 'reference', 2, snapshot='',
+                                          **fingerprints('reference', exp.config))
         reference.append([PointRecord(label, 'class_name', label, label) for label in ('Apple', 'Pear')],
                          np.eye(2))
-        cache = EmbeddingTable.create(self.db_path, 'cache', 'validation_cache', 2, snapshot='')
+        cache = EmbeddingTable.create(self.db_path, 'cache', 'validation_cache', 2, snapshot='',
+                                      **fingerprints('validation_cache', exp.config))
         cache.append([PointRecord(label, 'validation_image', str(i), '') for i, label in enumerate(('Apple', 'Pear'))],
                      np.eye(2))
         for evaluate in (exp.evaluate, exp.evaluate_cached):
@@ -1064,6 +1085,94 @@ class ExperimentTests(unittest.TestCase):
             exp.build_vector_database()
             self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
             self.assertEqual(exp.evaluate_cached().metrics['majority_vote_accuracy'], 1)
+
+    def test_settings_that_do_not_change_vectors_never_block_resuming(self):
+        exp = self.experiment((True, True, False))
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.batch_size = 1
+        self.interrupt_second_append(exp.build_vector_database)
+        self.interrupt_second_append(lambda: exp._index_builder().build_validation_cache('cache'))
+        moved = exp.config
+        for path, value in (
+            ('embedding.device', 'cpu'), ('embedding.batch_size', 7),
+            ('embedding.vertex.location', 'europe-west4'), ('embedding.vertex.max_concurrency', 9),
+            ('embedding.vertex.max_attempts', 2), ('embedding.vertex.request_timeout', 5.0),
+            ('dataset.root', str(self.root / 'moved raw')), ('output_dir', str(self.root / 'moved')),
+        ):
+            moved = updated(moved, path, value)
+        resumed = Experiment(moved)
+        self.assertEqual(resumed.build_vector_database().source_counts, {'training_image': 2, 'class_name': 2})
+        cache = resumed._index_builder().build_validation_cache('cache')
+        self.assertTrue(cache.is_complete)
+        self.assertEqual(resumed.evaluate_cached().metrics['majority_vote_accuracy'], 1)
+
+    def test_resuming_with_changed_reference_inputs_is_refused(self):
+        path = self.root / 'vocabulary.json'
+        path.write_text(json.dumps({'descriptions': {'Apple': ['red'], 'Pear': ['green']}}))
+        exp = self.experiment((True, True, True), 'inputs')
+        exp.config = updated(exp.config, 'descriptions_file', str(path))
+        exp = Experiment(exp.config)
+        exp.batch_size = 1
+        self.interrupt_second_append(exp.build_vector_database)
+        for setting, value, listed in (
+            ('embed_class_labels', False, 'embed_class_labels: stored True, required False'),
+            ('embed_images', False, 'embed_images: stored True, required False'),
+            ('n_imgs_per_class', 1, 'n_imgs_per_class: stored None, required 1'),
+            ('dataset.name', 'FoodX251', "dataset.name: stored 'foodx251', required 'FoodX251'"),
+        ):
+            with self.subTest(setting=setting):
+                changed = Experiment(updated(exp.config, setting, value))
+                with patch.object(changed, '_create_embedder', side_effect=AssertionError('encoder')), \
+                     self.assertRaisesRegex(IncompatibleTableError, listed):
+                    changed.build_vector_database()
+        path.write_text(json.dumps({'descriptions': {'Apple': ['red'], 'Pear': ['yellow']}}))
+        with self.assertRaisesRegex(IncompatibleTableError, r'vocabulary_sha256: stored \'[0-9a-f]{64}\''):
+            exp.build_vector_database()
+        path.write_text(json.dumps({'descriptions': {'Pear': ['green'], 'Apple': ['red']}}))
+        self.assertEqual(exp.build_vector_database().source_counts,
+                         {'class_name': 2, 'generated_description': 2, 'training_image': 2})
+
+    def test_live_evaluation_refuses_a_different_encoder_before_encoding_images(self):
+        exp = self.experiment()
+        exp.build_vector_database()
+        for setting, value in (('embedding.model_id', 'other/model'), ('embedding.truncate_dim', 1)):
+            with self.subTest(setting=setting):
+                changed = Experiment(updated(exp.config, setting, value))
+                with patch.object(self.Embedder, 'encode_images', side_effect=AssertionError('encoded')), \
+                     self.assertRaisesRegex(IncompatibleTableError, setting):
+                    changed.evaluate()
+        self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
+
+    def test_live_evaluation_refuses_an_encoder_of_another_width_before_encoding_images(self):
+        exp = self.experiment()
+        exp.build_vector_database()
+        self.Embedder.dimension = 3
+        with patch.object(self.Embedder, 'encode_images', side_effect=AssertionError('encoded')), \
+             self.assertRaisesRegex(IncompatibleTableError, 'dimension: stored 2, required 3'):
+            Experiment(exp.config).evaluate()
+
+    def test_cached_evaluation_refuses_a_cache_from_another_encoder_or_width(self):
+        import numpy as np
+
+        exp = self.experiment()
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.build_vector_database()
+        other = updated(exp.config, 'embedding.vertex.classification_prompt', True)
+        Experiment(other)._index_builder().build_validation_cache('cache')
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
+             patch.object(EmbeddingTable, 'fetch_vectors', side_effect=AssertionError('fetch')):
+            with self.assertRaisesRegex(IncompatibleTableError, 'classification_prompt: stored False, required True'):
+                exp.evaluate_cached()
+            wide = EmbeddingTable.create(self.db_path, 'wide', 'validation_cache', 3, snapshot='',
+                                         **fingerprints('validation_cache', exp.config))
+            records = [PointRecord(row['class'], 'validation_image', row['source_id'], '') for row in self.rows]
+            wide.append(records, np.ones((2, 3)))
+            wide.mark_complete(record.source_key for record in records)
+            narrow = Experiment(updated(exp.config, 'lancedb.validation_table', 'wide'))
+            with self.assertRaisesRegex(IncompatibleTableError, 'dimension: stored 2, required 3'):
+                narrow.evaluate_cached()
+        self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
 
     def test_evaluation_reads_read_only_database(self):
         exp = self.experiment()
