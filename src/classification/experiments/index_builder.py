@@ -129,6 +129,9 @@ class IndexBuilder:
         Reference inputs are validated before the table is opened or the encoder is
         constructed. Only missing source keys are embedded.
 
+        Returns:
+            The complete, optimized reference table.
+
         Raises:
             ValueError: If no reference inputs are selected, or if expected source
                 keys are still missing after insertion.
@@ -140,11 +143,11 @@ class IndexBuilder:
         if not expected:
             raise ValueError("No reference records selected - check dataset and config.")
         index = self._open_or_create(self.table)
-        missing = index.missing(expected)
-        pending = frozenset(missing)
+        absent = index.missing(expected)
+        pending = frozenset(absent)
         records = [r for r in records if (r.source_kind, r.source_identity) in pending]
         if images is not None:
-            images = self._pending_images(images, "training_image", missing)
+            images = self._pending_images(images, "training_image", absent)
         self._insert_references(index, records, images)
         logging.info("Verifying and optimizing LanceDB table...")
         index.mark_complete(expected, optimize=True)
@@ -162,6 +165,12 @@ class IndexBuilder:
 
     def build_validation_cache(self, table_name: str) -> LanceDBIndex:
         """Complete missing validation embeddings and return the unoptimized cache.
+
+        Args:
+            table_name: Validation-cache table name.
+
+        Returns:
+            The complete validation cache, never optimized.
 
         Raises:
             ValueError: If validation source keys are still missing after insertion.

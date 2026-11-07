@@ -16,7 +16,7 @@ selection and image ownership use [data](data.md); for scoring use
 | Module              | Responsibility                                                                                            |
 | ------------------- | --------------------------------------------------------------------------------------------------------- |
 | `classification.py` | `Experiment`: configuration, lazy encoder, stages, summaries, and report publication                      |
-| `index_builder.py`  | `IndexBuilder`: input selection, encoding batches, `build_reference_table()`, and `build_validation_cache()` |
+| `index_builder.py`  | `IndexBuilder`: input selection, encoding batches, reference-table builds, and validation-cache builds    |
 | `descriptions.py`   | Saved-vocabulary reading and ordered text-reference construction                                          |
 | `evaluation.py`     | Batch evaluation, metadata-row conversion, predictions, and completeness checks                           |
 | `config.py`         | Experiment settings                                                                                      |
@@ -180,7 +180,8 @@ pairing is retained.
 
 A successful evaluation writes only `evaluation_<UTC timestamp>/report.json`,
 containing `config`, `table`, `dimension` (the reference table's stored vector
-width), `reference_source_counts`, `predictions`, and `metrics`. Predictions contain image metadata, majority-vote label, vote
+width), `reference_source_counts`, `predictions`, and `metrics`.
+Predictions contain image metadata, majority-vote label, vote
 fraction, nearest label, first-k neighbors, and per-query retrieval metrics.
 [Retrieval](retrieval.md) defines the denominators and abstention behavior.
 Reports have no separate prediction/metric files, manifest, prediction `value`,

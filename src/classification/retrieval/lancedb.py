@@ -180,11 +180,11 @@ class LanceDBIndex:
             ValueError: If any expected key is absent, stating how many; nothing
                 is optimized.
         """
-        expected = list(dict.fromkeys(expected))
-        absent = self.missing(expected)
+        unique = set(expected)
+        absent = self.missing(unique)
         if absent:
             raise ValueError(
-                f"Table {self.name!r} is missing {len(absent)} of {len(expected)} "
+                f"Table {self.name!r} is missing {len(absent)} of {len(unique)} "
                 "expected source keys; resume the build before using it"
             )
         if optimize:
@@ -219,8 +219,12 @@ class LanceDBIndex:
     def missing(self, keys: Iterable[SourceIdentity]) -> list[SourceIdentity]:
         """Return requested source keys absent from the table.
 
-        One metadata-only scan; vectors are never read. Each absent key appears
-        once, in first-request order.
+        Args:
+            keys: ``(source_kind, source_identity)`` pairs; repeats are allowed.
+
+        Returns:
+            Each absent key once, in first-request order, from one metadata-only
+            scan that never reads vectors.
         """
         stored = frozenset(self.get_record_ids())
         return [key for key in dict.fromkeys(keys) if key not in stored]
