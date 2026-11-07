@@ -7,6 +7,7 @@ Experiment selection, resumption, and report publication belong to `experiments`
 | Task | Read before changing |
 | --- | --- |
 | Storage, identity scans, vector fetching, or optimization | [LanceDB storage](../../../docs/classification/retrieval.md#lancedb-storage) |
+| Stored width or sweep prefix tables | [Prefix tables](../../../docs/classification/retrieval.md#prefix-tables) |
 | Querying or label assignment | [Exact retrieval and voting](../../../docs/classification/retrieval.md#exact-retrieval-and-voting) |
 | Metric definitions, denominators, or abstentions | [Evaluation metrics](../../../docs/classification/retrieval.md#evaluation-metrics) |
 | Resume ordering or validation-cache writes | [Experiment persistence](../../../docs/classification/experiments.md#reference-builds-and-resumption) |

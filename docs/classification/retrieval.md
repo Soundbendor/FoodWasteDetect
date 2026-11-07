@@ -42,6 +42,28 @@ and identity. Empty input returns shape `(0, table dimension)`. It performs no
 duplicate-row or compatibility validation; identity resumption is not content
 verification.
 
+### Prefix tables
+
+`dimension` reads the stored width and raises `ValueError` unless the schema has a
+positive fixed-size `vector` field. `derive_prefix(destination, dimension, *,
+batch_size)` returns an index over a table in the same database:
+
+- An existing destination is reused if it opens, without reading the source or
+  its snapshot.
+- A prefix wider than the stored width raises `ValueError` before anything is
+  written. A prefix equal to the stored width copies vectors unchanged.
+- Otherwise one streaming `create_table()` call, with no query-result limit,
+  retains every row, UUID, and row metadata value. Only vectors change to exact
+  float32 prefixes and fixed-size Arrow types; no normalization is applied.
+- The creation snapshot (see
+  [table creation metadata](experiments.md#table-creation-metadata)) is
+  revalidated and records the derived `vector_dimension`; an invalid snapshot
+  fails before creation. Other schema metadata is preserved, and absent snapshots
+  remain absent.
+
+Open, create, and stream failures propagate without scan, repair, overwrite, or
+cleanup; this is not a crash durability guarantee.
+
 `optimize()` delegates to LanceDB defaults. Reference build finalization owns its
 invocation; ordinary evaluation never calls it. The recorded LanceDB 0.40.0
 policy compacts files and retains seven days of historical versions with

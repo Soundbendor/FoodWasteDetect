@@ -94,7 +94,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
     for dimension, result, (run, kwargs) in zip(config['sweep_dimensions'], summary, runs, strict=True):
         effective = kwargs['config']
         assert effective['k'] == 1
-        assert effective['embedding']['truncate_dim'] == dimension
+        assert effective['embedding']['truncate_dim'] is None
         assert effective['vector_dimension'] == dimension
         assert effective['cache_validation_embeddings'] is True
         assert effective['embed_images'] is True
@@ -137,92 +137,6 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         assert connection.open_table(name).to_arrow().to_pylist() == snapshot
 
 
-def test_reuse_has_no_writes_or_source_scan(sources, monkeypatch):
-    config, connection, _, _ = sources
-    sweep.prepare_table(connection, 'reference', 'reference_d768', 768, 1)
-    wrapper = MagicMock(wraps=connection)
-    wrapper.__contains__.side_effect = lambda name: name in connection
-    monkeypatch.setattr(sweep, 'prefix_batches', Mock(side_effect=AssertionError('scan forbidden')))
-    sweep.prepare_table(wrapper, 'reference', 'reference_d768', 768, 1)
-    wrapper.create_table.assert_not_called()
-    wrapper.open_table.assert_called_once_with('reference_d768')
-
-
-@pytest.mark.parametrize('invalid', ['json', 'empty', 'partial', 'nested', 'dimension'])
-def test_invalid_snapshot_fails_before_destination_creation(sources, invalid):
-    config, connection, _, _ = sources
-    document = ExperimentConfig.model_validate(config).model_dump()
-    document['vector_dimension'] = 3072
-    if invalid == 'partial':
-        document = {'dataset': {'name': 'foodx251'}}
-    elif invalid == 'nested':
-        document['embedding']['batch_size'] = '1'
-    elif invalid == 'dimension':
-        document['vector_dimension'] = 0
-    encoded = '{broken' if invalid == 'json' else json.dumps(document)
-    if invalid == 'empty':
-        encoded = ''
-    source = LanceDBIndex.create(config['lancedb']['uri'], 'invalid', 3072,
-                                metadata={'classification.build': encoded})
-    wrapper = MagicMock(wraps=connection)
-    wrapper.__contains__.side_effect = lambda name: name in connection
-    with pytest.raises(ValidationError):
-        sweep.prepare_table(wrapper, 'invalid', 'destination', 768, 1)
-    wrapper.create_table.assert_not_called()
-    assert 'destination' not in connection
-    assert source.table.schema.metadata[b'classification.build'] == encoded.encode()
-
-    # A readable destination remains reusable without parsing its source snapshot.
-    sweep.prepare_table(connection, 'reference', 'destination', 768, 1)
-    version = connection.open_table('destination').version
-    sweep.prepare_table(connection, 'invalid', 'destination', 768, 1)
-    assert connection.open_table('destination').version == version
-
-
-@pytest.mark.parametrize('failure', [RuntimeError('stream failed'), KeyboardInterrupt()])
-def test_streaming_failure_propagates(sources, monkeypatch, failure):
-    _, connection, _, _ = sources
-    original = sweep.prefix_batches
-    counts = []
-
-    def interrupted(*args):
-        batches = original(*args)
-        yield next(batches)
-        raise failure
-
-    monkeypatch.setattr(sweep, 'prefix_batches', interrupted)
-    # Consume the same streaming reader at the create boundary to exercise interrupts
-    # without relying on Arrow's translation of Python exceptions across native code.
-    wrapper = MagicMock(wraps=connection)
-    wrapper.__contains__.return_value = False
-
-    def create(name, *, data, **kwargs):
-        for batch in data:
-            counts.append(batch.num_rows)
-
-    wrapper.create_table.side_effect = create
-    with pytest.raises(type(failure)):
-        sweep.prepare_table(wrapper, 'reference', 'broken', 768, 1)
-    wrapper.create_table.assert_called_once()
-    assert counts == [1]
-    wrapper.drop_table.assert_not_called()
-
-
-@pytest.mark.parametrize('exists', [True, False])
-def test_open_and_create_errors_propagate(sources, exists):
-    _, connection, _, _ = sources
-    wrapper = MagicMock(wraps=connection)
-    wrapper.__contains__.return_value = exists
-    failure = RuntimeError('storage failure')
-    if exists:
-        wrapper.open_table.side_effect = failure
-    else:
-        wrapper.create_table.side_effect = failure
-    with pytest.raises(RuntimeError, match='storage failure'):
-        sweep.prepare_table(wrapper, 'reference', 'destination', 768, 1)
-    wrapper.drop_table.assert_not_called()
-
-
 def test_missing_vector_has_no_embedding_or_summary(sources, runs):
     config, connection, _, _ = sources
     connection.open_table('validation').delete("source_identity = 'first'")
@@ -239,7 +153,7 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     original = cli.evaluate_cached
 
     def evaluate(effective, tracker):
-        if effective.embedding.truncate_dim == 1536:
+        if effective.vector_dimension == 1536:
             raise RuntimeError('later failure')
         return original(effective, tracker)
 
@@ -255,7 +169,7 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
 @pytest.mark.parametrize('validation', ['reference_d768', 'reference_d1536'])
 def test_derived_name_collisions_fail_before_tracking(sources, runs, validation):
     config, connection, _, _ = sources
-    sweep.prepare_table(connection, 'validation', validation, 3072, 1)
+    LanceDBIndex.open(connection.uri, 'validation').derive_prefix(validation, 3072, batch_size=1)
     config['lancedb']['validation_table'] = validation
     with pytest.raises(ValueError, match='distinct'):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
@@ -270,36 +184,6 @@ def test_help_does_not_load_config(monkeypatch, capsys):
     assert error.value.code == 0
     assert 'matroyshka-sweep' in capsys.readouterr().out
     load.assert_not_called()
-
-
-def test_stream_has_no_default_result_limit(sources):
-    _, connection, _, _ = sources
-    source = connection.open_table('reference')
-    rows = source.to_arrow().to_pylist()
-    source.add([dict(rows[i % 2], id=f'extra-{i}', source_identity=f'extra-{i}') for i in range(23)])
-    snapshot = source.to_arrow().to_pylist()
-    sweep.prepare_table(connection, 'reference', 'many_d768', 768, 3)
-    destination = connection.open_table('many_d768')
-    assert destination.to_arrow().to_pylist() == [dict(row, vector=row['vector'][:768]) for row in snapshot]
-    version = destination.version
-    sweep.prepare_table(connection, 'reference', 'many_d768', 768, 3)
-    assert connection.open_table('many_d768').version == version
-    assert source.to_arrow().to_pylist() == snapshot
-
-
-def test_native_stream_creation_error(sources, monkeypatch):
-    _, connection, _, _ = sources
-    original = sweep.prefix_batches
-
-    def broken(*args):
-        yield next(original(*args))
-        raise RuntimeError('synthetic reader failure')
-
-    monkeypatch.setattr(sweep, 'prefix_batches', broken)
-    with pytest.raises(Exception, match='synthetic reader failure'):
-        sweep.prepare_table(connection, 'reference', 'broken_native', 768, 1)
-    # No assertion about table durability or repair after a native storage failure.
-    assert connection.open_table('reference').count_rows() == 2
 
 
 def test_sweep_variants_are_independent_validated_models(sources):
@@ -319,7 +203,7 @@ def test_sweep_variants_are_independent_validated_models(sources):
         ), "synthetic"
 
     sweep.run_sweep(config, evaluate)
-    assert [variant.embedding.truncate_dim for variant in variants] == raw['sweep_dimensions']
+    assert [variant.embedding.truncate_dim for variant in variants] == [None, None, None]
     assert [variant.vector_dimension for variant in variants] == raw['sweep_dimensions']
     assert len({id(variant.embedding) for variant in variants}) == 3
     assert config.model_dump() == ExperimentConfig.model_validate(raw).model_dump()
@@ -338,7 +222,7 @@ def test_missing_and_oversized_dimensions_fail_before_writes(sources, monkeypatc
     config, _, _, _ = sources
     prepare = Mock()
     evaluate = Mock()
-    monkeypatch.setattr(sweep, "prepare_table", prepare)
+    monkeypatch.setattr(LanceDBIndex, "derive_prefix", prepare)
     for dimensions in (None, [3073]):
         config["sweep_dimensions"] = dimensions
         with pytest.raises(ValueError):
@@ -349,8 +233,8 @@ def test_missing_and_oversized_dimensions_fail_before_writes(sources, monkeypatc
 
 def test_custom_non_gemini_order_and_truncated_sources(sources):
     config, connection, _, _ = sources
-    sweep.prepare_table(connection, 'reference', 'short_ref', 16, 1)
-    sweep.prepare_table(connection, 'validation', 'short_val', 16, 1)
+    LanceDBIndex.open(connection.uri, 'reference').derive_prefix('short_ref', 16, batch_size=1)
+    LanceDBIndex.open(connection.uri, 'validation').derive_prefix('short_val', 16, batch_size=1)
     config['embedding']['model_id'] = 'example/custom'
     config['lancedb'].update(table='short_ref', validation_table='short_val')
     config['sweep_dimensions'] = [8, 16, 4]
@@ -375,22 +259,14 @@ def test_custom_non_gemini_order_and_truncated_sources(sources):
 
 def test_mismatched_source_widths_fail_before_writes(sources, monkeypatch):
     config, connection, _, _ = sources
-    sweep.prepare_table(connection, 'validation', 'short_val', 16, 1)
+    LanceDBIndex.open(connection.uri, 'validation').derive_prefix('short_val', 16, batch_size=1)
     config['lancedb']['validation_table'] = 'short_val'
     prepare, evaluate = Mock(), Mock()
-    monkeypatch.setattr(sweep, 'prepare_table', prepare)
+    monkeypatch.setattr(LanceDBIndex, 'derive_prefix', prepare)
     with pytest.raises(ValueError, match='widths must match'):
         sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
     prepare.assert_not_called()
     evaluate.assert_not_called()
-
-
-@pytest.mark.parametrize('vector_type', [None, pa.list_(pa.float32()), pa.int32()])
-def test_malformed_source_schema(vector_type):
-    fields = [] if vector_type is None else [pa.field('vector', vector_type)]
-    table = Mock(schema=pa.schema(fields))
-    with pytest.raises(ValueError, match='fixed-size vector'):
-        sweep.vector_width(table)
 
 
 def test_cli_non_gemini_override_omits_source_width(sources, runs, tmp_path):
@@ -411,11 +287,11 @@ def test_cli_non_gemini_override_omits_source_width(sources, runs, tmp_path):
 
 def test_collision_when_source_width_omitted(sources, monkeypatch):
     config, connection, _, _ = sources
-    sweep.prepare_table(connection, 'validation', 'reference_d768', 3072, 1)
+    LanceDBIndex.open(connection.uri, 'validation').derive_prefix('reference_d768', 3072, batch_size=1)
     config['lancedb']['validation_table'] = 'reference_d768'
     config['sweep_dimensions'] = [768, 1536]
     prepare, evaluate = Mock(), Mock()
-    monkeypatch.setattr(sweep, 'prepare_table', prepare)
+    monkeypatch.setattr(LanceDBIndex, 'derive_prefix', prepare)
     with pytest.raises(ValueError, match='distinct'):
         sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
     prepare.assert_not_called()

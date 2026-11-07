@@ -23,10 +23,10 @@ selection and image ownership use [data](data.md); for scoring use
 | `batches.py`        | `EmbeddingBatch` type alias                                       |
 | `artifacts.py`      | Shared `write_json()`                                                                                     |
 | `report_types.py`   | Index summary and evaluation report models                                                                |
-| `matryoshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
+| `matryoshka.py`     | Cached dimension sweep policy, derived table names, and sweep summary                              |
 
-`LanceDBIndex` owns ordinary database operations. The sweep's streaming creation
-of derived tables is implemented directly in `matryoshka.py`. CLI parsing stays
+`LanceDBIndex` owns database operations, including the streaming derivation of
+prefix tables for the sweep; `matryoshka.py` does not import LanceDB or Arrow. CLI parsing stays
 in [cli.py](cli.md); neither experiment module has its own command-line parser.
 Use concrete module imports; `__init__.py` does not import backends.
 
@@ -195,31 +195,29 @@ Set `sweep_dimensions` to a nonempty list of unique positive integers in the
 order to evaluate them. Existing configurations must supply this field for the
 sweep; other stages and historical snapshots may omit it. The shipped Gemini
 configuration uses 768, 1536, and 3072. The source reference and validation
-vector fields must be fixed-size lists of the same positive width; all targets
-must fit that stored width, including when the sources are already truncated.
+vector fields must be fixed-size lists of the same positive width, checked
+through `LanceDBIndex.dimension` before anything is derived; all targets must fit
+that stored width, including when the sources are already truncated.
 The sweep makes no embedding requests and performs no completeness validation. Missing cached
 vectors fail instead of being regenerated. Evaluation uses the configured `k` and
 batch size.
 
 Configured `sweep_dimensions` require a validation table under the
-[validation-table rule](cli.md#validation-table). Beyond that rule, both source
-names and all derived names must be distinct, even if the stored width is not
-requested. A target equal to the stored width uses the original
-tables; smaller targets use `<source>_d<dimension>`. Each missing destination is created by one streaming
-`create_table()` call, with no query-result limit, retaining every row, UUID,
-and row metadata value. Only vectors change to exact float32 prefixes and
-fixed-size Arrow types; no extra normalization is applied. Reference switches
-and image caps remain recorded but do not filter stored rows.
+[validation-table rule](cli.md#validation-table). The sweep owns experiment policy
+only: target dimensions, `<source>_d<dimension>` naming, distinct-name checks,
+pairing the reference table with the validation cache, and the loop over
+dimensions. Beyond the validation-table rule, both source names and all derived names must
+be distinct, even if the stored width is not requested. A target equal to the
+stored width uses the original tables; each smaller target calls
+`LanceDBIndex.derive_prefix()` on both sources. The
+[storage contract](retrieval.md#prefix-tables) defines how derived tables are
+copied, reused, and annotated. Reference switches and image caps remain recorded
+but do not filter stored rows. The sweep delegates cached validation preparation
+to `Experiment.evaluate_cached()`.
 
-Derived tables retain the source configuration with only `vector_dimension`
-changed. Other schema metadata is preserved; absent snapshots remain absent.
-
-Existing destinations are reused if they open. Open/create/stream failures
-propagate without scan, repair, overwrite, or cleanup; this is not a crash
-durability guarantee. The sweep delegates cached validation preparation to `Experiment.evaluate_cached()`.
-
-Each dimension enables validation caching and uses its own table names and output
-directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`.
+Each per-dimension configuration sets `vector_dimension`, enables validation
+caching, and uses its own table names and output directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`. It leaves
+`embedding.truncate_dim` as configured, since the sweep embeds nothing.
 The CLI owns one native W&B context per dimension, with no outer run, explicit
 identity/group settings, or
 resume checks. Standard reports have null reference counts unless a matching

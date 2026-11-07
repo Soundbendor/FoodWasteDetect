@@ -14,7 +14,7 @@ from classification.datasets.image_dataset import FoodX251ImageDataset
 from classification.encoders.base import Embedder
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions, text_references
-from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.lancedb import BUILD_SNAPSHOT_KEY, LanceDBIndex
 from classification.schemas import PointRecord
 
 
@@ -125,7 +125,7 @@ class IndexBuilder:
             self.uri,
             self.table,
             dimension,
-            metadata={"classification.build": self.config.model_dump_json()},
+            metadata={BUILD_SNAPSHOT_KEY: self.config.model_dump_json()},
         )
         return index, images, records, Counter()
 
@@ -179,7 +179,7 @@ class IndexBuilder:
                 self.uri,
                 table_name,
                 dimension,
-                metadata={"classification.build": self.config.model_dump_json()},
+                metadata={BUILD_SNAPSHOT_KEY: self.config.model_dump_json()},
             )
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"

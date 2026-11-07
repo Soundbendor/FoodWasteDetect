@@ -1,7 +1,7 @@
 """LanceDB storage and exact cosine retrieval."""
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Self
 
@@ -11,7 +11,11 @@ from lancedb.db import LanceDBConnection
 from lancedb.table import LanceTable
 from numpy.typing import NDArray
 
+from classification.experiments.config import ExperimentConfig
 from classification.schemas import Neighbor, PointRecord, SourceIdentity
+
+# Schema metadata key holding the ExperimentConfig JSON that created a table.
+BUILD_SNAPSHOT_KEY = "classification.build"
 
 
 class LanceDBIndex:
@@ -63,6 +67,74 @@ class LanceDBIndex:
         )
         return cls(path, opened)
 
+    @property
+    def dimension(self) -> int:
+        """Return the stored vector width.
+
+        Raises:
+            ValueError: If the schema lacks a positive fixed-size ``vector`` field.
+        """
+        schema = self.table.schema
+        position = schema.get_field_index("vector")
+        if position < 0:
+            raise ValueError(f"Table {self.name!r} must have a fixed-size vector field")
+        vector_type = schema.field(position).type
+        if not pa.types.is_fixed_size_list(vector_type) or vector_type.list_size <= 0:
+            raise ValueError(f"Table {self.name!r} must have a positive fixed-size vector field")
+        return vector_type.list_size
+
+    def derive_prefix(self, destination: str, dimension: int, *, batch_size: int) -> Self:
+        """Open or create a table holding this table's rows at a shorter vector width.
+
+        An existing destination is reused without reading this table. Otherwise one
+        streaming creation copies every row, record ID, and metadata value, replacing
+        each vector with its exact float32 prefix. The creation snapshot records the
+        derived ``vector_dimension``; other schema metadata is kept verbatim.
+
+        Args:
+            destination: Name of the derived table in the same database.
+            dimension: Prefix width, at most the stored width.
+            batch_size: Rows per streamed batch.
+
+        Returns:
+            An index over the derived table.
+
+        Raises:
+            ValueError: If ``dimension`` exceeds the stored width.
+            pydantic.ValidationError: If the stored creation snapshot is invalid.
+        """
+        connection = LanceDBConnection(self.uri)
+        if destination in connection:
+            return type(self)(self.uri, connection.open_table(destination))
+        stored_width = self.dimension
+        if dimension > stored_width:
+            raise ValueError(
+                f"Prefix width {dimension} exceeds the stored width {stored_width} "
+                f"of table {self.name!r}"
+            )
+        schema = self._prefix_schema(dimension)
+        reader = pa.RecordBatchReader.from_batches(
+            schema, _prefix_batches(self.table, schema, dimension, batch_size)
+        )
+        created = connection.create_table(
+            destination, data=reader, schema=schema, mode="create", exist_ok=False
+        )
+        return type(self)(self.uri, created)
+
+    def _prefix_schema(self, dimension: int) -> pa.Schema:
+        """Narrow the vector type and record the derived width in the snapshot."""
+        schema = self.table.schema
+        metadata = dict(schema.metadata or {})
+        key = BUILD_SNAPSHOT_KEY.encode("utf-8")
+        encoded = metadata.get(key)
+        if encoded is not None:
+            snapshot = ExperimentConfig.model_validate_json(encoded)
+            snapshot.vector_dimension = dimension
+            metadata[key] = snapshot.model_dump_json().encode("utf-8")
+        position = schema.get_field_index("vector")
+        vector = schema.field(position).with_type(pa.list_(pa.float32(), dimension))
+        return schema.set(position, vector).with_metadata(metadata)
+
     def append(
         self,
         records: Sequence[PointRecord],
@@ -102,7 +174,7 @@ class LanceDBIndex:
         KeyError; storage errors propagate.
         """
         if not identities:
-            return np.empty((0, self.table.schema.field("vector").type.list_size), dtype=np.float32)
+            return np.empty((0, self.dimension), dtype=np.float32)
 
         def literal(value: str) -> str:
             return "'" + value.replace("'", "''") + "'"
@@ -135,3 +207,16 @@ class LanceDBIndex:
         return [
             Neighbor(id=p["id"], label=p["class"], score=1 - float(p["_distance"])) for p in points
         ]
+
+
+def _prefix_batches(
+    source: LanceTable, schema: pa.Schema, dimension: int, batch_size: int
+) -> Iterator[pa.RecordBatch]:
+    """Stream every source row, replacing only the vector column with its prefix."""
+    position = schema.get_field_index("vector")
+    vector_type = schema.field(position).type
+    for batch in source.search().limit(None).to_batches(batch_size=batch_size):
+        vectors = np.asarray(batch.column(position).to_pylist(), dtype=np.float32)
+        arrays = list(batch.columns)
+        arrays[position] = pa.array(vectors[:, :dimension].tolist(), type=vector_type)
+        yield pa.RecordBatch.from_arrays(arrays, schema=schema)

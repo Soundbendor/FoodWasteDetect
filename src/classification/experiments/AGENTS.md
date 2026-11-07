@@ -3,8 +3,10 @@
 This package runs the whole-image classification baseline. `Experiment` owns
 stage orchestration, validation-batch preparation, and report publication; `evaluation.py` owns batch prediction,
 progress, and completeness checks. `IndexBuilder` owns reference selection and
-encoding batches. Ordinary database operations use `retrieval`;
-`matryoshka.py` directly reads and creates the sweep's derived tables.
+encoding batches. Database operations use `retrieval`. `matryoshka.py` holds
+sweep policy (dimensions, `<source>_d<dim>` names, distinct-name and source-width
+checks) and derives prefix tables through `LanceDBIndex.derive_prefix()`; it must
+not import LanceDB or Arrow.
 
 | Task | Read before changing |
 | --- | --- |
