@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -143,22 +142,24 @@ class Experiment:
         )
 
     def build_vector_database(self) -> IndexSummary:
-        """Build or resume references, optimize the table, and publish its summary."""
-        index, counts = self._index_builder().build_reference_index()
-        return self._publish_index(index, counts)
+        """Build or resume the reference table, mark it complete, and publish its summary."""
+        index = self._index_builder().build_reference_table()
+        return self._publish_index(index)
 
-    def _publish_index(self, index: LanceDBIndex, counts: Counter[str]) -> IndexSummary:
-        """Write index.json before publishing reference counts to the tracker."""
+    def _publish_index(self, index: LanceDBIndex) -> IndexSummary:
+        """Write index.json before publishing the table's source counts to the tracker."""
+        counts = dict(index.source_counts())
         artifact = IndexSummary(
             table=index.name,
             uri=str(index.uri),
+            dimension=index.dimension,
             source_counts=counts,
             config=self.config,
         )
         self.output.mkdir(parents=True, exist_ok=True)
         write_json(self.output / "index.json", artifact.model_dump(mode="json"))
         if self.tracker:
-            self.tracker.reference_counts(dict(counts))
+            self.tracker.reference_counts(counts)
         return artifact
 
     def _prepare_validation_batches(self, *, cached_only: bool) -> Iterator[EmbeddingBatch]:
@@ -171,7 +172,7 @@ class Experiment:
         if cached_only:
             cache = LanceDBIndex.open(uri=options.uri, table=table)
         else:
-            cache = self._index_builder().build_validation_table(table)
+            cache = self._index_builder().build_validation_cache(table)
         metadata = self.dataset.iter_batches("val", self.batch_size, decode=False)
         return (
             (
@@ -219,6 +220,7 @@ class Experiment:
         report = EvaluationReport(
             config=self.config,
             table=index.name,
+            dimension=index.dimension,
             reference_source_counts=reference_source_counts,
             predictions=predictions,
             metrics=metrics(predictions, self.classes),

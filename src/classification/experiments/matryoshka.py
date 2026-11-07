@@ -66,7 +66,6 @@ def run_sweep(
     for dimension in dimensions:
         reference, validation = table_names(sources, dimension, source_width)
         settings = config.model_dump()
-        settings["vector_dimension"] = dimension
         settings["lancedb"].update(table=reference, validation_table=validation)
         settings["cache_validation_embeddings"] = True
         settings["output_dir"] = str(output / f"d{dimension}")

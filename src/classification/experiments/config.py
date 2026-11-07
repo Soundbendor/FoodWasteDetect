@@ -97,7 +97,6 @@ class ExperimentConfig(ConfigModel):
     embed_images: bool
     embed_class_labels: bool
     embed_descriptions: bool
-    vector_dimension: PositiveInt | None = None
     sweep_dimensions: list[PositiveInt] | None = None
     n_imgs_per_class: PositiveInt | None = None
     descriptions_file: str | None = None

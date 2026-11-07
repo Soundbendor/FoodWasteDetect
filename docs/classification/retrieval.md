@@ -6,7 +6,7 @@ and publication; [tracking](tracking.md) owns W&B summaries and tables.
 
 | Module | Responsibility |
 | --- | --- |
-| `retrieval/lancedb.py` | `LanceDBIndex`: table lifecycle, appends, identity/vector reads, counts, optimization, and search |
+| `retrieval/lancedb.py` | `LanceDBIndex`: table lifecycle, build operations (open or create, missing keys, mark complete), appends, identity/vector reads, counts, optimization, and search |
 | `retrieval/voting.py` | Pure `classify()` majority vote |
 | `retrieval/metrics.py` | Pure per-query ranking and aggregate classification/retrieval metrics |
 | `schemas.py` | `PointRecord`, source identity, neighbor, prediction, and retrieval-metric types |
@@ -18,7 +18,10 @@ expansion, independently of `output_dir`. `exists()` and `open()` do not create
 missing database directories. `LanceDBIndex.open(uri, table)` and
 `LanceDBIndex.create(uri, table, dimension, *, metadata=None)` return an index with an open
 `LanceTable`; `LanceDBIndex.exists(uri, table)` checks storage without constructing
-an index. Each factory uses the local `LanceDBConnection` directly. Index methods
+an index. `LanceDBIndex.open_or_create(uri, table, dimension, *, metadata=None)`
+opens an existing table, or creates one when the name is absent; `dimension` is a
+callable invoked only when creating, and `metadata` is ignored for an existing
+table. Each factory uses the local `LanceDBConnection` directly. Index methods
 can therefore use their table without an unopened state or repeated guards.
 Creation uses an explicit Arrow schema with
 non-null string fields `id`, `class`, `source_kind`, `source_identity`, and `value`,
@@ -29,6 +32,16 @@ overwrites. `PointRecord` supplies UUIDs and maps its `label` to stored `class`.
 to reject bad vectors. It adds completed batches without application write
 retries. Compatibility checks and transaction/rollback guarantees are outside the
 current scope; follow [experiment persistence](experiments.md#reference-builds-and-resumption).
+
+Builds resume and finish through two operations over expected source keys
+(`(source_kind, source_identity)` pairs):
+
+- `missing(keys)` performs one metadata-only scan and returns the requested keys
+  that are absent, each once, in first-request order.
+- `mark_complete(expected, *, optimize)` raises `ValueError` stating how many of
+  the expected keys are missing when any are absent, without optimizing. Extra
+  stored rows are allowed. Only after the check passes does `optimize=True`
+  call `optimize()`. Reference builds pass `True`; validation caches pass `False`.
 
 | Read operation | Contract |
 | --- | --- |
@@ -56,17 +69,17 @@ batch_size)` returns an index over a table in the same database:
 - Otherwise one streaming `create_table()` call, with no query-result limit,
   retains every row, UUID, and row metadata value. Only vectors change to exact
   float32 prefixes and fixed-size Arrow types; no normalization is applied.
-- The creation snapshot (see
-  [table creation metadata](experiments.md#table-creation-metadata)) is
-  revalidated and records the derived `vector_dimension`; an invalid snapshot
-  fails before creation. Other schema metadata is preserved, and absent snapshots
-  remain absent.
+- Schema metadata, including the creation snapshot (see
+  [table creation metadata](experiments.md#table-creation-metadata)), is copied
+  verbatim without parsing; absent snapshots remain absent. The derived width is
+  read from the prefix table's `dimension`.
 
 Open, create, and stream failures propagate without scan, repair, overwrite, or
 cleanup; this is not a crash durability guarantee.
 
-`optimize()` delegates to LanceDB defaults. Reference build finalization owns its
-invocation; ordinary evaluation never calls it. The recorded LanceDB 0.40.0
+`optimize()` delegates to LanceDB defaults. Reference builds invoke it only
+through `mark_complete(..., optimize=True)`; validation caches and evaluation
+never call it. The recorded LanceDB 0.40.0
 policy compacts files and retains seven days of historical versions with
 `delete_unverified=False`; the application supplies no custom policy. See the
 [verification log](../experiments.md#unified-experiment-pipeline-november-2-2026)

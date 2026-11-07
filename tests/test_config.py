@@ -32,14 +32,16 @@ def test_defaults_spelling_and_mutable_nested_attributes():
     }
     assert config.n_imgs_per_class is config.descriptions_file is config.ollama is None
     assert config.description_count is None
-    assert config.vector_dimension is None
     assert config.cache_validation_embeddings is False
     config.k = 3
     config.embedding.batch_size = 5
-    config.vector_dimension = 2
     assert config.k == 3
     assert config.embedding.batch_size == 5
-    assert config.vector_dimension == 2
+
+
+def test_vector_dimension_setting_no_longer_exists():
+    with pytest.raises(ValidationError, match="vector_dimension"):
+        ExperimentConfig.model_validate(config_data(vector_dimension=2))
 
 
 @pytest.mark.parametrize(
@@ -87,7 +89,6 @@ def test_unknown_fields(section):
         "embedding.truncate_dim",
         "n_imgs_per_class",
         "description_count",
-        "vector_dimension",
         "embedding.vertex.max_attempts",
         "embedding.vertex.max_concurrency",
     ],
@@ -192,7 +193,9 @@ def test_shipped_experiment_configurations_load(name):
 
 def test_evaluation_reports_require_reference_source_counts():
     config = ExperimentConfig.model_validate(config_data())
-    fields = dict(config=config, table="references", predictions=[], metrics=metrics([], ["A"]))
+    fields = dict(
+        config=config, table="references", dimension=2, predictions=[], metrics=metrics([], ["A"])
+    )
     for missing in ({}, {"reference_source_counts": None}):
         with pytest.raises(ValidationError, match="reference_source_counts"):
             EvaluationReport(**fields, **missing)
@@ -202,7 +205,7 @@ def test_evaluation_reports_require_reference_source_counts():
 def test_optional_services_and_report_serialization():
     config = ExperimentConfig.model_validate(config_data())
     summary = IndexSummary(
-        table="references", uri="/db", source_counts={"class_name": 2}, config=config
+        table="references", uri="/db", dimension=2, source_counts={"class_name": 2}, config=config
     )
     assert summary.config is config
     assert summary.model_dump(mode="json")["config"] == config.model_dump(mode="json")

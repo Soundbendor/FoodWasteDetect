@@ -1,7 +1,7 @@
 """LanceDB storage and exact cosine retrieval."""
 
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Self
 
@@ -11,7 +11,6 @@ from lancedb.db import LanceDBConnection
 from lancedb.table import LanceTable
 from numpy.typing import NDArray
 
-from classification.experiments.config import ExperimentConfig
 from classification.schemas import Neighbor, PointRecord, SourceIdentity
 
 # Schema metadata key holding the ExperimentConfig JSON that created a table.
@@ -67,6 +66,31 @@ class LanceDBIndex:
         )
         return cls(path, opened)
 
+    @classmethod
+    def open_or_create(
+        cls,
+        uri: str | Path,
+        table: str,
+        dimension: Callable[[], int],
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> Self:
+        """Open an existing table, or create one when the name is absent.
+
+        Args:
+            uri: Local database directory.
+            table: Table name.
+            dimension: Returns the vector width; called only when creating, so an
+                existing table never constructs an encoder.
+            metadata: Creation schema metadata; ignored for an existing table.
+
+        Returns:
+            An index over the opened or created table.
+        """
+        if cls.exists(uri, table):
+            return cls.open(uri, table)
+        return cls.create(uri, table, dimension(), metadata=metadata)
+
     @property
     def dimension(self) -> int:
         """Return the stored vector width.
@@ -88,8 +112,8 @@ class LanceDBIndex:
 
         An existing destination is reused without reading this table. Otherwise one
         streaming creation copies every row, record ID, and metadata value, replacing
-        each vector with its exact float32 prefix. The creation snapshot records the
-        derived ``vector_dimension``; other schema metadata is kept verbatim.
+        each vector with its exact float32 prefix. Schema metadata, including the
+        creation snapshot, is kept verbatim.
 
         Args:
             destination: Name of the derived table in the same database.
@@ -101,7 +125,6 @@ class LanceDBIndex:
 
         Raises:
             ValueError: If ``dimension`` exceeds the stored width.
-            pydantic.ValidationError: If the stored creation snapshot is invalid.
         """
         connection = LanceDBConnection(self.uri)
         if destination in connection:
@@ -122,18 +145,11 @@ class LanceDBIndex:
         return type(self)(self.uri, created)
 
     def _prefix_schema(self, dimension: int) -> pa.Schema:
-        """Narrow the vector type and record the derived width in the snapshot."""
+        """Narrow the vector type, keeping schema metadata verbatim."""
         schema = self.table.schema
-        metadata = dict(schema.metadata or {})
-        key = BUILD_SNAPSHOT_KEY.encode("utf-8")
-        encoded = metadata.get(key)
-        if encoded is not None:
-            snapshot = ExperimentConfig.model_validate_json(encoded)
-            snapshot.vector_dimension = dimension
-            metadata[key] = snapshot.model_dump_json().encode("utf-8")
         position = schema.get_field_index("vector")
         vector = schema.field(position).with_type(pa.list_(pa.float32(), dimension))
-        return schema.set(position, vector).with_metadata(metadata)
+        return schema.set(position, vector)
 
     def append(
         self,
@@ -150,6 +166,29 @@ class LanceDBIndex:
             ],
             on_bad_vectors="error",
         )
+
+    def mark_complete(self, expected: Iterable[SourceIdentity], *, optimize: bool) -> None:
+        """Verify that every expected source key is stored, then optionally optimize.
+
+        Args:
+            expected: Source keys the finished table must contain; repeats count once.
+                Extra stored rows are allowed.
+            optimize: Compact the table after verification. Reference builds pass
+                True; validation caches pass False and are never optimized.
+
+        Raises:
+            ValueError: If any expected key is absent, stating how many; nothing
+                is optimized.
+        """
+        expected = list(dict.fromkeys(expected))
+        absent = self.missing(expected)
+        if absent:
+            raise ValueError(
+                f"Table {self.name!r} is missing {len(absent)} of {len(expected)} "
+                "expected source keys; resume the build before using it"
+            )
+        if optimize:
+            self.optimize()
 
     def optimize(self) -> None:
         """Compact with LanceDB's default maintenance and version-retention policy."""
@@ -176,6 +215,15 @@ class LanceDBIndex:
         """Scan all identity metadata without reading vectors."""
         rows = self.table.search().select(["source_kind", "source_identity"]).limit(None).to_list()
         return [(row["source_kind"], row["source_identity"]) for row in rows]
+
+    def missing(self, keys: Iterable[SourceIdentity]) -> list[SourceIdentity]:
+        """Return requested source keys absent from the table.
+
+        One metadata-only scan; vectors are never read. Each absent key appears
+        once, in first-request order.
+        """
+        stored = frozenset(self.get_record_ids())
+        return [key for key in dict.fromkeys(keys) if key not in stored]
 
     def fetch_vectors(self, identities: Sequence[SourceIdentity]) -> NDArray[np.float32]:
         """Fetch vectors in the requested identity order, including repeats.

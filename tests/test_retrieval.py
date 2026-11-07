@@ -351,3 +351,63 @@ def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
     assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r['id']) == sorted(
         before, key=lambda r: r['id'])
     assert index.query(np.asarray([1.0, 1.0]), 5) == neighbors
+
+
+def test_open_or_create_computes_the_dimension_only_when_creating(tmp_path):
+    dimension = Mock(return_value=3)
+    created = LanceDBIndex.open_or_create(
+        tmp_path / "db", "lazy", dimension, metadata={"snapshot": "kept"}
+    )
+    assert created.dimension == 3
+    dimension.assert_called_once_with()
+    created.append([PointRecord("A", "class_name", "A", "A")], np.ones((1, 3)))
+
+    reopened = LanceDBIndex.open_or_create(
+        tmp_path / "db", "lazy", Mock(side_effect=AssertionError("encoder")),
+        metadata={"snapshot": "replaced"},
+    )
+    assert reopened.dimension == 3
+    assert reopened.table.count_rows() == 1
+    assert reopened.table.schema.metadata == {b"snapshot": b"kept"}
+
+
+def test_missing_reports_absent_source_keys_once_in_request_order(tmp_path):
+    index = LanceDBIndex.create(tmp_path / "db", "keys", 2)
+    assert index.missing([]) == []
+    index.append(
+        [PointRecord("A", "class_name", "A", "A"), PointRecord("A", "training_image", "it's", "f")],
+        np.ones((2, 2)),
+    )
+    requested = [
+        ("training_image", "B"), ("class_name", "A"), ("training_image", "A"),
+        ("training_image", "B"), ("training_image", "it's"),
+    ]
+    assert index.missing(requested) == [("training_image", "B"), ("training_image", "A")]
+
+
+def fragmented(tmp_path, name):
+    index = LanceDBIndex.create(tmp_path / "db", name, 2)
+    for i in range(4):
+        index.append([PointRecord("A", "class_name", str(i), str(i))], np.ones((1, 2)))
+    keys = [("class_name", str(i)) for i in range(4)]
+    return index, keys, index.table.stats()["fragment_stats"]["num_fragments"]
+
+
+@pytest.mark.parametrize("optimize", [False, True])
+def test_mark_complete_states_the_missing_count_before_optimizing(tmp_path, optimize):
+    index, keys, fragments = fragmented(tmp_path, "partial")
+    expected = keys + [("class_name", "absent"), ("training_image", "0"), ("class_name", "absent")]
+    with pytest.raises(ValueError, match="missing 2 of 6 expected source keys"):
+        index.mark_complete(expected, optimize=optimize)
+    assert index.table.stats()["fragment_stats"]["num_fragments"] == fragments
+
+
+@pytest.mark.parametrize("optimize", [False, True])
+def test_mark_complete_optimizes_only_when_requested(tmp_path, optimize):
+    index, keys, fragments = fragmented(tmp_path, "complete")
+    before = index.table.to_arrow().to_pylist()
+    index.mark_complete(keys[1:], optimize=optimize)
+    after = index.table.stats()["fragment_stats"]["num_fragments"]
+    assert after < fragments if optimize else after == fragments
+    assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r["id"]) == sorted(
+        before, key=lambda r: r["id"])

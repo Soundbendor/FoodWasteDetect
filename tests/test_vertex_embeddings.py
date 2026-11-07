@@ -464,15 +464,17 @@ def test_index_builder_direct_build_and_complete_resume(transport, resume_config
     requests, _, _ = transport(lambda request: response())
     experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     builder = experiment._index_builder()
-    index, counts = builder.build_reference_index()
+    index = builder.build_reference_table()
+    counts = index.source_counts()
     assert counts == {"class_name": 1, "generated_description": 2, "training_image": 13}
-    cache = builder.build_validation_table(resume_config["lancedb"]["validation_table"])
+    cache = builder.build_validation_cache(resume_config["lancedb"]["validation_table"])
     assert len(cache.get_record_ids()) == 13
     before = len(requests)
     resumed = Experiment(ExperimentConfig.model_validate(resume_config))
     resumed_builder = resumed._index_builder()
-    resumed_index, resumed_counts = resumed_builder.build_reference_index()
-    resumed_builder.build_validation_table(resume_config["lancedb"]["validation_table"])
+    resumed_index = resumed_builder.build_reference_table()
+    resumed_counts = resumed_index.source_counts()
+    resumed_builder.build_validation_cache(resume_config["lancedb"]["validation_table"])
     assert resumed_index.name == index.name
     assert resumed_counts == counts
     assert len(requests) == before
@@ -741,7 +743,7 @@ def test_cached_predictions_pair_vectors_with_metadata(transport, resume_config,
     assert tracker.evaluation.call_args.args[0].metrics == report["metrics"]
 
 
-def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config):
+def test_reference_summary_counts_all_stored_rows(transport, resume_config):
     from classification.retrieval.lancedb import LanceDBIndex
     from classification.schemas import PointRecord
     from classification.experiments.classification import Experiment
@@ -753,16 +755,7 @@ def test_reference_snapshot_counts_all_stored_rows_once(transport, resume_config
     # Counts include duplicate and unrequested stored rows; filtering is a set.
     index.append([PointRecord("Apple", "class_name", identity, identity)
                   for identity in ("Apple", "Apple", "old")], np.ones((3, 128)))
-    original = LanceDBIndex.get_record_ids
-    scans = []
-
-    def get_record_ids(index):
-        scans.append(index.name)
-        return original(index)
-
-    with patch.object(LanceDBIndex, "get_record_ids", get_record_ids):
-        summary = experiment.build_vector_database().model_dump(mode="json")
-    assert scans == [index.name]
+    summary = experiment.build_vector_database().model_dump(mode="json")
     assert summary["source_counts"] == {
         "class_name": 3, "generated_description": 2, "training_image": 13,
     }

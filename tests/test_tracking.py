@@ -315,7 +315,7 @@ config = {"k": 1, "embed_images": False, "embed_class_labels": True,
           "embed_descriptions": False, "embedding": {"model_id": "openai/clip-vit-base-patch32"}}
 config.update(dataset=dict(name="foodx251", root="/raw"), lancedb=dict(uri="/db", table="references"), output_dir="/output")
 config = ExperimentConfig.model_validate(config)
-report = EvaluationReport(config=config, table="references", reference_source_counts={"class_name": 1}, predictions=[], metrics=dict(metrics([], ["A", "B"]), **report["metrics"]))
+report = EvaluationReport(config=config, table="references", dimension=2, reference_source_counts={"class_name": 1}, predictions=[], metrics=dict(metrics([], ["A", "B"]), **report["metrics"]))
 original_configuration = Tracker.configuration
 
 def publish(tracker, config):
@@ -538,9 +538,8 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     assert report['config']['embedding']['truncate_dim'] == 1024
     from classification.cli import wandb
     initial_config = wandb.init.call_args.kwargs['config']
-    assert initial_config['vector_dimension'] is None
-    assert report['config']['vector_dimension'] == 1024
-    assert dict(initial_config, vector_dimension=1024) == report['config']
+    assert report['dimension'] == 1024
+    assert initial_config == report['config']
     artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
     config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
     assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == initial_config

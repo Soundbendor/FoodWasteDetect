@@ -206,14 +206,12 @@ class ExperimentTests(unittest.TestCase):
         snapshot = self.client.open_table(name).schema.metadata
         document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
         self.assertEqual(document, exp.config)
-        self.assertEqual(exp.config.vector_dimension, 2)
         exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
         with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
             exp.build_vector_database()
         self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
         exp._embedder = None
-        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
             exp.build_vector_database()
         self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
 
@@ -221,7 +219,7 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment()
         exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
         exp.build_vector_database()
-        exp._index_builder().build_validation_table('cache')
+        exp._index_builder().build_validation_cache('cache')
         before = exp.config.model_dump()
         exp._embedder = None
         with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
@@ -246,19 +244,17 @@ class ExperimentTests(unittest.TestCase):
 
         with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
             with self.assertRaisesRegex(RuntimeError, 'partial'):
-                exp._index_builder().build_validation_table('cache')
+                exp._index_builder().build_validation_cache('cache')
         snapshot = self.client.open_table('cache').schema.metadata
         document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
         self.assertEqual(document, exp.config)
-        self.assertEqual(exp.config.vector_dimension, 2)
         exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
         with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
-            cache = exp._index_builder().build_validation_table('cache')
+            cache = exp._index_builder().build_validation_cache('cache')
         self.assertEqual(cache.table.schema.metadata, snapshot)
         exp._embedder = None
-        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
-            resumed = exp._index_builder().build_validation_table('cache')
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
+            resumed = exp._index_builder().build_validation_cache('cache')
         self.assertEqual(resumed.table.schema.metadata, snapshot)
 
     def test_malformed_snapshots_do_not_block_resumes(self):
@@ -283,14 +279,13 @@ class ExperimentTests(unittest.TestCase):
                 expected = {b'classification.build': payload.encode()}
                 with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
                     exp.build_vector_database()
-                    exp._index_builder().build_validation_table(cache_name)
+                    exp._index_builder().build_validation_cache(cache_name)
                 self.assertEqual(reference.table.schema.metadata, expected)
                 self.assertEqual(cache.table.schema.metadata, expected)
                 exp._embedder = None
-                with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-                     patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
+                with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
                     exp.build_vector_database()
-                    exp._index_builder().build_validation_table(cache_name)
+                    exp._index_builder().build_validation_cache(cache_name)
                 for table in (exp.config.lancedb.table, cache_name):
                     reopened = self.client.open_table(table)
                     self.assertEqual(reopened.schema.metadata, expected)
@@ -395,9 +390,11 @@ class ExperimentTests(unittest.TestCase):
         (exp.output / 'descriptions.json').write_text(json.dumps({
             'descriptions': {'Apple': [], 'Pear': []}
         }))
-        with self.assertRaisesRegex(ValueError, 'No records inserted into LanceDB'):
+        with self.assertRaisesRegex(ValueError, 'No reference records selected'):
             exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
+        self.assertFalse(LanceDBIndex.exists(self.db_path, exp.config.lancedb.table))
+        self.embedder_constructor.assert_not_called()
 
     def test_description_rejects_invalid_timeouts_before_session_construction(self):
         exp = self.experiment((False, False, True))
@@ -575,9 +572,9 @@ class ExperimentTests(unittest.TestCase):
         self.describer_constructor.side_effect = AssertionError('Cached descriptions regenerated')
         report = exp.run().model_dump(mode="json")
         artifact = json.loads((exp.output / 'index.json').read_text())
-        self.assertEqual(set(artifact), {'table', 'uri', 'source_counts', 'config'})
-        self.assertEqual(set(report), {'config', 'predictions',
-                                      'table', 'reference_source_counts', 'metrics'})
+        self.assertEqual(set(artifact), {'table', 'uri', 'dimension', 'source_counts', 'config'})
+        self.assertEqual(set(report), {'config', 'predictions', 'table', 'dimension',
+                                      'reference_source_counts', 'metrics'})
         folder = next(exp.output.glob('evaluation_*'))
         self.assertEqual([p.name for p in folder.iterdir()], ['report.json'])
         self.assertEqual(json.loads((folder / 'report.json').read_text()), report)
@@ -906,6 +903,40 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
         self.assertEqual(exp.build_vector_database().model_dump(mode="json"), artifact)
         self.assertIsNone(exp._embedder)
+
+    def test_summary_and_report_record_the_table_dimension_without_mutating_config(self):
+        exp = self.experiment()
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.config = updated(exp.config, 'cache_validation_embeddings', True)
+        before = exp.config.model_dump()
+        summary = exp.build_vector_database().model_dump(mode="json")
+        self.assertEqual(summary['dimension'], 2)
+        self.assertEqual(json.loads((exp.output / 'index.json').read_text())['dimension'], 2)
+        report = exp.evaluate().model_dump(mode="json")
+        self.assertEqual(report['dimension'], 2)
+        self.assertEqual(exp.config.model_dump(), before)
+        self.assertEqual(report['config'], summary['config'])
+        exp._embedder = None
+        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')):
+            self.assertEqual(exp.evaluate_cached().dimension, 2)
+
+    def test_lost_appends_fail_completion_with_missing_count(self):
+        exp = self.experiment((True, True, False))
+        with patch.object(LanceDBIndex, 'append'), \
+             patch.object(LanceDBIndex, 'optimize', side_effect=AssertionError('optimize')):
+            with self.assertRaisesRegex(ValueError, 'missing 4 of 4 expected source keys'):
+                exp.build_vector_database()
+        self.assertFalse((exp.output / 'index.json').exists())
+        exp.build_vector_database()
+        exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.config = updated(exp.config, 'cache_validation_embeddings', True)
+        with patch.object(LanceDBIndex, 'append'), \
+             patch.object(LanceDBIndex, 'optimize', side_effect=AssertionError('optimize')):
+            with self.assertRaisesRegex(ValueError, "'cache' is missing 2 of 2 expected"):
+                exp.evaluate()
+        self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
+        with patch.object(LanceDBIndex, 'optimize', side_effect=AssertionError('optimize')):
+            self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
 
     def test_stale_or_mismatched_summaries_do_not_affect_reported_counts(self):
         exp = self.experiment()

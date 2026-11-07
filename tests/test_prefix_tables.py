@@ -1,6 +1,5 @@
 """Prefix tables derived through the storage interface on temporary LanceDB."""
 
-import json
 from unittest.mock import Mock
 
 import lancedb
@@ -9,7 +8,6 @@ import pyarrow as pa
 import pytest
 from config_helpers import config_data
 from lancedb.db import LanceDBConnection
-from pydantic import ValidationError
 
 from classification.experiments.config import ExperimentConfig
 from classification.retrieval import lancedb as lancedb_module
@@ -82,43 +80,26 @@ def test_existing_destination_is_reused_without_reading_source(source, monkeypat
     assert rows(reused) == rows(first)
 
 
-def snapshot_document(dimension):
-    return ExperimentConfig.model_validate(
-        config_data(embedding={"model_id": "google/ge-v2", "truncate_dim": 3}, vector_dimension=dimension)
-    ).model_dump()
-
-
-@pytest.mark.parametrize("invalid", ["json", "empty", "partial", "nested", "dimension"])
-def test_invalid_snapshot_fails_before_destination_creation(tmp_path, invalid):
-    document = snapshot_document(4)
-    if invalid == "partial":
-        document = {"dataset": {"name": "foodx251"}}
-    elif invalid == "nested":
-        document["embedding"]["batch_size"] = "1"
-    elif invalid == "dimension":
-        document["vector_dimension"] = 0
-    encoded = {"json": "{broken", "empty": ""}.get(invalid, json.dumps(document))
-    source = LanceDBIndex.create(tmp_path / "db", "invalid", 4, metadata={"classification.build": encoded})
-
-    with pytest.raises(ValidationError):
-        source.derive_prefix("destination", 2, batch_size=1)
-
-    assert not LanceDBIndex.exists(source.uri, "destination")
-    assert source.table.schema.metadata[b"classification.build"] == encoded.encode()
-
-
-def test_snapshot_records_derived_width_and_keeps_other_settings(tmp_path):
-    encoded = json.dumps(snapshot_document(4))
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        ExperimentConfig.model_validate(
+            config_data(embedding={"model_id": "google/ge-v2", "truncate_dim": 3})
+        ).model_dump_json(),
+        "{broken",
+        "",
+    ],
+)
+def test_creation_snapshot_is_copied_verbatim(tmp_path, encoded):
     metadata = {"classification.build": encoded, "unrelated": "kept"}
     source = LanceDBIndex.create(tmp_path / "db", "source", 4, metadata=metadata)
 
-    derived = source.derive_prefix("source_d2", 2, batch_size=1).table.schema.metadata
+    derived = source.derive_prefix("source_d2", 2, batch_size=1)
 
-    snapshot = json.loads(derived[b"classification.build"])
-    assert snapshot == dict(json.loads(encoded), vector_dimension=2)
-    assert snapshot["embedding"]["truncate_dim"] == 3
-    assert derived[b"unrelated"] == b"kept"
-    assert source.table.schema.metadata[b"classification.build"] == encoded.encode()
+    expected = {key.encode(): value.encode() for key, value in metadata.items()}
+    assert derived.table.schema.metadata == expected
+    assert LanceDBIndex.open(source.uri, "source_d2").table.schema.metadata == expected
+    assert source.table.schema.metadata == expected
 
 
 def test_absent_snapshot_stays_absent(source):

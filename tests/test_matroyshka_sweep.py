@@ -34,7 +34,7 @@ def sources(tmp_path, monkeypatch):
         ('reference', 'class_name', ['A', 'B'], vectors),
         ('validation', 'validation_image', ['second', 'first'], [query * 2, query]),
     ):
-        index = LanceDBIndex.create(uri, name, 3072)
+        index = LanceDBIndex.create(uri, name, 3072, metadata={'classification.build': f'{{"created": "{name}"}}'})
         index.table.add([
             dict(id=f'{name}-{i}', source_kind=kind, source_identity=identity,
                  value=f'kept-{i}', vector=vector.tolist(), **{'class': label})
@@ -95,7 +95,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         effective = kwargs['config']
         assert effective['k'] == 1
         assert effective['embedding']['truncate_dim'] is None
-        assert effective['vector_dimension'] == dimension
+        assert 'vector_dimension' not in effective
         assert effective['cache_validation_embeddings'] is True
         assert effective['embed_images'] is True
         assert effective['n_imgs_per_class'] == 1
@@ -111,6 +111,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
         assert report_artifact.files['report.json'] == report_path.read_bytes()
         report = json.loads(report_path.read_text())
         assert report['config'] == effective
+        assert report['dimension'] == dimension
         assert report['reference_source_counts'] == {'class_name': 2}
         assert run.summary['reference_source_counts'] == {'class_name': 2}
         assert report['metrics']['evaluated'] == 2
@@ -133,6 +134,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
             rows = table.to_arrow().to_pylist()
             expected = [dict(row, vector=row['vector'][:dimension]) for row in snapshots[source]]
             assert rows == expected
+            assert table.schema.metadata == {b'classification.build': f'{{"created": "{source}"}}'.encode()}
     assert [item['majority_vote_accuracy'] for item in summary] == [1, 0, 1]
     for name, snapshot in snapshots.items():
         assert connection.open_table(name).to_arrow().to_pylist() == snapshot
@@ -154,7 +156,7 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     original = cli.evaluate_cached
 
     def evaluate(effective, tracker):
-        if effective.vector_dimension == 1536:
+        if effective.lancedb.table == 'reference_d1536':
             raise RuntimeError('later failure')
         return original(effective, tracker)
 
@@ -199,13 +201,15 @@ def test_sweep_variants_are_independent_validated_models(sources):
         assert isinstance(effective, ExperimentConfig)
         variants.append(effective)
         return EvaluationReport(
-            config=effective, table=effective.lancedb.table,
+            config=effective, table=effective.lancedb.table, dimension=0,
             reference_source_counts={'class_name': 2}, predictions=[], metrics=metrics([], ["A", "B"]),
         ), "synthetic"
 
     sweep.run_sweep(config, evaluate)
     assert [variant.embedding.truncate_dim for variant in variants] == [None, None, None]
-    assert [variant.vector_dimension for variant in variants] == raw['sweep_dimensions']
+    assert [variant.lancedb.table for variant in variants] == [
+        'reference_d768', 'reference_d1536', 'reference']
+    assert all('vector_dimension' not in variant.model_dump() for variant in variants)
     assert len({id(variant.embedding) for variant in variants}) == 3
     assert config.model_dump() == ExperimentConfig.model_validate(raw).model_dump()
     assert config.embedding.truncate_dim is None
@@ -245,7 +249,7 @@ def test_custom_non_gemini_order_and_truncated_sources(sources):
 
     def evaluate(effective):
         variants.append(effective)
-        return EvaluationReport(config=effective, table=effective.lancedb.table,
+        return EvaluationReport(config=effective, table=effective.lancedb.table, dimension=0,
             reference_source_counts={'class_name': 2}, predictions=[], metrics=metrics([], ['A', 'B'])), 'run'
 
     result = sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)

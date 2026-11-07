@@ -16,7 +16,7 @@ selection and image ownership use [data](data.md); for scoring use
 | Module              | Responsibility                                                                                            |
 | ------------------- | --------------------------------------------------------------------------------------------------------- |
 | `classification.py` | `Experiment`: configuration, lazy encoder, stages, summaries, and report publication                      |
-| `index_builder.py`  | `IndexBuilder`: input selection, reference resumption, encoding batches, and validation-cache preparation |
+| `index_builder.py`  | `IndexBuilder`: input selection, encoding batches, `build_reference_table()`, and `build_validation_cache()` |
 | `descriptions.py`   | Saved-vocabulary reading and ordered text-reference construction                                          |
 | `evaluation.py`     | Batch evaluation, metadata-row conversion, predictions, and completeness checks                           |
 | `config.py`         | Experiment settings                                                                                      |
@@ -82,20 +82,29 @@ It affects images only. Every class must have a selected training reference when
 images are enabled; selected image decoding can still fail later. Compare
 complete retrieval strategies: changing sources changes reference counts.
 
-New builds prepare and validate reference inputs before creating a table or
-loading the encoder. Existing builds follow this sequence:
+`IndexBuilder.build_reference_table()` sequences three `LanceDBIndex` storage
+operations; it makes no other storage calls and never mutates the experiment
+configuration. New and resumed builds follow one flow:
 
-1. Open the table, prepare the capped unbatched training selection, check class
-   coverage, and prepare text references.
-2. Scan all `(source_kind, source_identity)` metadata once, without a result
-   limit. Initialize counts from every stored row, including duplicates and
-   extra rows; use the identity set to exclude saved inputs.
-3. Batch and decode only remaining images, preserving the original dataset
-   splits and order. Caps apply before saved-identity exclusion.
+1. Prepare and validate inputs: the capped unbatched training selection, class
+   coverage, and text references (which reads the vocabulary). The expected
+   source keys are every prepared text record and selected training image. An
+   empty expected set fails before any table exists. Validation failures happen
+   before a table is created or the encoder is constructed.
+2. `open_or_create()` opens the table, or creates it when absent. The dimension
+   is supplied lazily as `embedder.dimension` and computed only when creating,
+   so resuming never constructs the encoder for that reason.
+3. `missing()` scans all `(source_kind, source_identity)` metadata once, without
+   a result limit, and returns the expected keys that are absent. Only those text
+   records and images are embedded, preserving the original dataset splits and
+   order. Caps apply before filtering by missing keys. A table with no missing
+   keys never constructs the encoder.
 4. Encode each text/image batch and append its strictly paired records/vectors
-   once. Advance counts and progress only after successful append.
-5. Optimize the reference table, including a no-work resume, then return the
-   index and counts to `Experiment` for summary publication.
+   once. Advance progress only after a successful append.
+5. `mark_complete(expected, optimize=True)` verifies that every expected key is
+   present, failing with the number of missing keys otherwise, and only then
+   optimizes the table. A no-work resume is verified and optimized again.
+   The builder returns the table to `Experiment` for summary publication.
 
 Image records are built directly from column-oriented batches, with strict
 pairing of `class`, `source_id`, and `fname` columns. `EmbeddingBatch` is an
@@ -105,18 +114,20 @@ evaluation and reporting. Keep final partial batches. The dataset and encoder
 
 Successful batches survive later failures; failed encoding batches save no
 vectors. Storage failures propagate without write retries or rollback. Existing
-rows and UUIDs remain intact. Optimization failure preserves the previous
-summary; a rerun retries finalization without re-encoding saved inputs. Use one
+rows and UUIDs remain intact. Completion or optimization failure preserves the
+previous summary; a rerun retries finalization without re-encoding saved inputs. Use one
 writer and finish building/optimization before concurrent readers. Shared jobs
 need a filesystem path visible to all nodes and separate evaluation output
 directories.
 
 ### Table creation metadata
 
-New reference and validation tables store the full `ExperimentConfig` as JSON under
-the Arrow schema key `classification.build`, with `vector_dimension` set to the
-stored vector size. The snapshot records creation settings and remains unchanged
-on resume, even when the current configuration differs.
+New reference tables and validation caches store the full `ExperimentConfig` as
+JSON under the Arrow schema key `classification.build`. The snapshot is the
+configuration exactly as supplied; the configuration has no dimension setting,
+and the stored width comes from the table itself (`LanceDBIndex.dimension`). The
+snapshot remains unchanged on resume, even when the current configuration
+differs, and prefix tables copy it verbatim.
 
 ## Validation caching
 
@@ -125,12 +136,15 @@ configuration enforces the [validation-table rule](cli.md#validation-table) at
 load time. All backends share this path. Cache records use `validation_image`;
 they never join reference searches.
 
-Evaluation opens references first, creates or opens the cache, scans saved
-identities, and completes missing validation batches. It then fetches vectors in
-metadata order through `Experiment`. Complete caches need neither image
-decoding nor a model/client. Disabled caching recomputes validation embeddings.
-Validation-cache preparation does not optimize tables; evaluation does not
-optimize or insert into reference tables.
+Evaluation opens references first, then calls
+`IndexBuilder.build_validation_cache()`. It uses the same storage operations as a
+reference build: `open_or_create()` with a lazy dimension, `missing()` over every
+validation-split `validation_image` key, appends of the missing batches, and
+`mark_complete(expected, optimize=False)`. Completion fails with the number of
+missing keys before any vectors are fetched. `Experiment` then fetches vectors in
+metadata order. Complete caches need neither image decoding nor a model/client.
+Disabled caching recomputes validation embeddings. Validation caches are never
+optimized; evaluation does not optimize or insert into reference tables.
 
 Cache persistence uses the same completed-batch boundary as reference insertion.
 For paid backends, restarting can repeat requests from the unfinished batch;
@@ -138,9 +152,11 @@ For paid backends, restarting can repeat requests from the unfinished batch;
 
 ## Artifact and failure contract
 
-`build_vector_database()` returns and writes `index.json` only after successful
-optimization. It contains `table`, resolved `uri`, `source_counts`, and
-effective `config`, including defaults. Writers return an `IndexSummary`.
+`build_vector_database()` returns and writes `index.json` only after the
+reference table is marked complete and optimized. It contains `table`, resolved
+`uri`, `dimension` (the table's stored vector width), `source_counts` (read from
+the table with `LanceDBIndex.source_counts()`, duplicates included), and the
+unmodified `config`, including defaults. Writers return an `IndexSummary`.
 Evaluation never reads `index.json`: a missing, stale, mismatched, or malformed
 summary has no effect on reports. Before evaluating, `evaluate()` and
 `evaluate_cached()` read `reference_source_counts` from the reference table with
@@ -163,8 +179,8 @@ This is validation accuracy, not official test accuracy. Strict metadata/vector
 pairing is retained.
 
 A successful evaluation writes only `evaluation_<UTC timestamp>/report.json`,
-containing `config`, `table`, `reference_source_counts`, `predictions`, and
-`metrics`. Predictions contain image metadata, majority-vote label, vote
+containing `config`, `table`, `dimension` (the reference table's stored vector
+width), `reference_source_counts`, `predictions`, and `metrics`. Predictions contain image metadata, majority-vote label, vote
 fraction, nearest label, first-k neighbors, and per-query retrieval metrics.
 [Retrieval](retrieval.md) defines the denominators and abstention behavior.
 Reports have no separate prediction/metric files, manifest, prediction `value`,
@@ -217,9 +233,12 @@ copied, reused, and annotated. Reference switches and image caps remain recorded
 but do not filter stored rows. The sweep delegates cached validation preparation
 to `Experiment.evaluate_cached()`.
 
-Each per-dimension configuration sets `vector_dimension`, enables validation
-caching, and uses its own table names and output directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`. It leaves
-`embedding.truncate_dim` as configured, since the sweep embeds nothing.
+Each per-dimension configuration enables validation caching and uses its own
+table names and output directory under
+`<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`. It leaves
+`embedding.truncate_dim` as configured, since the sweep embeds nothing, and
+records no dimension; each report's `dimension` comes from that dimension's
+reference table. Prefix tables keep the source's creation snapshot verbatim.
 The CLI owns one native W&B context per dimension, with no outer run, explicit
 identity/group settings, or
 resume checks. Each dimension's report and W&B summary carry the source counts of
