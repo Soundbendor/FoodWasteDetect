@@ -713,6 +713,17 @@ def test_existing_prefix_is_reused_without_copying_again(source):
     assert records_of(reused) == records_of(first) == PREFIX_ROWS
 
 
+def test_existing_prefix_from_another_encoder_is_refused(source):
+    other = dict(SYNTHETIC_ENCODER, **{"embedding.model_id": "other"})
+    EmbeddingTable.create(
+        source.uri, "source_d2", "reference", 2, snapshot="", encoder=other,
+        inputs=SYNTHETIC_INPUTS,
+    )
+
+    with pytest.raises(IncompatibleTableError, match="embedding.model_id: stored 'other'"):
+        source.derive_prefix("source_d2", 2, batch_size=1)
+
+
 def test_legacy_destination_is_refused_and_left_unchanged(source):
     legacy_table(source.uri, "source_d2", None)
 

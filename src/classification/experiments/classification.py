@@ -99,13 +99,8 @@ class Experiment:
             dimension=dimension,
         )
 
-    def _evaluation_batches(self, reference: EmbeddingTable) -> Iterator[EmbeddingBatch]:
-        """Encode uncached validation images in bounded batches.
-
-        The encoder's width must equal the reference table's before any image is
-        encoded.
-        """
-        reference.require_compatible(dimension=self.embedder.dimension)
+    def _evaluation_batches(self) -> Iterator[EmbeddingBatch]:
+        """Encode uncached validation images in bounded batches."""
         for batch in self.dataset.iter_batches("val", self.batch_size):
             vectors = self.embedder.encode_images(batch.pop("image"))
             yield batch, vectors
@@ -176,7 +171,7 @@ class Experiment:
             self.tracker.reference_counts(counts)
         return artifact
 
-    def _validation_table(self) -> str:
+    def _validation_table_name(self) -> str:
         table = self.config.lancedb.validation_table
         if table is None:
             raise ValueError("lancedb.validation_table is required for cached evaluation")
@@ -204,13 +199,14 @@ class Experiment:
         """
         reference, counts = self._prepare_evaluation(encoder=encoder_fingerprint(self.config))
         if self.config.cache_validation_embeddings:
-            cache = self._index_builder().build_validation_cache(self._validation_table())
+            cache = self._index_builder().build_validation_cache(self._validation_table_name())
             reference.require_compatible(
                 encoder=cache.encoder_fingerprint, dimension=cache.dimension
             )
             batches = self._cached_batches(cache)
         else:
-            batches = self._evaluation_batches(reference)
+            reference.require_compatible(dimension=self.embedder.dimension)
+            batches = self._evaluation_batches()
         return self._execute_evaluation(reference, counts, batches)
 
     def evaluate_cached(self) -> EvaluationReport:
@@ -221,7 +217,7 @@ class Experiment:
         """
         cache = EmbeddingTable.open_complete(
             self.config.lancedb.uri,
-            self._validation_table(),
+            self._validation_table_name(),
             "validation_cache",
             expected=self._index_builder().expected_validation_keys,
         )

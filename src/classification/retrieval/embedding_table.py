@@ -24,6 +24,8 @@ type TableRole = Literal["reference", "validation_cache"]
 type FingerprintValue = str | int | bool | None
 # Vector-affecting settings by name, such as configuration paths; compared generically.
 type Fingerprint = Mapping[str, FingerprintValue]
+# Each differing setting mapped to its stored and required values.
+type Differences = dict[str, tuple[FingerprintValue, FingerprintValue]]
 
 # Version of the store-owned header format; tables recording another version are legacy.
 SCHEMA_VERSION = 2
@@ -57,9 +59,14 @@ class IncompatibleTableError(EmbeddingTableError):
         differences: Each differing setting mapped to its stored and required values.
     """
 
-    def __init__(
-        self, message: str, *, differences: dict[str, tuple[FingerprintValue, FingerprintValue]]
-    ) -> None:
+    def __init__(self, message: str, *, differences: Differences) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Description listing every difference and the fix.
+            differences: Each differing setting mapped to its stored and required
+                values.
+        """
         super().__init__(message)
         self.differences = differences
 
@@ -242,7 +249,7 @@ class EmbeddingTable:
             EmbeddingTableError: If ``inputs`` does not match the role; nothing is
                 written.
         """
-        if (role == "reference") != (inputs is not None):
+        if not _inputs_match_role(role, inputs):
             requirement = "requires an" if role == "reference" else "has no"
             raise EmbeddingTableError(
                 f"Table {name!r}: a {role} table {requirement} inputs fingerprint"
@@ -361,7 +368,7 @@ class EmbeddingTable:
             IncompatibleTableError: If any value differs, listing each differing
                 setting with its stored and required values.
         """
-        differences: dict[str, tuple[FingerprintValue, FingerprintValue]] = {}
+        differences: Differences = {}
         if encoder is not None:
             differences.update(_differences(self._header.encoder, encoder))
         if inputs is not None:
@@ -400,7 +407,7 @@ class EmbeddingTable:
         """Open or create a prefix table holding this table's rows at a smaller dimension.
 
         An existing destination is opened under this table's role without reading this
-        table. Otherwise one streaming creation copies every row, record ID, and
+        table, and must record this table's fingerprints. Otherwise one streaming creation copies every row, record ID, and
         metadata value, replacing each vector with its exact float32 prefix. The new
         header keeps this table's role and records this table as the source; the
         creation snapshot is copied verbatim. A new prefix of a complete table is
@@ -417,9 +424,13 @@ class EmbeddingTable:
 
         Raises:
             EmbeddingTableError: If ``dimension`` exceeds this table's dimension.
+            IncompatibleTableError: If an existing destination records other
+                fingerprints; it is left unchanged.
         """
         if type(self).exists(self.uri, destination):
-            return type(self).open(self.uri, destination, self.role)
+            existing = type(self).open(self.uri, destination, self.role)
+            existing.require_compatible(encoder=self._header.encoder, inputs=self._header.inputs)
+            return existing
         if dimension > self.dimension:
             raise EmbeddingTableError(
                 f"Prefix width {dimension} exceeds the stored width {self.dimension} "
@@ -651,7 +662,7 @@ def _read_header(table: LanceTable) -> _Header:
     if (
         header is None
         or header.schema_version != SCHEMA_VERSION
-        or (header.role == "reference") != (header.inputs is not None)
+        or not _inputs_match_role(header.role, header.inputs)
         or _SNAPSHOT_KEY not in metadata
         or table.schema.remove_metadata() != _schema(header, "").remove_metadata()
     ):
@@ -663,9 +674,12 @@ def _read_header(table: LanceTable) -> _Header:
     return header
 
 
-def _differences(
-    stored: Mapping[str, FingerprintValue], required: Fingerprint
-) -> dict[str, tuple[FingerprintValue, FingerprintValue]]:
+def _inputs_match_role(role: TableRole, inputs: Fingerprint | None) -> bool:
+    """Reference tables carry an inputs fingerprint; validation caches never do."""
+    return (role == "reference") == (inputs is not None)
+
+
+def _differences(stored: Fingerprint, required: Fingerprint) -> Differences:
     """Return each setting whose stored and required values differ, in sorted order."""
     return {
         key: (stored.get(key), required.get(key))

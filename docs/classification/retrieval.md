@@ -174,7 +174,9 @@ verification.
 the same database:
 
 - An existing destination is opened under the source's role without reading the
-  source; a legacy destination raises `LegacyTableError` and is left unchanged.
+  source; a legacy destination raises `LegacyTableError`, and one recording other
+  fingerprints than the source raises `IncompatibleTableError`. Either is left
+  unchanged.
 - A prefix wider than the source dimension raises `EmbeddingTableError` before
   anything is written. A prefix equal to the source dimension copies vectors
   unchanged.

@@ -18,6 +18,29 @@ For hardware acceptance, read the [V100 procedure](#v100-kernel-check) together
 with the current encoder's hardware constraints. Procedures here retain the root
 guide's explicit authorization requirements.
 
+## Encoder and inputs fingerprints (2026-11-06)
+
+**Every existing embedding table must be rebuilt under a new name again.** The
+header schema version is now 2, so tables written under version 1, including
+any rebuilt after the [header entry](#embedding-table-header-2026-11-06), raise
+`LegacyTableError`. New headers record an encoder fingerprint (model ID,
+truncation dimension, Vertex classification-prompt flag) and, for reference
+tables, an inputs fingerprint (dataset name, reference-source switches, image
+cap, vocabulary SHA-256)
+([fingerprints](classification/retrieval.md#fingerprints-and-compatibility)).
+Resuming or evaluating with different vector-affecting settings now raises
+`IncompatibleTableError` listing each difference; the earlier test that resumed
+after a truncation change now expects refusal. No table was read or migrated.
+
+Checks ran with the same commands as the
+[header entry](#embedding-table-header-2026-11-06), in the worktree's `default`
+and `jina-cpu` environments installed from the committed lockfile. Ruff, the
+format check, and scoped ty passed in both. The default suite passed 607 tests and
+316 subtests with two skips. The Jina suite passed 606 tests and 316 subtests with
+three skips. Both reported the existing Sentence Transformers deprecation warning.
+The test task hid GPUs and set Hugging Face offline mode. No model or dataset
+downloads, GPU work, live cloud requests, or shared storage were used.
+
 ## Completion markers (2026-11-06)
 
 Embedding tables now record completion as a LanceDB version tag named `complete`

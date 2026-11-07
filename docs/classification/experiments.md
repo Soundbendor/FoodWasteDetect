@@ -140,7 +140,8 @@ directories.
 `fingerprints.encoder_fingerprint(config)` and
 `fingerprints.inputs_fingerprint(config, vocabulary)` compute the
 [fingerprints](retrieval.md#fingerprints-and-compatibility) that every new table
-records and that every resume and evaluation compares:
+records. Resumes compare both; evaluation compares the encoder fingerprint and
+dimension only, since reference inputs do not change the validation vectors:
 
 | Fingerprint | Settings | Recorded on |
 | --- | --- | --- |

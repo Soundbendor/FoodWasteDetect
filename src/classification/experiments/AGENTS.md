@@ -20,8 +20,9 @@ source-dimension checks) and derives prefix tables through
 | Query depth, voting, or reported metrics | [Retrieval contract](../../../docs/classification/retrieval.md) |
 | Progress bars or W&B publication | [Tracking](../../../docs/classification/tracking.md) |
 
-`fingerprints.py` alone decides which settings change vectors; pass its
-fingerprints to every `EmbeddingTable` resume or evaluation open.
+`fingerprints.py` alone decides which settings change vectors. Pass both
+fingerprints to every `EmbeddingTable` resume; evaluation opens require the
+encoder fingerprint and dimension only.
 `Experiment.evaluate()` completes and marks an enabled cache; `evaluate_cached()`
 reads existing vectors regardless of the cache flag. Evaluation opens tables with
 `EmbeddingTable.open_complete()`, supplying expected keys from `IndexBuilder`;
