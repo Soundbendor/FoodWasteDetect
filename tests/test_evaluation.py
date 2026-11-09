@@ -24,31 +24,45 @@ def batch(labels):
 
 
 def test_query_depth_preserves_support_order_and_metadata():
+    import json
+
     metadata, vectors = batch(["A", "B", "C"])
     metadata["extra"] = ["first", "second", "third"]
+    snapshot = {key: list(values) for key, values in metadata.items()}
     ranked = [
         Neighbor(id="first", label="B", score=0.9),
         Neighbor(id="second", label="A", score=0.8),
         Neighbor(id="third", label="A", score=0.7),
     ]
-    query = Mock(side_effect=[ranked, [], []])
+    deep_ranked = [
+        Neighbor(id=f"n{i}", label="B" if i == 4 else "A", score=0.9 - 0.1 * i)
+        for i in range(5)
+    ]
+    query = Mock(side_effect=[ranked, deep_ranked, []])
 
     predictions = evaluation.evaluate_batches(
         [(metadata, vectors)], query=query, class_counts={"A": 7, "B": 1},
         k=2, expected_count=3,
     )
 
+    assert metadata == snapshot
+    json.dumps(predictions)
     assert [call.args[1] for call in query.call_args_list] == [7, 5, 5]
     for call, vector in zip(query.call_args_list, vectors, strict=True):
         np.testing.assert_array_equal(call.args[0], vector)
     assert [row["extra"] for row in predictions] == ["first", "second", "third"]
     assert predictions[0]["prediction"] == "B"
+    assert predictions[0]["nearest"] == "B"
     assert predictions[0]["vote_fraction"] == 0.5
     assert predictions[0]["neighbors"] == ranked[:2]
     assert predictions[0]["retrieval_metrics"]["relevant_reference_count"] == 7
     assert predictions[0]["retrieval_metrics"]["average_precision_at_r"] == pytest.approx(1 / 6)
-    assert predictions[1]["prediction"] is None
-    assert predictions[1]["vote_fraction"] == 0
+    assert predictions[1]["prediction"] == "A"
+    assert predictions[1]["vote_fraction"] == 1.0
+    assert predictions[1]["neighbors"] == deep_ranked[:2]
+    assert predictions[1]["retrieval_metrics"]["top5_hit"] is True
+    assert predictions[2]["prediction"] is None
+    assert predictions[2]["vote_fraction"] == 0
     assert predictions[2]["retrieval_metrics"]["relevant_reference_count"] == 0
 
 

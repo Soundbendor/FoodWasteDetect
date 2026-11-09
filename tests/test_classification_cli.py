@@ -25,7 +25,10 @@ def config_path(tmp_path):
     return path
 
 
-@pytest.mark.parametrize("command", [[], ["experiment"], ["download_model"]])
+@pytest.mark.parametrize(
+    "command",
+    [[], ["experiment"], ["experiment", "matroyshka-sweep"], ["download_model"]],
+)
 def test_help_before_loading(command):
     with patch("builtins.open", side_effect=AssertionError("file load")), pytest.raises(SystemExit) as error:
         main([*command, "--help"])
@@ -124,13 +127,18 @@ def test_stage_failures_propagate(config_path, failure):
 @pytest.mark.parametrize("failure", [None, RuntimeError("pull failed"), KeyboardInterrupt()])
 def test_download_validates_only_ollama_section(failure):
     settings = dict(binary_path="ollama", host="localhost:11434", startup_timeout=2, request_timeout=3)
-    with patch("builtins.open", mock_open(read_data=yaml.safe_dump(dict(ollama=settings, unrelated="legacy")))), patch("classification.llm.ollama.OllamaSession") as session:
+    with (
+        patch("builtins.open", mock_open(read_data=yaml.safe_dump(dict(ollama=settings, unrelated="legacy")))),
+        patch("classification.cli.wandb.init") as initialize,
+        patch("classification.llm.ollama.OllamaSession") as session,
+    ):
         session.return_value.__enter__.return_value.download_model.side_effect = failure
         if failure is None:
             main(["download_model", "requested:tag"])
         else:
             with pytest.raises(type(failure)):
                 main(["download_model", "requested:tag"])
+        initialize.assert_not_called()
         session.assert_called_once_with(OllamaConfig.model_validate(settings))
         session.return_value.__enter__.return_value.download_model.assert_called_once_with("requested:tag")
         session.return_value.__exit__.assert_called_once()
@@ -207,73 +215,53 @@ class SlurmOverrideTests(unittest.TestCase):
             pixi = temporary / "pixi"
             pixi.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$CAPTURE_ARGUMENTS"\n')
             pixi.chmod(0o755)
-            env = dict(
+            base_env = dict(
                 os.environ,
                 PATH=f"{temporary}:{os.environ.get('PATH', '')}",
                 SLURM_SUBMIT_DIR=str(root),
                 CAPTURE_ARGUMENTS=str(capture),
             )
-            env.pop("INTERNVL_PIXI_ENV", None)
-            for script, stage in (
-                ("scripts/generate_descriptions.sbatch", "describe"),
-                ("sbatch/test_embedding.sbatch", "evaluate"),
-                ("sbatch/run_embedding.sbatch", "run"),
+            base_env.pop("INTERNVL_PIXI_ENV", None)
+            overrides = [
+                "config with spaces.yml",
+                "--set",
+                "output_dir=output with spaces",
+                "--set=k=3",
+                "--set=lancedb.uri=shared db",
+                "--set=lancedb.table=fixture",
+            ]
+            for script, stage, envs in (
+                ("scripts/generate_descriptions.sbatch", "describe", (None,)),
+                ("sbatch/test_embedding.sbatch", "evaluate", (None, "jina-cu126", "cu126", "jina-cpu")),
+                ("sbatch/run_embedding.sbatch", "run", (None, "jina-cu126", "cu126", "jina-cpu")),
             ):
                 subprocess.run(["bash", "-n", str(root / script)], check=True)
-                for extra in (
-                    [],
-                    [
-                        "config with spaces.yml",
-                        "--set",
-                        "output_dir=output with spaces",
-                        "--set=k=3",
-                        "--set=lancedb.uri=shared db",
-                        "--set=lancedb.table=fixture",
-                    ],
-                ):
-                    with self.subTest(script=script, extra=extra):
-                        subprocess.run(
-                            ["bash", str(root / script), *extra], env=env, check=True
-                        )
-                        actual = capture.read_bytes().decode().rstrip("\0").split("\0")
-                        self.assertEqual(
-                            actual,
-                            [
-                                "run",
-                                "--manifest-path",
-                                "src/classification/pyproject.toml",
-                                "--as-is",
-                                "-e",
-                                "cu126",
-                                "classification",
-                                "experiment",
-                                stage,
-                                "--config_file",
-                                *(extra or ["cfg/classification.yml"]),
-                            ],
-                        )
-
-
-    def test_wrappers_select_explicit_environment_and_forward_overrides(self):
-        root = Path(__file__).resolve().parents[1]
-        with tempfile.TemporaryDirectory() as directory:
-            temporary = Path(directory)
-            capture = temporary / "arguments"
-            pixi = temporary / "pixi"
-            pixi.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$CAPTURE_ARGUMENTS"\n')
-            pixi.chmod(0o755)
-            for stage, script in [("run", "run_embedding"), ("evaluate", "test_embedding")]:
-                for environment in ["jina-cu126", "cu126", "jina-cpu"]:
-                    env = dict(os.environ, PATH=f"{temporary}:{os.environ.get('PATH', '')}",
-                               SLURM_SUBMIT_DIR=str(root), CAPTURE_ARGUMENTS=str(capture),
-                               INTERNVL_PIXI_ENV=environment)
-                    extra = ["config with spaces.yml", "--set", "output_dir=with spaces", "--set=k=3"]
-                    subprocess.run(["bash", str(root / f"sbatch/{script}.sbatch"), *extra],
-                                   env=env, check=True)
-                    actual = capture.read_bytes().decode().rstrip("\0").split("\0")
-                    self.assertEqual(actual, ["run", "--manifest-path", "src/classification/pyproject.toml",
-                                              "--as-is", "-e", environment, "classification", "experiment",
-                                              stage, "--config_file", *extra])
+                for environment in envs:
+                    env = dict(base_env)
+                    if environment is not None:
+                        env["INTERNVL_PIXI_ENV"] = environment
+                    for extra in ([], overrides) if environment is None else (overrides,):
+                        with self.subTest(script=script, env=environment, extra=extra):
+                            subprocess.run(
+                                ["bash", str(root / script), *extra], env=env, check=True
+                            )
+                            actual = capture.read_bytes().decode().rstrip("\0").split("\0")
+                            self.assertEqual(
+                                actual,
+                                [
+                                    "run",
+                                    "--manifest-path",
+                                    "src/classification/pyproject.toml",
+                                    "--as-is",
+                                    "-e",
+                                    environment or "cu126",
+                                    "classification",
+                                    "experiment",
+                                    stage,
+                                    "--config_file",
+                                    *(extra or ["cfg/classification.yml"]),
+                                ],
+                            )
 
 
 if __name__ == "__main__":

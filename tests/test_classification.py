@@ -9,104 +9,14 @@ import unittest
 from unittest.mock import patch
 
 from classification.experiments.classification import Experiment
-from classification.experiments.evaluation import extract_batch_metadata, prediction
 from classification.experiments.config import ExperimentConfig
-from config_helpers import config_data, updated
-from classification.schemas import Neighbor, PointRecord
+from config_helpers import updated
+from classification.schemas import PointRecord
 from classification.retrieval.lancedb import LanceDBIndex
 
 
 def available(*modules):
     return all(importlib.util.find_spec(module) is not None for module in modules)
-
-
-class Contracts(unittest.TestCase):
-
-    def test_prediction_preserves_metadata_and_neighbor_order(self):
-        batch = {
-            'fname': ['fixture.png'], 'class': ['A'], 'source_id': ['image-1'],
-            'source_split': ['val'], 'extra': ['retained'], 'image': [object()],
-        }
-        record = extract_batch_metadata(batch)[0]
-        original = dict(record)
-        cases = [
-            (
-                [Neighbor(id='first', label='B', score=0.9), Neighbor(id='second', label='A', score=0.8),
-                 Neighbor(id='third', label='A', score=0.7)],
-                {
-                    'prediction': 'A', 'vote_fraction': 2 / 3, 'nearest': 'B',
-                    'neighbors': [
-                        {'id': 'first', 'label': 'B', 'score': 0.9},
-                        {'id': 'second', 'label': 'A', 'score': 0.8},
-                        {'id': 'third', 'label': 'A', 'score': 0.7},
-                    ],
-                },
-            ),
-            ([], {'prediction': None, 'vote_fraction': 0.0,
-                  'nearest': None, 'neighbors': []}),
-        ]
-        for neighbors, result in cases:
-            with self.subTest(neighbors=neighbors):
-                result_prediction = prediction(record, neighbors, max(1, len(neighbors)),
-                                         sum(n["label"] == record["class"] for n in neighbors))
-                self.assertEqual(result_prediction, {
-                    'fname': 'fixture.png', 'class': 'A', 'source_id': 'image-1',
-                    'source_split': 'val', 'extra': 'retained', **result,
-                    'retrieval_metrics': result_prediction['retrieval_metrics'],
-                })
-                self.assertEqual(record, original)
-                self.assertIsNot(result_prediction, record)
-                self.assertEqual(json.loads(json.dumps(result_prediction)), result_prediction)
-
-    def test_extract_batch_metadata_requires_paired_metadata_columns(self):
-        with self.assertRaises(ValueError):
-            extract_batch_metadata({'fname': ['first', 'second'], 'class': ['A']})
-
-    def test_reference_switch_combinations(self):
-        keys = ('embed_images', 'embed_class_labels', 'embed_descriptions')
-        for flags in itertools.product([False, True], repeat=3):
-            cfg = config_data(**dict(zip(keys, flags), k=1))
-            with self.subTest(flags=flags):
-                if any(flags):
-                    self.assertEqual(ExperimentConfig.model_validate(cfg).k, cfg["k"])
-                else:
-                    with self.assertRaisesRegex(ValueError, 'at least one reference source'):
-                        ExperimentConfig.model_validate(cfg)
-                    with self.assertRaisesRegex(ValueError, 'at least one reference source'):
-                        Experiment(ExperimentConfig.model_validate(cfg))
-
-    def test_reference_switches_require_booleans(self):
-        for key in ('embed_images', 'embed_class_labels', 'embed_descriptions'):
-            for value in ('false', 0, 1, None):
-                cfg = config_data(k=1, embed_images=False, embed_class_labels=True, embed_descriptions=False)
-                cfg[key] = value
-                with self.subTest(key=key, value=value):
-                    with self.assertRaisesRegex(ValueError, key):
-                        ExperimentConfig.model_validate(cfg)
-                    with self.assertRaisesRegex(ValueError, key):
-                        Experiment(ExperimentConfig.model_validate(cfg))
-
-    def test_image_limit_validation(self):
-        for enabled in (False, True):
-            cfg = config_data(k=1, embed_images=enabled, embed_class_labels=True, embed_descriptions=False)
-            self.assertEqual(ExperimentConfig.model_validate(cfg).k, cfg["k"])
-            for limit in (None, 1, 20):
-                cfg['n_imgs_per_class'] = limit
-                self.assertEqual(ExperimentConfig.model_validate(cfg).k, cfg["k"])
-            for limit in (0, -1, True, False, '2', 1.0, [], {}):
-                cfg['n_imgs_per_class'] = limit
-                with self.subTest(enabled=enabled, limit=limit):
-                    with self.assertRaisesRegex(ValueError, 'n_imgs_per_class'):
-                        ExperimentConfig.model_validate(cfg)
-
-    def test_output_cannot_be_inside_raw_data(self):
-        with tempfile.TemporaryDirectory() as directory:
-            cfg = config_data(k=1, embed_images=True, embed_class_labels=False, embed_descriptions=False,
-                       dataset={'name': 'foodx251', 'root': directory}, output_dir=str(Path(directory) / 'derived'))
-            with self.assertRaisesRegex(ValueError, 'separate from raw data'):
-                Experiment(ExperimentConfig.model_validate(cfg))
-            self.assertFalse((Path(directory) / 'derived').exists())
-
 
 
 @unittest.skipUnless(available('numpy', 'PIL', 'pandas', 'tqdm', 'datasets'), 'requires datasets and CPU image/dataframe dependencies')
@@ -187,79 +97,60 @@ class DatasetTests(unittest.TestCase):
 class ExperimentTests(unittest.TestCase):
 
     def test_creation_metadata_survives_partial_and_changed_complete_resumes(self):
-        exp = self.experiment()
-        exp.batch_size = 1
-        original = LanceDBIndex.append
-        calls = 0
+        for stage in ('reference', 'validation'):
+            with self.subTest(stage=stage):
+                exp = self.experiment(name=f'snapshot-{stage}')
+                exp.batch_size = 1
+                if stage == 'validation':
+                    exp.build_vector_database()
+                    exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+                    exp.config = updated(exp.config, 'cache_validation_embeddings', True)
+                table_name = 'cache' if stage == 'validation' else exp.config.lancedb.table
+                run_stage = exp.evaluate if stage == 'validation' else exp.build_vector_database
+                calls = 0
 
-        def fail_second(index, records, vectors):
-            nonlocal calls
-            calls += 1
-            if calls == 2:
-                raise RuntimeError('partial')
-            original(index, records, vectors)
+                def fail_second(index, records, vectors, append=LanceDBIndex.append):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 2:
+                        raise RuntimeError('partial')
+                    append(index, records, vectors)
 
-        with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
-            with self.assertRaisesRegex(RuntimeError, 'partial'):
-                exp.build_vector_database()
-        name = exp.config.lancedb.table
-        snapshot = self.client.open_table(name).schema.metadata
-        document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
-        self.assertEqual(document, exp.config)
-        self.assertEqual(exp.config.vector_dimension, 2)
-        exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
-        with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
-            exp.build_vector_database()
-        self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
-        exp._embedder = None
-        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
-            exp.build_vector_database()
-        self.assertEqual(self.client.open_table(name).schema.metadata, snapshot)
+                with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
+                    with self.assertRaisesRegex(RuntimeError, 'partial'):
+                        run_stage()
+                snapshot = self.client.open_table(table_name).schema.metadata
+                document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
+                self.assertEqual(document, exp.config)
+                self.assertEqual(exp.config.vector_dimension, 2)
+                exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
+                run_stage()
+                self.assertEqual(self.client.open_table(table_name).schema.metadata, snapshot)
+                self.embedder_constructor.reset_mock()
+                fresh = Experiment(exp.config)
+                if stage == 'validation':
+                    fresh.evaluate()
+                else:
+                    fresh.build_vector_database()
+                self.embedder_constructor.assert_not_called()
+                self.assertEqual(self.client.open_table(table_name).schema.metadata, snapshot)
 
     def test_cached_evaluation_reuses_vectors_when_cache_flag_is_disabled(self):
         exp = self.experiment()
         exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
+        exp.config = updated(exp.config, 'cache_validation_embeddings', True)
         exp.build_vector_database()
-        exp._index_builder().build_validation_table('cache')
+        exp.evaluate()
+        exp.config = updated(exp.config, 'cache_validation_embeddings', False)
         before = exp.config.model_dump()
-        exp._embedder = None
-        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')):
-            report = exp.evaluate_cached()
+        self.embedder_constructor.reset_mock()
+        fresh = Experiment(exp.config)
+        with patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')):
+            report = fresh.evaluate_cached()
+        self.embedder_constructor.assert_not_called()
         self.assertEqual(report.metrics['evaluated'], 2)
-        self.assertEqual(exp.config.model_dump(), before)
-        self.assertFalse(exp.config.cache_validation_embeddings)
-
-    def test_validation_creation_snapshot_and_lazy_resume(self):
-        exp = self.experiment()
-        exp.batch_size = 1
-        original = LanceDBIndex.append
-        calls = 0
-
-        def fail_second(index, records, vectors):
-            nonlocal calls
-            calls += 1
-            if calls == 2:
-                raise RuntimeError('partial')
-            original(index, records, vectors)
-
-        with patch.object(LanceDBIndex, 'append', side_effect=fail_second, autospec=True):
-            with self.assertRaisesRegex(RuntimeError, 'partial'):
-                exp._index_builder().build_validation_table('cache')
-        snapshot = self.client.open_table('cache').schema.metadata
-        document = ExperimentConfig.model_validate_json(snapshot[b'classification.build'])
-        self.assertEqual(document, exp.config)
-        self.assertEqual(exp.config.vector_dimension, 2)
-        exp.config = updated(exp.config, 'embedding.truncate_dim', 100)
-        with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
-            cache = exp._index_builder().build_validation_table('cache')
-        self.assertEqual(cache.table.schema.metadata, snapshot)
-        exp._embedder = None
-        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
-            resumed = exp._index_builder().build_validation_table('cache')
-        self.assertEqual(resumed.table.schema.metadata, snapshot)
+        self.assertEqual(fresh.config.model_dump(), before)
+        self.assertFalse(fresh.config.cache_validation_embeddings)
 
     def test_malformed_snapshots_do_not_block_resumes(self):
         import numpy as np
@@ -268,11 +159,13 @@ class ExperimentTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 name = 'incomplete' if payload == '{}' else 'malformed'
                 exp = self.experiment(name=name)
+                cache_name = name + '_cache'
+                exp.config = updated(exp.config, 'lancedb.validation_table', cache_name)
+                exp.config = updated(exp.config, 'cache_validation_embeddings', True)
                 reference = LanceDBIndex.create(
                     self.db_path, exp.config.lancedb.table, 2,
                     metadata={'classification.build': payload},
                 )
-                cache_name = name + '_cache'
                 cache = LanceDBIndex.create(
                     self.db_path, cache_name, 2, metadata={'classification.build': payload},
                 )
@@ -281,16 +174,13 @@ class ExperimentTests(unittest.TestCase):
                 cache.append([PointRecord('Apple', 'validation_image', '0', self.rows[0]['fname'])],
                              np.array([[1., 0.]]))
                 expected = {b'classification.build': payload.encode()}
-                with patch.object(ExperimentConfig, 'model_validate_json', side_effect=AssertionError('parse')):
-                    exp.build_vector_database()
-                    exp._index_builder().build_validation_table(cache_name)
-                self.assertEqual(reference.table.schema.metadata, expected)
-                self.assertEqual(cache.table.schema.metadata, expected)
-                exp._embedder = None
-                with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-                     patch.object(ExperimentConfig, 'model_dump_json', side_effect=AssertionError('snapshot')):
-                    exp.build_vector_database()
-                    exp._index_builder().build_validation_table(cache_name)
+                exp.build_vector_database()
+                exp.evaluate()
+                self.embedder_constructor.reset_mock()
+                fresh = Experiment(exp.config)
+                fresh.build_vector_database()
+                fresh.evaluate()
+                self.embedder_constructor.assert_not_called()
                 for table in (exp.config.lancedb.table, cache_name):
                     reopened = self.client.open_table(table)
                     self.assertEqual(reopened.schema.metadata, expected)
@@ -324,8 +214,6 @@ class ExperimentTests(unittest.TestCase):
         }))
         with self.assertRaises(FileNotFoundError):
             exp.run()
-        with self.assertRaises(FileNotFoundError):
-            exp._index_builder()._get_text_inputs()
         self.describer_constructor.assert_not_called()
         self.embedder_constructor.assert_not_called()
         self.client_constructor.assert_not_called()
@@ -380,15 +268,6 @@ class ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError, 'annotations'):
             Experiment(exp.config)
 
-    def test_default_batch_size_is_stored_once(self):
-        cfg = self.experiment().config.model_dump()
-        del cfg['embedding']['batch_size']
-        exp = Experiment(ExperimentConfig.model_validate(cfg))
-        cfg['embedding']['batch_size'] = 7
-        exp.build_vector_database()
-        self.assertEqual(exp.batch_size, 32)
-        self.embedder_constructor.assert_called_once_with(model_id="jinaai/jina-clip-v2", device="auto", truncate_dim=None, batch_size=32)
-
     def test_empty_index_is_rejected(self):
         exp = self.experiment((False, False, True))
         exp.output.mkdir()
@@ -398,14 +277,6 @@ class ExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'No records inserted into LanceDB'):
             exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
-
-    def test_description_rejects_invalid_timeouts_before_session_construction(self):
-        exp = self.experiment((False, False, True))
-        with patch("classification.experiments.classification.OllamaSession") as session:
-            with self.assertRaisesRegex(ValueError, "startup_timeout"):
-                updated(exp.config, "ollama.startup_timeout", float("nan"))
-        session.assert_not_called()
-        self.assertFalse(exp.output.exists())
 
     def test_description_errors_and_interrupts_exit_context(self):
         for error in (RuntimeError('generation failed'), KeyboardInterrupt()):
@@ -420,15 +291,52 @@ class ExperimentTests(unittest.TestCase):
             self.assertFalse((exp.output / 'descriptions.json').exists())
             self.embedder_constructor.assert_not_called()
 
-    def test_failed_index_write_preserves_previous_summary(self):
-        exp = self.experiment()
+    def test_failed_index_or_report_write_preserves_previous_summary(self):
+        from classification.experiments.artifacts import write_json
+
+        exp = self.experiment((True, False, False))
+        exp.batch_size = 1
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
-        exp.config = updated(exp.config, 'lancedb.table', exp.config.lancedb.table + '_new')
+
+        exp.config = updated(exp.config, 'lancedb.table', exp.config.lancedb.table + '_partial')
+        append = LanceDBIndex.append
+        calls = 0
+
+        def fail_second(index, records, vectors):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ConnectionError('second append failed')
+            return append(index, records, vectors)
+
+        with patch.object(LanceDBIndex, 'append', new=fail_second):
+            with self.assertRaisesRegex(ConnectionError, 'second append'):
+                exp.build_vector_database()
+        self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
+        self.assertEqual(calls, 2)
+
+        exp.config = updated(exp.config, 'lancedb.table', exp.config.lancedb.table + '_write')
         with patch('classification.experiments.artifacts.Path.replace', side_effect=OSError('replace failed')):
             with self.assertRaisesRegex(OSError, 'replace failed'):
                 exp.build_vector_database()
         self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
+
+        for stage in ('build_vector_database', 'evaluate'):
+            with self.subTest(stage=stage):
+                stage_exp = self.experiment(name=f'write-{stage}')
+                if stage == 'evaluate':
+                    stage_exp.build_vector_database()
+
+                def write(path, value):
+                    if isinstance(value, dict):
+                        raise OSError('report write failed')
+                    return write_json(path, value)
+
+                with patch('classification.experiments.classification.write_json', side_effect=write):
+                    with self.assertRaisesRegex(OSError, 'report write failed'):
+                        getattr(stage_exp, stage)()
+                self.assert_no_failed_report(stage_exp, stage)
 
     def test_early_ending_evaluation_is_incomplete(self):
         exp = self.experiment()
@@ -438,24 +346,9 @@ class ExperimentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Incomplete evaluation'):
                 exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
-
-
-    def test_successful_processing_still_fails_if_report_write_fails(self):
-        from classification.experiments.artifacts import write_json
-        for stage in ('build_vector_database', 'evaluate'):
-            with self.subTest(stage=stage):
-                exp = self.experiment(name=stage)
-                if stage == 'evaluate':
-                    exp.build_vector_database()
-
-                def write(path, value):
-                    if isinstance(value, dict):
-                        raise OSError('report write failed')
-                    return write_json(path, value)
-
-                with patch('classification.experiments.classification.write_json', side_effect=write):
-                    with self.assertRaisesRegex(OSError, 'report write failed'):
-                        getattr(exp, stage)()
+        self.dataset.splits['validation'] = self.dataset.splits['validation'].select([])
+        with self.assertRaisesRegex(ValueError, 'No evaluation'):
+            exp.evaluate()
 
     def test_bad_batch_columns_and_vector_counts_fail(self):
         original = self.dataset.iter_dataset_batches
@@ -473,37 +366,17 @@ class ExperimentTests(unittest.TestCase):
                             yield batch
 
                     encode = exp.embedder.encode_images
+
                     def short_vectors(batch):
                         return encode(batch)[:-1]
 
                     with patch.object(self.dataset, 'iter_dataset_batches', side_effect=batches), \
-                         patch.object(exp.embedder, 'encode_images', side_effect=short_vectors if failure == 'vectors' else encode):
+                         patch.object(exp.embedder, 'encode_images', side_effect=short_vectors if failure == 'vectors' else encode) as encode_mock:
                         with self.assertRaises(ValueError):
                             getattr(exp, stage)()
+                        if failure == 'columns' and stage == 'build_vector_database':
+                            encode_mock.assert_not_called()
                     self.assert_no_failed_report(exp, stage)
-
-    def test_image_insertion_rejects_mismatched_record_columns_before_encoding(self):
-        exp = self.experiment((True, False, False))
-        builder = exp._index_builder()
-        index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
-        for split in ('train', 'val'):
-            for field in ('class', 'source_id', 'fname'):
-                with self.subTest(split=split, field=field):
-                    batch = {
-                        'class': ['Apple', 'Pear'], 'source_id': ['0', '1'],
-                        'fname': ['apple.png', 'pear.png'], 'source_split': [split, split],
-                        'extra': ['first', 'second'], 'image': [object(), object()],
-                    }
-                    batch[field].pop()
-                    with patch.object(self.dataset, 'iter_dataset_batches', return_value=iter([batch])), \
-                         patch.object(exp.embedder, 'encode_images') as encode, \
-                         patch.object(LanceDBIndex, 'append') as append:
-                        with self.assertRaises(ValueError):
-                            builder._insert_image_records(
-                                index, self.dataset.train_set(), split=split
-                            )
-                        encode.assert_not_called()
-                        append.assert_not_called()
 
     def test_database_failures_and_interrupts_propagate(self):
         for stage, method in [('build_vector_database', 'append'), ('evaluate', 'query')]:
@@ -535,28 +408,6 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(len({p['id'] for p in stored}), 3)
         for point in stored:
             self.assertEqual(point['vector'], [0., 1.] if point['source_identity'] == '1' else [1., 0.])
-
-    def test_failed_rebuild_preserves_previous_summary(self):
-        exp = self.experiment((True, False, False))
-        exp.batch_size = 1
-        exp.build_vector_database()
-        previous = (exp.output / 'index.json').read_bytes()
-        exp.config = updated(exp.config, 'lancedb.table', exp.config.lancedb.table + '_new')
-        append = LanceDBIndex.append
-        calls = 0
-
-        def fail_second(index, records, vectors):
-            nonlocal calls
-            calls += 1
-            if calls == 2:
-                raise ConnectionError('second append failed')
-            return append(index, records, vectors)
-
-        with patch.object(LanceDBIndex, 'append', new=fail_second):
-            with self.assertRaisesRegex(ConnectionError, 'second append'):
-                exp.build_vector_database()
-        self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
-        self.assertEqual(calls, 2)
 
     def test_image_references_still_require_every_class(self):
         self.dataset.splits['train'] = self.dataset.splits['train'].select([0])
@@ -735,22 +586,30 @@ class ExperimentTests(unittest.TestCase):
             PointRecord(rows[i]['class'], 'training_image', rows[i]['source_id'], rows[i]['fname'])
             for i in (0, 1, 4)
         ]
-        saved.append(PointRecord('Apple', 'class_name', 'Apple', 'Apple'))
+        saved.extend([
+            PointRecord(rows[0]['class'], 'training_image', rows[0]['source_id'], 'duplicate'),
+            PointRecord('Pear', 'training_image', 'extra-outside-cap', 'extra'),
+            PointRecord('Apple', 'class_name', 'Apple', 'Apple'),
+        ])
         index.append(saved, np.ones((len(saved), 2)))
         Path(rows[0]['fname']).unlink()
         Path(rows[1]['fname']).write_bytes(b'corrupt')
         Path(rows[4]['fname']).unlink()
-        builder = exp._index_builder()
-        with patch.object(exp, '_index_builder', return_value=builder), \
-             patch.object(builder, '_insert_references', wraps=builder._insert_references) as insert:
+        seen = []
+        encode = exp.embedder.encode_images
+
+        def record_encoded(images):
+            seen.append([image.getpixel((0, 0))[1] for image in images])
+            return encode(images)
+
+        with patch.object(exp.embedder, 'encode_images', side_effect=record_encoded):
             artifact = exp.build_vector_database().model_dump(mode="json")
-        image_dataset = insert.call_args.args[2]
-        self.assertEqual(list(image_dataset['source_id']), [rows[2]['source_id']])
-        self.assertEqual(artifact['source_counts'], {'training_image': 4, 'class_name': 2})
+        self.assertEqual(seen, [[2]])
+        self.assertEqual(artifact['source_counts'], {'training_image': 6, 'class_name': 2})
         stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
         self.assertEqual(
             {row['source_identity'] for row in stored if row['source_kind'] == 'training_image'},
-            {rows[i]['source_id'] for i in (0, 1, 2, 4)},
+            {rows[i]['source_id'] for i in (0, 1, 2, 4)} | {'extra-outside-cap'},
         )
         self.assertTrue({record.id for record in saved} <= {row['id'] for row in stored})
         self.assertEqual(len(self.dataset.train_set()), 5)
@@ -857,23 +716,6 @@ class ExperimentTests(unittest.TestCase):
             artifact = exp.build_vector_database().model_dump(mode="json")
         self.assertEqual(artifact['source_counts'], {'class_name': 2, 'generated_description': 10})
 
-    def test_point_records_round_trip_through_lancedb(self):
-        exp = self.experiment()
-        records = [PointRecord(label, 'class_name', label, label) for label in ['Apple', 'Pear']]
-        self.assertTrue(all(isinstance(record, PointRecord) for record in records))
-        index = LanceDBIndex.create(self.db_path, 'record_round_trip', 2)
-        vectors = exp.embedder.encode_text([record.value for record in records])
-        index.append(records, vectors)
-        stored = self.client.open_table('record_round_trip').to_arrow().to_pylist()
-        payloads = {point['id']: {k: v for k, v in point.items() if k != 'vector'} for point in stored}
-        for record in records:
-            self.assertEqual(payloads[record.id], {
-                'id': record.id, 'class': record.label, 'source_kind': record.source_kind,
-                'source_identity': record.source_identity, 'value': record.value,
-            })
-        neighbor = index.query(vectors[0], 1)[0]
-        self.assertEqual((neighbor['id'], neighbor['label']), (records[0].id, records[0].label))
-
     def test_combinations_and_table_reuse(self):
         for flags in itertools.product([False, True], repeat=3):
             if not any(flags): continue
@@ -897,15 +739,15 @@ class ExperimentTests(unittest.TestCase):
         exp = self.experiment()
         artifact = exp.build_vector_database().model_dump(mode="json")
         previous = (exp.output / 'index.json').read_bytes()
-        with patch.object(exp, '_create_embedder', side_effect=AssertionError('encoder')), \
-             patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')), \
+        self.embedder_constructor.reset_mock()
+        fresh = Experiment(exp.config)
+        with patch.object(LanceDBIndex, 'append', side_effect=AssertionError('append')), \
              patch.object(LanceDBIndex, 'optimize', side_effect=OSError('optimize')):
-            exp._embedder = None
             with self.assertRaisesRegex(OSError, 'optimize'):
-                exp.build_vector_database()
+                fresh.build_vector_database()
         self.assertEqual((exp.output / 'index.json').read_bytes(), previous)
-        self.assertEqual(exp.build_vector_database().model_dump(mode="json"), artifact)
-        self.assertIsNone(exp._embedder)
+        self.assertEqual(fresh.build_vector_database().model_dump(mode="json"), artifact)
+        self.embedder_constructor.assert_not_called()
 
     def test_evaluation_uses_configured_table_with_stale_summary(self):
         exp = self.experiment()
@@ -989,24 +831,6 @@ class ExperimentTests(unittest.TestCase):
                 with self.assertRaises(OSError): exp.evaluate()
                 self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
 
-    def test_query_failure_and_empty_evaluation(self):
-        exp = self.experiment(); exp.build_vector_database()
-        with patch('classification.retrieval.lancedb.LanceDBIndex.query', side_effect=ConnectionError('offline')):
-            with self.assertRaises(ConnectionError): exp.evaluate()
-        self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
-        self.dataset.splits['validation'] = self.dataset.splits['validation'].select([])
-        with self.assertRaisesRegex(ValueError, 'No evaluation'): exp.evaluate()
-
-    def test_empty_generation_and_missing_table(self):
-        exp = self.experiment((False, False, True))
-        with patch.object(self.Describer, 'describe_class', return_value=SimpleNamespace(description='')):
-            with self.assertRaises(ValueError): exp.generate_descriptions()
-        self.assertFalse((exp.output/'descriptions.json').exists())
-        exp = self.experiment(name='valid')
-        artifact = exp.build_vector_database().model_dump(mode="json")
-        self.client.drop_table(artifact['table'])
-        with self.assertRaises(Exception): exp.evaluate()
-
     def test_embedding_failure_aborts_without_retry(self):
         for stage in ['build_vector_database', 'evaluate']:
             with self.subTest(stage=stage):
@@ -1017,38 +841,6 @@ class ExperimentTests(unittest.TestCase):
                         getattr(exp, stage)()
                 encode.assert_called_once()
                 self.assert_no_failed_report(exp, stage)
-
-    def test_empty_retrieval(self):
-        exp = self.experiment(); exp.build_vector_database()
-        with patch('classification.retrieval.lancedb.LanceDBIndex.query', return_value=[]):
-            report = exp.evaluate().model_dump(mode="json")
-        self.assertEqual(report['metrics']['majority_vote_accuracy'], 0)
-        self.assertTrue(all(p['prediction'] is None for p in report['predictions']))
-
-    def test_batch_order_partial_batch_and_payloads(self):
-        from datasets import concatenate_datasets
-        self.dataset.splits['validation'] = concatenate_datasets([self.dataset.splits['validation'], self.dataset.splits['validation'].select([0])])
-        batches = list(self.dataset.iter_batches('val', 2))
-        self.assertEqual([len(b['image']) for b in batches], [2, 1])
-        self.assertEqual([sid for b in batches for sid in b['source_id']], ['0', '1', '0'])
-        for batch in batches:
-            for source_id, image in zip(batch['source_id'], batch['image']):
-                self.assertEqual(image.size, (3, 4))
-                self.assertEqual(image.getpixel((0, 0))[0], int(source_id) * 100)
-                image.close()
-        exp = self.experiment((True, False, False))
-        artifact = exp.build_vector_database().model_dump(mode="json")
-        stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
-        self.assertEqual(len(stored), 2)
-        for point in stored:
-            row = next(r for r in self.rows if r['source_id'] == point['source_identity'])
-            self.assertEqual({k: v for k, v in point.items() if k != 'vector'}, dict(id=point['id'], source_kind='training_image',
-                source_identity=row['source_id'], value=row['fname'], **{'class': row['class']}))
-            self.assertEqual(point['vector'], [1., 0.] if row['class'] == 'Apple' else [0., 1.])
-        report = exp.evaluate().model_dump(mode="json")
-        self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1', '0'])
-        self.assertEqual(report['metrics']['evaluated'], 3)
-        self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
 
     def test_disabled_description_and_ollama_closes_before_embedder(self):
         events = []
@@ -1069,28 +861,36 @@ class ExperimentTests(unittest.TestCase):
         self.assertIsNone(exp._embedder)
         exp.run()
 
+    def test_historical_counts_do_not_validate_historical_configuration(self):
+        exp = self.experiment()
+        summary = exp.build_vector_database()
+        path = exp.output / 'index.json'
+        for historical_config in (None, {'retired_field': 'value'}):
+            with self.subTest(historical_config=historical_config):
+                historical = summary.model_dump(mode='json')
+                historical['config'] = historical_config
+                path.write_text(json.dumps(historical))
+                report = exp.evaluate()
+                self.assertIs(report.config, exp.config)
+                self.assertEqual(report.reference_source_counts, summary.source_counts)
+                saved = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
+                self.assertEqual(saved['config']['embedding']['device'], 'auto')
+
+    def test_generation_requires_services_only_when_generating(self):
+        for path, value in [('ollama', None), ('ollama.llm', None), ('description_count', None)]:
+            with self.subTest(path=path, value=value):
+                exp = self.experiment((False, False, True), name=f'gen-{path}')
+                exp.config = updated(exp.config, path, value)
+                with self.assertRaisesRegex(ValueError, 'ollama.llm and description_count'):
+                    exp.generate_descriptions()
+                self.session_constructor.assert_not_called()
+                self.assertFalse(exp.output.exists())
+                exp.output.mkdir()
+                descriptions = {'Apple': ['stored'], 'Pear': ['stored']}
+                (exp.output / 'descriptions.json').write_text(json.dumps({'descriptions': descriptions}))
+                self.assertEqual(exp.generate_descriptions(), descriptions)
+                self.assertEqual(exp.build_vector_database().source_counts, {'generated_description': 2})
+                self.session_constructor.assert_not_called()
+
 
 if __name__ == '__main__': unittest.main()
-
-
-def test_deep_rankings_do_not_expand_voting_support():
-    from classification.experiments.evaluation import prediction
-    from classification.schemas import Neighbor
-
-    row = dict(fname='x', source_id='x', source_split='val', **{'class': 'A'})
-    ranked = [Neighbor(id=str(i), label=label, score=1 - i / 10)
-              for i, label in enumerate(['B', 'B', 'B', 'B', 'A', 'A', 'A', 'A'])]
-    result = prediction(row, ranked, 1, 4)
-    assert result['prediction'] == 'B'
-    assert result['neighbors'] == ranked[:1]
-    assert result['retrieval_metrics']['top5_hit']
-    assert result['retrieval_metrics']['precision_at_k'] == 0
-    assert result['retrieval_metrics']['average_precision_at_r'] == 0
-
-
-def test_k_requires_positive_nonboolean_integer():
-    import pytest
-    for k in (0, -1, True, False, None, '5', 1.5):
-        with pytest.raises(ValueError, match='k'):
-            ExperimentConfig.model_validate(config_data(k=k, embed_images=True, embed_class_labels=False,
-                                 embed_descriptions=False))

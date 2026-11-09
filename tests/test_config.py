@@ -1,8 +1,10 @@
 """Strict configuration validation without datasets, encoders, or services."""
 
 from itertools import product
+from pathlib import Path
 
 import pytest
+import yaml
 from config_helpers import config_data, updated
 from pydantic import ValidationError
 
@@ -31,6 +33,12 @@ def test_defaults_spelling_and_mutable_nested_attributes():
     assert config.description_count is None
     assert config.vector_dimension is None
     assert config.cache_validation_embeddings is False
+    assert ExperimentConfig.model_validate_json(config.model_dump_json()) == config
+    summary = IndexSummary(
+        table="references", uri="/db", source_counts={"class_name": 2}, config=config
+    )
+    assert summary.model_dump(mode="json")["config"] == config.model_dump(mode="json")
+    assert '"batch_size":32' in summary.model_dump_json()
     config.k = 3
     config.embedding.batch_size = 5
     config.vector_dimension = 2
@@ -158,20 +166,11 @@ def test_output_and_cache_constraints(tmp_path):
             ExperimentConfig.model_validate(data)
 
 
-def test_optional_services_and_report_serialization():
-    config = ExperimentConfig.model_validate(config_data())
-    summary = IndexSummary(
-        table="references", uri="/db", source_counts={"class_name": 2}, config=config
-    )
-    assert summary.config is config
-    assert summary.model_dump(mode="json")["config"] == config.model_dump(mode="json")
-    assert '"batch_size":32' in summary.model_dump_json()
-    # Only the backend constructor requires the project.
-    config = updated(config, "embedding.model_id", "google/ge-v2")
-    experiment = Experiment.__new__(Experiment)
-    experiment.config = config
-    with pytest.raises(ValueError, match="vertex.project"):
-        experiment._create_embedder()
+@pytest.mark.parametrize("filename", ["cfg/classification.yml", "cfg/ge_v2.yml"])
+def test_shipped_configs_validate(filename):
+    root = Path(__file__).resolve().parents[1]
+    data = yaml.safe_load((root / filename).read_text(encoding="utf-8"))
+    ExperimentConfig.model_validate(data)
 
 
 def test_python_api_requires_model():

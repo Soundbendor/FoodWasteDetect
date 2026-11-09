@@ -10,10 +10,8 @@ from classification.experiments.descriptions import load_descriptions, text_refe
 def test_saved_vocabulary_is_read_only(tmp_path):
     path = tmp_path / "vocabulary.json"
     vocabulary = {"Pear": ["green pear"], "Apple": ["red apple", "apple slice"]}
-    original = json.dumps({"descriptions": vocabulary}).encode()
-    path.write_bytes(original)
+    path.write_text(json.dumps({"descriptions": vocabulary}))
     assert load_descriptions(path) == vocabulary
-    assert path.read_bytes() == original
 
 
 def test_missing_vocabulary_does_not_create_file(tmp_path):

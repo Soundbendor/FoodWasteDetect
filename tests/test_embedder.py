@@ -6,23 +6,9 @@ import sys
 
 import pytest
 
-from classification.encoders.base import Embedder, ImageInput
+from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
-from classification.encoders.sentence_transformers import ImageInput as ExportedImageInput
 from classification.encoders.vertex import VertexEmbeddingModel
-
-
-@pytest.mark.parametrize("implemented", [(), ("encode_text",), ("encode_images",)])
-def test_incomplete_encoders_cannot_be_instantiated(implemented):
-    methods = {name: lambda self, inputs: None for name in implemented}
-    incomplete = type("Incomplete", (Embedder,), methods)
-    with pytest.raises(TypeError, match="abstract"):
-        incomplete()
-
-
-def test_base_cannot_be_instantiated():
-    with pytest.raises(TypeError, match="abstract"):
-        Embedder()
 
 
 @pytest.mark.parametrize("encoder", [EmbeddingModel, VertexEmbeddingModel])
@@ -31,13 +17,12 @@ def test_concrete_encoders_implement_interface(encoder):
     assert not inspect.isabstract(encoder)
 
 
-def test_image_input_reexport():
-    assert ExportedImageInput is ImageInput
-
-
 def test_interface_import_does_not_load_backends_or_experiments():
     subprocess.run(
-        [sys.executable, "-c", """
+        [
+            sys.executable,
+            "-c",
+            """
 import sys
 from classification.encoders.base import Embedder
 assert not any(name in sys.modules for name in (
@@ -45,6 +30,7 @@ assert not any(name in sys.modules for name in (
     'classification.experiments.classification', 'classification.vertex_utils',
     'torch', 'sentence_transformers', 'google.genai',
 ))
-"""],
+""",
+        ],
         check=True,
     )

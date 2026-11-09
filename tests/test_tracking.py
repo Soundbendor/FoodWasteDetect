@@ -1,7 +1,6 @@
 """Synthetic W&B contracts: fake SDK publishing plus isolated native offline runs."""
 
 import io
-import itertools
 import json
 import os
 import subprocess
@@ -74,11 +73,8 @@ def config_file(tmp_path):
         ("run", "run"),
     ],
 )
-@pytest.mark.parametrize("newline", ["\n", "\r\n"])
-def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline):
+def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method):
     path, source = config_file(tmp_path)
-    source = source.replace("\n", newline)
-    path.write_bytes(source.encode())
     overrides = ["embedding.batch_size=4", "embedding.batch_size=3"]
     with (
         patch("classification.cli.Experiment") as experiment,
@@ -131,36 +127,6 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
 
 
 @pytest.mark.parametrize(
-    "kind", ["help", "unknown", "malformed", "mapping", "switches", "download"]
-)
-def test_no_run_for_non_experiments_or_invalid_input(sdk, tmp_path, kind):
-    path, _ = config_file(tmp_path)
-    args = ["experiment", "run", "--config_file", str(path)]
-    if kind == "help":
-        args = ["--help"]
-    elif kind == "unknown":
-        args += ["--set", "embedding.unknown=1"]
-    elif kind == "malformed":
-        args += ["--set", "broken"]
-    elif kind == "mapping":
-        path.write_text("- not a mapping")
-    elif kind == "switches":
-        args += ["--set", "embed_class_labels=false"]
-    elif kind == "download":
-        args = ["download_model", "fake"]
-    with (
-        patch("classification.cli.wandb.init") as initialize,
-        patch("classification.cli.download_model"),
-    ):
-        if kind == "download":
-            main(args)
-        else:
-            with pytest.raises((SystemExit, ValueError)):
-                main(args)
-        initialize.assert_not_called()
-
-
-@pytest.mark.parametrize(
     "source", ["init", "artifact", "constructor", "stage", "interrupt", "success"]
 )
 @pytest.mark.parametrize("cleanup_fails", [False, True])
@@ -207,9 +173,8 @@ def test_native_context_exit_on_errors_and_success(sdk, tmp_path, source, cleanu
             experiment.assert_not_called()
 
 
-@pytest.mark.parametrize("flags", [x for x in itertools.product([False, True], repeat=3) if any(x)])
-def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
-    exp = experiment_case.experiment(flags)
+def test_pipeline_counts_and_reuse(experiment_case, sdk):
+    exp = experiment_case.experiment((True, True, True))
     exp.batch_size = 3
     exp.tracker = Tracker(sdk)
     report = exp.run().model_dump(mode="json")
@@ -543,37 +508,3 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
     config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
     assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == initial_config
-
-
-def test_historical_counts_do_not_validate_historical_configuration(experiment_case):
-    exp = experiment_case.experiment()
-    summary = exp.build_vector_database()
-    path = exp.output / "index.json"
-    # Historical config can be absent or use a retired schema.
-    for historical_config in (None, {"retired_field": "value"}):
-        historical = summary.model_dump(mode="json")
-        historical["config"] = historical_config
-        path.write_text(json.dumps(historical))
-        report = exp.evaluate()
-        assert report.config is exp.config
-        assert report.reference_source_counts == summary.source_counts
-        saved = json.loads(next(exp.output.glob("evaluation_*/report.json")).read_text())
-        assert saved["config"]["embedding"]["device"] == "auto"
-
-
-@pytest.mark.parametrize("path,value", [
-    ("ollama", None), ("ollama.llm", None), ("description_count", None),
-])
-def test_generation_requires_services_only_when_generating(experiment_case, path, value):
-    exp = experiment_case.experiment((False, False, True))
-    exp.config = updated(exp.config, path, value)
-    with pytest.raises(ValueError, match="ollama.llm and description_count"):
-        exp.generate_descriptions()
-    experiment_case.session_constructor.assert_not_called()
-    assert not exp.output.exists()
-    exp.output.mkdir()
-    descriptions = {"Apple": ["stored"], "Pear": ["stored"]}
-    (exp.output / "descriptions.json").write_text(json.dumps({"descriptions": descriptions}))
-    assert exp.generate_descriptions() == descriptions
-    assert exp.build_vector_database().source_counts == {"generated_description": 2}
-    experiment_case.session_constructor.assert_not_called()

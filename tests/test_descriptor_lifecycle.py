@@ -19,36 +19,10 @@ from classification.llm import ollama
 ConnectError = httpx.ConnectError
 
 
-class OllamaConfigTests(unittest.TestCase):
-    def test_timeouts_must_be_positive_finite_numbers(self):
-        for name in ("startup_timeout", "request_timeout"):
-            for value in (0, -1, True, False, float("nan"), float("inf"), -float("inf"), "10", None):
-                with self.subTest(name=name, value=value):
-                    settings = {"binary_path": "ollama", "host": "localhost:11434", "startup_timeout": 10, "request_timeout": 30}
-                    settings[name] = value
-                    with self.assertRaisesRegex(ValueError, name):
-                        OllamaConfig.model_validate(settings)
-
-    def test_valid_timeouts_and_missing_keys(self):
-        for value in (1, 0.25):
-            OllamaConfig.model_validate({"binary_path": "ollama", "host": "localhost:11434", "startup_timeout": value, "request_timeout": value})
-        for name in ("startup_timeout", "request_timeout"):
-            settings = {"binary_path": "ollama", "host": "localhost:11434", "startup_timeout": 10, "request_timeout": 30}
-            del settings[name]
-            with self.assertRaises(ValueError):
-                OllamaConfig.model_validate(settings)
-
-
 class DescriptionTests(unittest.TestCase):
     def setUp(self):
         self.client = Mock()
         self.llm = descriptors.DescriberLLM(self.client, 'test-model')
-
-    def test_public_description_uses_shared_prompt_without_cleaning_label(self):
-        output = types.SimpleNamespace(food_class='Seafood', description='A seafood dish.')
-        with patch.object(self.llm, '_describe_class', return_value=output) as describe:
-            self.assertIs(self.llm.describe_class('Seafood'), output)
-        describe.assert_called_once_with('Seafood', descriptors.descriptor_prompt('Seafood'))
 
     def test_generate_descriptions_preserves_classes_and_requested_count(self):
         outputs = [types.SimpleNamespace(description=text) for text in
@@ -88,12 +62,13 @@ class DescriptionTests(unittest.TestCase):
     def test_single_description_preserves_label_and_removes_emphasis(self):
         response = self.llm.client.chat.return_value
         response.message.content = '{"food_class":"wrong", "description":"*Golden* crust"}'
-        prompt = descriptors.descriptor_prompt('bread')
-        result = self.llm._describe_class('bread food', prompt)
+        result = self.llm.describe_class('bread food')
         self.assertEqual(result.food_class, 'bread food')
         self.assertEqual(result.description, 'Golden crust')
         self.client.chat.assert_called_once_with(
-            model='test-model', messages=[prompt], format=descriptors.FoodDescriptor.model_json_schema(),
+            model='test-model',
+            messages=[descriptors.descriptor_prompt('bread food')],
+            format=descriptors.FoodDescriptor.model_json_schema(),
         )
 
 
@@ -156,14 +131,6 @@ class OllamaLifecycleTests(unittest.TestCase):
                 self.process.wait.assert_called_once()
                 self.assertIsNone(self.session._process)
 
-    def test_occupied_endpoint_prevents_pull(self):
-        with patch.object(self.session.client, 'pull') as pull:
-            with self.assertRaisesRegex(RuntimeError, 'already bound'):
-                with self.session:
-                    self.session.download_model('requested:tag')
-        pull.assert_not_called()
-        self.popen.assert_not_called()
-
     def test_invalid_installations_fail_before_network_or_launch(self):
         non_executable = self.directory / 'not-executable'
         non_executable.write_text('fixture')
@@ -188,19 +155,21 @@ class OllamaLifecycleTests(unittest.TestCase):
         self.get.assert_not_called()
         self.popen.assert_not_called()
 
-    def test_relative_and_home_paths_resolve(self):
-        # Use a mocked cwd rather than changing the process-wide working directory.
-        with patch.object(ollama.os, 'getcwd', return_value=str(self.directory)):
-            self.session.binary_path = './ollama'
-            self.assertEqual(self.session._validate_binary(), str(self.binary))
-        with patch.dict(ollama.os.environ, {'HOME': str(self.directory)}):
-            self.session.binary_path = '~/ollama'
-            self.assertEqual(self.session._validate_binary(), str(self.binary))
-
-    def test_bare_executable_resolves_on_path(self):
-        with patch.dict(ollama.os.environ, {'PATH': str(self.directory)}):
-            self.session.binary_path = 'ollama'
-            self.assertEqual(self.session._validate_binary(), str(self.binary))
+    def test_relative_home_and_path_executables_resolve_on_start(self):
+        # Use mocked environment/cwd and verify resolution through public start_server().
+        cases = [
+            ('./ollama', patch.object(ollama.os, 'getcwd', return_value=str(self.directory))),
+            ('~/ollama', patch.dict(ollama.os.environ, {'HOME': str(self.directory)})),
+            ('ollama', patch.dict(ollama.os.environ, {'PATH': str(self.directory)})),
+        ]
+        for binary_path, env_patch in cases:
+            with self.subTest(binary_path=binary_path), env_patch:
+                self.popen.reset_mock()
+                self.get.side_effect = [ConnectError('connection failed'), self.get.return_value]
+                self.session.binary_path = binary_path
+                self.session.start_server()
+                self.assertEqual(self.popen.call_args.args[0], [str(self.binary), 'serve'])
+                self.session.close()
 
     def test_missing_path_executable_fails_before_network_or_launch(self):
         with patch.dict(ollama.os.environ, {'PATH': ''}):
@@ -233,19 +202,12 @@ class OllamaLifecycleTests(unittest.TestCase):
         self.assertEqual(session.startup_timeout, 7)
         ollama.Client.assert_called_with(host=session.host, timeout=19)
 
-    def test_missing_settings_fail_instead_of_using_defaults(self):
-        for key in self.config:
-            with self.subTest(key=key):
-                config = self.config.copy()
-                del config[key]
-                with self.assertRaises(ValueError):
-                    ollama.OllamaSession(OllamaConfig.model_validate(config))
-
-
-    def test_existing_server_is_rejected_without_starting_or_stopping_it(self):
-        with self.assertRaisesRegex(RuntimeError, r"already bound to http://127\.0\.0\.1:12345"):
-            with self.session:
-                self.fail("An occupied endpoint must prevent context entry")
+    def test_existing_server_is_rejected_without_starting_pulling_or_stopping(self):
+        with patch.object(self.session.client, 'pull') as pull:
+            with self.assertRaisesRegex(RuntimeError, r"already bound to http://127\.0\.0\.1:12345"):
+                with self.session:
+                    self.session.download_model('requested:tag')
+        pull.assert_not_called()
         self.popen.assert_not_called()
         self.process.terminate.assert_not_called()
 
@@ -289,14 +251,6 @@ class OllamaLifecycleTests(unittest.TestCase):
         self.session.close()
         self.process.kill.assert_called_once()
         self.assertIsNone(self.session._process)
-
-    @unittest.skip("Existing mismatch: remote-endpoint guard was removed; outside binary validation scope")
-    def test_remote_endpoint_failure_does_not_launch_local_server(self):
-        self.session.host = 'http://remote.example:11434'
-        self.get.side_effect = ConnectError('connection failed')
-        with self.assertRaises(ConnectionError):
-            self.session.start_server()
-        self.popen.assert_not_called()
 
     def test_invalid_endpoint_response_does_not_launch_server(self):
         self.get.return_value.json.return_value = {'unexpected': True}

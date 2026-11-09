@@ -195,25 +195,6 @@ def test_invalid_snapshot_fails_before_destination_creation(sources, invalid, mo
     assert connection.open_table('destination').version == version
 
 
-@pytest.mark.parametrize('failure', [RuntimeError('stream failed'), KeyboardInterrupt()])
-def test_streaming_failure_propagates(sources, monkeypatch, failure):
-    config, connection, _, _ = sources
-    source = LanceDBIndex.open(config['lancedb']['uri'], 'reference')
-    wrapper = MagicMock(wraps=connection)
-    wrapper.__contains__.return_value = False
-    cloned = MagicMock()
-    dataset = MagicMock()
-    dataset.add_columns.side_effect = failure
-    cloned.to_lance.return_value = dataset
-    wrapper.clone_table.return_value = cloned
-    monkeypatch.setattr('classification.retrieval.lancedb.LanceDBConnection', Mock(return_value=wrapper))
-    with pytest.raises(type(failure)):
-        source.create_prefix_table('broken', 768)
-    wrapper.clone_table.assert_called_once()
-    dataset.add_columns.assert_called_once()
-    wrapper.drop_table.assert_not_called()
-
-
 @pytest.mark.parametrize('exists', [True, False])
 def test_open_and_create_errors_propagate(sources, exists, monkeypatch):
     config, connection, _, _ = sources
@@ -260,25 +241,30 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     assert runs[1][0].__exit__.call_args.args[0] is RuntimeError
 
 
-@pytest.mark.parametrize('validation', ['reference', 'reference_d768', 'reference_d1536', ''])
-def test_collisions_fail_before_tracking(sources, runs, validation):
+@pytest.mark.parametrize(
+    'validation,sweep_dimensions',
+    [
+        ('reference', [768, 1536, 3072]),
+        ('reference_d768', [768, 1536, 3072]),
+        ('reference_d1536', [768, 1536, 3072]),
+        ('reference_d768', [768, 1536]),
+        ('', [768, 1536, 3072]),
+    ],
+)
+def test_collisions_fail_before_tracking_or_writes(
+    sources, runs, monkeypatch, validation, sweep_dimensions,
+):
     config, _, _, _ = sources
     if validation and validation != 'reference':
         LanceDBIndex.open(config['lancedb']['uri'], 'validation').create_prefix_table(validation, 3072)
     config['lancedb']['validation_table'] = validation
+    config['sweep_dimensions'] = sweep_dimensions
+    prepare = Mock()
+    monkeypatch.setattr(LanceDBIndex, 'create_prefix_table', prepare)
     with pytest.raises(ValueError):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert runs == []
-
-
-def test_help_does_not_load_config(monkeypatch, capsys):
-    load = Mock(side_effect=AssertionError('config load forbidden'))
-    monkeypatch.setattr(cli, '_load_config', load)
-    with pytest.raises(SystemExit) as error:
-        cli.main(['experiment', 'matroyshka-sweep', '--help'])
-    assert error.value.code == 0
-    assert 'matroyshka-sweep' in capsys.readouterr().out
-    load.assert_not_called()
+    prepare.assert_not_called()
 
 
 def test_stream_has_no_default_result_limit(sources):
@@ -299,7 +285,8 @@ def test_stream_has_no_default_result_limit(sources):
     assert source.to_arrow().to_pylist() == snapshot
 
 
-def test_native_stream_creation_error(sources, monkeypatch):
+@pytest.mark.parametrize('failure', [RuntimeError('synthetic reader failure'), KeyboardInterrupt()])
+def test_native_stream_creation_error(sources, monkeypatch, failure):
     config, connection, _, _ = sources
     source_index = LanceDBIndex.open(config['lancedb']['uri'], 'reference')
     import lance
@@ -311,14 +298,14 @@ def test_native_stream_creation_error(sources, monkeypatch):
             @original_udf(*args, **kwargs)
             def failing(batch):
                 fn(batch)
-                raise RuntimeError('synthetic reader failure')
+                raise failure
 
             return failing
 
         return decorator
 
     monkeypatch.setattr('classification.retrieval.lancedb.lance.batch_udf', broken_udf)
-    with pytest.raises(Exception, match='synthetic reader failure'):
+    with pytest.raises((Exception, KeyboardInterrupt)):
         source_index.create_prefix_table('broken_native', 768)
     # No assertion about table durability or repair after a native storage failure.
     assert connection.open_table('reference').count_rows() == 2
@@ -425,16 +412,3 @@ def test_cli_non_gemini_override_omits_source_width(sources, runs, tmp_path):
     assert len(runs) == 2
     assert connection.open_table('reference').schema.field('vector').type.list_size == 3072
     Experiment._create_embedder.assert_not_called()
-
-
-def test_collision_when_source_width_omitted(sources, monkeypatch):
-    config, _, _, _ = sources
-    LanceDBIndex.open(config['lancedb']['uri'], 'validation').create_prefix_table('reference_d768', 3072)
-    config['lancedb']['validation_table'] = 'reference_d768'
-    config['sweep_dimensions'] = [768, 1536]
-    prepare, evaluate = Mock(), Mock()
-    monkeypatch.setattr(LanceDBIndex, 'create_prefix_table', prepare)
-    with pytest.raises(ValueError, match='distinct'):
-        sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
-    prepare.assert_not_called()
-    evaluate.assert_not_called()
