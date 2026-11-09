@@ -87,10 +87,6 @@ class Experiment:
             batch_size=self.batch_size,
         )
 
-    def _lancedb_adapter(self) -> LanceDBIndex:
-        options = self.config.lancedb
-        return LanceDBIndex.open(uri=options.uri, table=options.table)
-
     def _evaluation_batches(
         self,
     ) -> Iterator[EmbeddingBatch]:
@@ -167,11 +163,7 @@ class Experiment:
         if not cached_only and not self.config.cache_validation_embeddings:
             return self._evaluation_batches()
         options = self.config.lancedb
-        table = options.validation_table
-        if not table or not table.strip() or table == options.table:
-            raise ValueError(
-                "lancedb.validation_table must be nonempty and distinct from reference table"
-            )
+        table = options.require_validation_table()
         if cached_only:
             cache = LanceDBIndex.open(uri=options.uri, table=table)
         else:
@@ -200,8 +192,9 @@ class Experiment:
         return self._execute_evaluation(index, artifact, batches)
 
     def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict[str, Any] | None]:
-        table = self.config.lancedb.table
-        index = self._lancedb_adapter()
+        options = self.config.lancedb
+        table = options.table
+        index = LanceDBIndex.open(uri=options.uri, table=table)
         artifact: dict[str, Any] | None = None
         path = self.output / "index.json"
         if path.exists():

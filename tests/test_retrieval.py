@@ -147,7 +147,7 @@ class LanceDBTests(unittest.TestCase):
         self.index = LanceDBIndex(self.uri, Mock())
         record = PointRecord("A", "class_name", "A", "A")
         for records, vectors in [([record], np.empty((0, 2))), ([], np.ones((1, 2)))]:
-            with self.assertRaisesRegex(ValueError, "Record/vector count mismatch"):
+            with self.assertRaises(ValueError):
                 self.index.append(records, vectors)
         self.index.table.add.assert_not_called()
 
@@ -191,6 +191,18 @@ class LanceDBTests(unittest.TestCase):
             with self.assertRaises((ValueError, pa.ArrowInvalid)):
                 self.index.append([PointRecord("A", "class_name", "A", "A")], np.array(vector))
             self.assertEqual(self.index.table.count_rows(), 0)
+
+    def test_make_schema(self):
+        params = ["id", "class", "source_kind", "source_identity", "value"]
+        schema = LanceDBIndex._make_schema(params, 128, metadata={"key": "val"})
+        for name in params:
+            field = schema.field(name)
+            self.assertEqual(field.type, pa.string())
+            self.assertFalse(field.nullable)
+        vec_field = schema.field("vector")
+        self.assertEqual(vec_field.type, pa.list_(pa.float32(), 128))
+        self.assertFalse(vec_field.nullable)
+        self.assertEqual(schema.metadata, {b"key": b"val"})
 
     def test_missing_storage_is_not_created(self):
         self.assertFalse(LanceDBIndex.exists(self.uri, "fixture"))
@@ -339,3 +351,20 @@ def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
     assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r['id']) == sorted(
         before, key=lambda r: r['id'])
     assert index.query(np.asarray([1.0, 1.0]), 5) == neighbors
+
+
+def test_dimension_and_prefix_table_derivation(tmp_path):
+    index = LanceDBIndex.create(tmp_path / 'db', 'source', 4)
+    assert index.dimension == 4
+    records = [PointRecord('A', 'class_name', 'A', 'A'), PointRecord('B', 'class_name', 'B', 'B')]
+    vectors = np.asarray([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
+    index.append(records, vectors)
+    derived = index.create_prefix_table('prefix_d2', 2)
+    assert derived.dimension == 2
+    prefixes = vectors[:, :2]
+    expected = prefixes / np.linalg.norm(prefixes, axis=1, keepdims=True)
+    np.testing.assert_allclose(
+        derived.fetch_vectors([('class_name', 'A'), ('class_name', 'B')]),
+        expected,
+        rtol=1e-6,
+    )

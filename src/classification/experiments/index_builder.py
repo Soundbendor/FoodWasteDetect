@@ -119,13 +119,11 @@ class IndexBuilder:
         self,
     ) -> tuple[LanceDBIndex, Dataset | None, list[PointRecord], Counter[str]]:
         images, records = self._prepare_reference_inputs()
-        dimension = self.embedder.dimension
-        self.config.vector_dimension = dimension
         index = LanceDBIndex.create(
             self.uri,
             self.table,
-            dimension,
-            metadata={"classification.build": self.config.model_dump_json()},
+            self.embedder.dimension,
+            config=self.config,
         )
         return index, images, records, Counter()
 
@@ -173,13 +171,11 @@ class IndexBuilder:
         if LanceDBIndex.exists(self.uri, table_name):
             cache = LanceDBIndex.open(self.uri, table_name)
         else:
-            dimension = self.embedder.dimension
-            self.config.vector_dimension = dimension
             cache = LanceDBIndex.create(
                 self.uri,
                 table_name,
-                dimension,
-                metadata={"classification.build": self.config.model_dump_json()},
+                self.embedder.dimension,
+                config=self.config,
             )
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"

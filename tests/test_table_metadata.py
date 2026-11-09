@@ -9,7 +9,6 @@ from config_helpers import config_data, updated
 from lancedb.db import LanceDBConnection
 
 from classification.experiments.config import ExperimentConfig
-from classification.experiments.matryoshka import prepare_table
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.schemas import PointRecord
 
@@ -83,8 +82,8 @@ def test_config_persistence_and_derived_dimensions(tmp_path, with_snapshot):
     assert reopened.table.schema.remove_metadata() == schema
     assert reopened.query(np.array([1.0, 0.0, 0.0]), 2) == before
     connection = LanceDBConnection(index.uri)
-    prepare_table(connection, "source", "derived", 2, 1)
-    destination = connection.open_table("derived")
+    derived_index = reopened.create_prefix_table("derived", 2)
+    destination = derived_index.table
     derived = destination.schema.metadata
     assert derived[b"unrelated"] == expected[b"unrelated"]
     if with_snapshot:
@@ -97,13 +96,13 @@ def test_config_persistence_and_derived_dimensions(tmp_path, with_snapshot):
         dict(row, vector=row["vector"][:2]) for row in reopened.table.to_arrow().to_pylist()
     ]
     version = destination.version
-    prepare_table(connection, "source", "derived", 1, 1)
+    reopened.create_prefix_table("derived", 1)
     destination = connection.open_table("derived")
     assert destination.version == version
     assert destination.schema.metadata == derived
     assert connection.open_table("source").schema.metadata == expected
 
-    prepare_table(connection, "derived", "second_generation", 1, 1)
+    derived_index.create_prefix_table("second_generation", 1)
     second_metadata = connection.open_table("second_generation").schema.metadata
     assert second_metadata[b"unrelated"] == expected[b"unrelated"]
     if with_snapshot:
@@ -116,6 +115,5 @@ def test_config_persistence_and_derived_dimensions(tmp_path, with_snapshot):
 def test_missing_schema_metadata_is_supported(tmp_path):
     index = LanceDBIndex.create(tmp_path / "db", "source", 3)
     index.append([PointRecord("A", "class_name", "A", "A")], np.array([[1.0, 0.0, 0.0]]))
-    connection = LanceDBConnection(index.uri)
-    prepare_table(connection, "source", "derived", 2, 1)
-    assert b"classification.build" not in (connection.open_table("derived").schema.metadata or {})
+    derived = index.create_prefix_table("derived", 2)
+    assert b"classification.build" not in (derived.table.schema.metadata or {})

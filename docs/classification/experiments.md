@@ -25,10 +25,11 @@ selection and image ownership use [data](data.md); for scoring use
 | `report_types.py`   | Index summary and evaluation report models                                                                |
 | `matryoshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
 
-`LanceDBIndex` owns ordinary database operations. The sweep's streaming creation
-of derived tables is implemented directly in `matryoshka.py`. CLI parsing stays
-in [cli.py](cli.md); neither experiment module has its own command-line parser.
-Use concrete module imports; `__init__.py` does not import backends.
+`LanceDBIndex` owns database operations, including build-metadata snapshots,
+vector-dimension inspection, and streaming creation of derived prefix tables.
+CLI parsing stays in [cli.py](cli.md); neither experiment module has its own
+command-line parser. Use concrete module imports; `__init__.py` does not import
+backends.
 
 ## Lifecycle and configuration
 
@@ -203,10 +204,10 @@ batch size.
 
 Both source names and all derived names must be distinct, even if the stored
 width is not requested. A target equal to the stored width uses the original
-tables; smaller targets use `<source>_d<dimension>`. Each missing destination is created by one streaming
-`create_table()` call, with no query-result limit, retaining every row, UUID,
-and row metadata value. Only vectors change to exact float32 prefixes and
-fixed-size Arrow types; no extra normalization is applied. Reference switches
+tables; smaller targets use `<source>_d<dimension>`. Each missing destination is created by shallow-cloning
+the source table via `clone_table()` and replacing its `vector` column through a PyLance batch UDF,
+retaining every row, UUID, and row metadata value without copying unmodified columns. Only vectors change to L2-normalized float32 prefixes and
+fixed-size Arrow types. Reference switches
 and image caps remain recorded but do not filter stored rows.
 
 Derived tables retain the source configuration with only `vector_dimension`

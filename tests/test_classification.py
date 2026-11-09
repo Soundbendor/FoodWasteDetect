@@ -599,7 +599,7 @@ class ExperimentTests(unittest.TestCase):
         index = LanceDBIndex.create(self.db_path, exp.config.lancedb.table, 2)
         records = [PointRecord('Apple', 'description', str(i), '') for i in range(7)]
         index.append(records, np.tile([1., 0.], (7, 1)))
-        with patch.object(exp, '_lancedb_adapter', return_value=index), \
+        with patch.object(LanceDBIndex, 'open', return_value=index), \
              patch.object(index, 'class_counts', wraps=index.class_counts) as counts, \
              patch.object(index, 'query', wraps=index.query) as query:
             report = exp.evaluate().model_dump(mode="json")

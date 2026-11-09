@@ -6,7 +6,7 @@ and publication; [tracking](tracking.md) owns W&B summaries and tables.
 
 | Module | Responsibility |
 | --- | --- |
-| `retrieval/lancedb.py` | `LanceDBIndex`: table lifecycle, appends, identity/vector reads, counts, optimization, and search |
+| `retrieval/lancedb.py` | `LanceDBIndex`: table lifecycle, build snapshots, prefix derivation, appends, identity/vector reads, counts, optimization, and search |
 | `retrieval/voting.py` | Pure `classify()` majority vote |
 | `retrieval/metrics.py` | Pure per-query ranking and aggregate classification/retrieval metrics |
 | `schemas.py` | `PointRecord`, source identity, neighbor, prediction, and retrieval-metric types |
@@ -16,7 +16,7 @@ and publication; [tracking](tracking.md) owns W&B summaries and tables.
 `lancedb.uri` is a filesystem path resolved from the working directory with `~`
 expansion, independently of `output_dir`. `exists()` and `open()` do not create
 missing database directories. `LanceDBIndex.open(uri, table)` and
-`LanceDBIndex.create(uri, table, dimension, *, metadata=None)` return an index with an open
+`LanceDBIndex.create(uri, table, dimension, *, config=None, metadata=None)` return an index with an open
 `LanceTable`; `LanceDBIndex.exists(uri, table)` checks storage without constructing
 an index. Each factory uses the local `LanceDBConnection` directly. Index methods
 can therefore use their table without an unopened state or repeated guards.
@@ -24,14 +24,18 @@ Creation uses an explicit Arrow schema with
 non-null string fields `id`, `class`, `source_kind`, `source_identity`, and `value`,
 plus a fixed-length float32 `vector`. `mode="create", exist_ok=False` refuses
 overwrites. `PointRecord` supplies UUIDs and maps its `label` to stored `class`.
+When `config` is supplied to `create()`, its `vector_dimension` is set to `dimension`
+and serialized under `classification.build` schema metadata.
 
-`append()` checks record/vector counts, pairs rows strictly, and asks the backend
+`append()` pairs rows strictly and asks the backend
 to reject bad vectors. It adds completed batches without application write
 retries. Compatibility checks and transaction/rollback guarantees are outside the
 current scope; follow [experiment persistence](experiments.md#reference-builds-and-resumption).
 
-| Read operation | Contract |
+| Operation | Contract |
 | --- | --- |
+| `dimension` | Positive fixed-size vector width from the table schema |
+| `create_prefix_table(destination, dimension)` | Reuse a readable destination or shallow-clone the source table and replace its `vector` column with L2-normalized float32 prefixes via PyLance, updating any `classification.build` snapshot's `vector_dimension` |
 | `get_record_ids()` | Unlimited metadata-only scan of `(source_kind, source_identity)`; includes every stored row |
 | `class_counts()` | Stream only the class column without a result limit; every source type and duplicate row counts |
 | `fetch_vectors(identities)` | Select requested identities and return float32 vectors in caller order, including repeated requests; missing identities fail |

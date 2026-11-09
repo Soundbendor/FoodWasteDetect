@@ -58,6 +58,15 @@ class LanceDBConfig(ConfigModel):
     table: NonemptyString
     validation_table: str | None = None
 
+    def require_validation_table(self) -> str:
+        """Return a nonempty validation table name distinct from the reference table."""
+        name = self.validation_table
+        if not name or not name.strip() or name == self.table:
+            raise ValueError(
+                "lancedb.validation_table must be nonempty and distinct from reference table"
+            )
+        return name
+
 
 class OllamaConfig(ConfigModel):
     """Owned server connection and process settings, also used for downloads."""
@@ -110,9 +119,5 @@ class ExperimentConfig(ConfigModel):
         if output.is_relative_to(Path(self.dataset.root).expanduser().resolve()):
             raise ValueError("Output directory must be separate from raw data")
         if self.cache_validation_embeddings:
-            name = self.lancedb.validation_table
-            if not name or not name.strip() or name == self.lancedb.table:
-                raise ValueError(
-                    "lancedb.validation_table must be nonempty and distinct from reference table"
-                )
+            self.lancedb.require_validation_table()
         return self
