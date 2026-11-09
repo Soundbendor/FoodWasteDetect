@@ -28,37 +28,16 @@ format but have different provenance; preserve that distinction.
 ## Removed interfaces
 
 The former `model.py`, `workflows.py`, and flat `embeddings.py` are absent from the
-current package. Concrete encoders now live in `internvl.encoders`. BGE training,
+current package. Concrete encoders now live in `classification.encoders`. BGE training,
 triplet evaluation, caption/merge/conversion workflows, and their CLI commands are
 retired without compatibility aliases. Old `vlm`, `llm`, and `database.embedding`
 imports are unsupported. The separate `src/clip_finetune.py` image experiment and
 root `build_clip_db`, `test_clip`, and `test_yolo` commands remain separate.
-See [CLI documentation](../classification/cli.md) for supported commands and migration.
+See [CLI documentation](../classification/cli.md) for supported commands.
 
-The `vlm-refactor` extraction originally preserved runtime behavior and deferred
-bug fixes, caching/restart guarantees, training redesign, and model changes.
-Later authorized whole-image work superseded that scope for the current runner;
-the old deferrals do not erase its implemented batch resumption.
-
-## Historical evaluation and limitations
+## Historical evaluation
 
 The example evaluation sampled 1,000 FoodX251 validation images with seed 42 and
 reported top-1, top-5, and voting accuracy. Top-5 counted description records,
 possibly repeating classes. These scores measured captioning plus retrieval;
-they did not isolate caption quality or visual factuality. JSON structure checks,
-replacing the generated class field with the supplied label, and the demonstration
-macaron query did not establish accuracy. No direct descriptor-factuality or
-human-reference caption evaluation was implemented.
-
-Recorded defects in the deleted workflows included:
-
-- INI-style lookups against YAML configuration and passing an anchor-file path as
-  the embedding model name.
-- Text insertion with incompatible class/metadata arguments and missing IDs.
-- Accessing the Qdrant reranker response incorrectly.
-- Caption resumption checking Series indices instead of saved image identities,
-  and losing the final buffered captions.
-- Retrieval callers requiring the removed training-dependent embedding interface.
-
-These findings do not describe the current runner. Extraction tests established
-command wiring, import boundaries, and selected artifact behavior only.
+they did not isolate caption quality or visual factuality.

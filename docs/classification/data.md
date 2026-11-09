@@ -23,7 +23,7 @@ are rejected. Split CSVs preserve annotation order and produce `fname`, `class`,
 their split directory; identities use `foodx251:<train|val>:<relative path>`.
 Duplicate identities within a split are rejected. `source_split` remains `val` for
 validation records. Loading metadata does not decode images or compare contents or
-paths across splits. Content hashing and exclusion artifacts remain removed.
+paths across splits.
 
 `select_images()` applies the optional per-class cap before saved-identity
 exclusions, leaving the input dataset unchanged. This order makes resumed builds

@@ -20,13 +20,8 @@ configuration or dataset files. Abbreviated flags are disabled.
 | `matroyshka-sweep` | `experiments.matryoshka.run_sweep()` with a tracked evaluation callback |
 
 Preserve the public `matroyshka-sweep` spelling. Experiment modules have no separate
-CLI parser. Stage ordering, cache behavior, and the current description-indexing
-limitation are defined in [experiment contracts](experiments.md).
-
-The former per-key flags, `finetune-embeddings`, `build-db`, top-level `evaluate`,
-`caption-images`, `generate-descriptions`, `merge-captions`, and `convert-captions`
-are removed. They produce ordinary argparse errors; there are no compatibility
-commands or old flat-module import shims.
+CLI parser. Stage ordering and cache behavior are defined in
+[experiment contracts](experiments.md).
 
 ## Override semantics
 
@@ -40,17 +35,14 @@ The last assignment wins, and overrides can repair invalid input values. Values
 use YAML syntax; split occurs at the first equals sign, preserving additional
 equals signs. Quote strings that resemble other types: `--set 'output_dir="001"'`.
 
-OmegaConf and interpolation have been removed. Strings containing interpolation
-syntax receive ordinary YAML/string handling. Source YAML remains unchanged.
-YAML, override, and schema errors produce argparse errors with field paths before
-W&B initialization or experiment construction, including sweep dispatch.
-Backend checks still occur when constructing the lazy encoder.
+Source YAML remains unchanged. YAML, override, and schema errors produce argparse
+errors with field paths before W&B initialization or experiment construction,
+including sweep dispatch. Backend checks still occur when constructing the lazy
+encoder.
 
 For cached dimension sweeps, set an explicit ordered list in YAML or use, for
 example, `--set 'sweep_dimensions=[256,512,1024]'`. The field is required only
 for sweep execution. See the [sweep contract](experiments.md#cached-matryoshka-sweep).
-
-Overrides do not select isolated artifact names or manage services.
 
 ## Ollama downloads
 

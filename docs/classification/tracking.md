@@ -48,12 +48,10 @@ They close on errors or interruption and do not count unfinished work as complet
 
 Resumed insertion bars count only newly processed work. Empty insertion loops can
 show zero work. Disabled or cached description generation creates no description
-loop. Progress callbacks, reused offsets, `Tracker.progress`, and intermediate W&B
-progress metrics are absent. Persistence and counts advance at completed batches.
+loop. Persistence and counts advance at completed batches.
 
 W&B's native console capture records tqdm's stderr output; disabling capture removes
-that visibility, and offline runs retain output locally. Online Logs-tab rendering
-has not been tested.
+that visibility, and offline runs retain output locally.
 
 ## Verification
 
@@ -61,4 +59,3 @@ has not been tested.
 configuration, native context exit, publication ordering, failure boundaries,
 progress counts, and isolated native offline runs. Description-loop checks also
 use [`tests/test_descriptor_lifecycle.py`](../../tests/test_descriptor_lifecycle.py).
-See [verification history](../experiments.md) for dated evidence and limitations.

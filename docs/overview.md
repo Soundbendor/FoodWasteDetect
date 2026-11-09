@@ -33,9 +33,9 @@ experiments. They do not replace the selected architecture by default.
 
 Recheck code before acting on branch-era findings. Keep refactors within their
 requested behavior; historical plans do not authorize deferred features.
-The [retired text workflow](history/internvl-text.md) and
-[October handoff](handoffs/2026-10-19-whole-image-classification.md) explain earlier
-decisions. Current package contracts supersede their API and storage descriptions.
+The [retired text workflow](history/internvl-text.md) explains the earlier
+captioning baseline; current package contracts supersede historical API and
+storage descriptions.
 
 ## Ownership
 

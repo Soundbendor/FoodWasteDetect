@@ -47,17 +47,12 @@ duplicate-row or compatibility validation; identity resumption is not content
 verification.
 
 `optimize()` delegates to LanceDB defaults. Reference build finalization owns its
-invocation; ordinary evaluation never calls it. The recorded LanceDB 0.40.0
-policy compacts files and retains seven days of historical versions with
-`delete_unverified=False`; the application supplies no custom policy. See the
-[verification log](../experiments.md#unified-experiment-pipeline-november-2-2026)
-for that version's observed behavior.
+invocation; ordinary evaluation never calls it. LanceDB 0.40.0 compacts files and
+retains seven days of historical versions with `delete_unverified=False`; the
+application supplies no custom policy.
 
 Use one completed writer/build before concurrent readers, with a filesystem
 visible to every node. Concurrent writes to the same table are unsupported.
-The separate CLIP/YOLO Qdrant backend remains outside this package; rebuild new
-references instead of migrating or changing old Qdrant collections.
-
 Creation `metadata` attaches string pairs to the Arrow schema without adding row
 columns; appends, optimization, and reopening preserve it. For experiment snapshots,
 read [table creation metadata](experiments.md#table-creation-metadata).

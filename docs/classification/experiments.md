@@ -34,8 +34,7 @@ backends.
 ## Lifecycle and configuration
 
 The shared CLI exposes `experiment describe`, `index`, `evaluate`, `run`, and
-`matroyshka-sweep`. Preserve the existing sweep spelling. The old caption/BGE
-workflows and flat-module import paths have no compatibility shims.
+`matroyshka-sweep`. Preserve the existing sweep spelling.
 
 `Experiment(config: ExperimentConfig, tracker=None)` resolves paths, loads dataset
 metadata and class names, and stores the configured batch size.
@@ -54,20 +53,10 @@ backend checks remain separate; service requirements belong to
 `evaluate()`. The owned Ollama context closes before embedding begins. The
 `describe` and `index` CLI stages use those named methods directly.
 
-### Description inputs
-
-For vocabulary paths, generation/cache behavior, and server lifecycle, read
-[class descriptions and Ollama](data.md#class-descriptions-and-ollama).
-`DescriberLLM` owns the per-class generation loop; the experiment owns
-saved-file handling and the server context.
-
-`Experiment` resolves the vocabulary path once. Both generation and indexing
-read saved vocabularies through `descriptions.load_descriptions()`. Indexing
-accepts an existing explicit or default `output_dir/descriptions.json` file and
-never starts Ollama. A missing explicit file fails without fallback or
-generation. The `descriptions.text_references()` function builds class-name and
-description records from an in-memory mapping, preserving class and sentence
-order.
+Vocabulary path resolution, generation/cache behavior, and Ollama lifecycle are
+defined in [class descriptions and Ollama](data.md#class-descriptions-and-ollama).
+`descriptions.load_descriptions()` reads saved vocabularies, and
+`descriptions.text_references()` builds ordered class-name and description records.
 
 ## Reference builds and resumption
 
@@ -75,13 +64,9 @@ Reference switches select any nonempty combination of class names, generated
 descriptions, and training images. Text identities are the class name for
 `class_name` and `<class>:<description index>` for `generated_description`.
 Training records use `training_image` and the dataset source ID. Values retain
-the class name, description text, or image filename respectively.
-
-Use the full official training split by default. The optional image cap selects
-the first N images per class in annotation order, independently of batch size.
-It affects images only. Every class must have a selected training reference when
-images are enabled; selected image decoding can still fail later. Compare
-complete retrieval strategies: changing sources changes reference counts.
+the class name, description text, or image filename respectively. Per-class
+training image caps and before-exclusion selection order are defined in
+[data](data.md#foodx251-metadata-and-image-batches).
 
 New builds prepare and validate reference inputs before creating a table or
 loading the encoder. Existing builds follow this sequence:
@@ -166,27 +151,18 @@ containing `config`, `table`, `reference_source_counts`, `predictions`, and
 `metrics`. Predictions contain image metadata, majority-vote label, vote
 fraction, nearest label, first-k neighbors, and per-query retrieval metrics.
 [Retrieval](retrieval.md) defines the denominators and abstention behavior.
-Reports have no separate prediction/metric files, manifest, prediction `value`,
-status/error fields, or fixed retrieval settings.
 
 `write_json()` serializes finite JSON with a trailing newline to a sibling
 `.tmp` file and replaces the destination. Tracking uploads reports only after
 successful local writing. Loading, encoding, storage, and interruption failures
-propagate; there are no partial evaluation reports, exclusions,
-application-level retries, or cleanup of partial reference tables. Backend
-request retries are separately documented in [encoders](encoders.md).
-[Tracking](tracking.md) defines loop-owned progress bars and W&B lifecycle
-details.
+propagate without partial evaluation reports, exclusions, application-level
+retries, or cleanup of partial reference tables.
 
-Keep the explicitly deferred scope: artifact compatibility checks, hashes,
-manifest/table-content validation, automatic table naming, migration, rollback,
-and Git/model/code revision, dependency-version, or timestamp provenance
-metadata are not implemented. This includes nested text-encoder revisions; UTC
-output directory names remain in use. Changing models, dimensions, prompts,
-descriptions, source inputs, or caps requires fresh tables and output
-directories with all enabled references rebuilt. Existing tables are reused by
-identity without verifying compatibility. Preserve historical data and
-collections; the separate CLIP/Qdrant experiment is unaffected.
+Artifact compatibility checks, content hashes, automatic table naming, migrations,
+and Git/model/dependency provenance metadata are intentionally omitted. Existing
+tables are reused by identity without verifying compatibility; changing models,
+dimensions, prompts, descriptions, source inputs, or caps requires fresh tables
+and output directories.
 
 ## Cached Matryoshka sweep
 
@@ -239,7 +215,3 @@ and temporary LanceDB tables. It covers selection, pairing, partial/complete
 resumes, cache reuse, failures, and publication ordering. For sweep changes use
 `tests/test_matroyshka_sweep.py`; scoring is covered in
 `tests/test_retrieval.py`, tracking in `tests/test_tracking.py`.
-
-These tests establish neither real-checkpoint behavior nor cloud, GPU, HPC, or
-shared-storage compatibility. Consult the [verification log](../experiments.md)
-for dated test results and historical baseline failures.

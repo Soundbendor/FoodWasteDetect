@@ -95,24 +95,16 @@ migration, or automatic artifact naming; see the
 
 ### Environment and hardware selection
 
-Use `jina-cpu` / `jina-cu126` for both Jina models, and `default` / `cu126` for
-EmbeddingGemma2, OpenAI CLIP, and Qwen. The four Pixi environments use independent
-solve groups. Exact family pins and installed dependencies belong to
-[`pyproject.toml`](../../src/classification/pyproject.toml) and its lockfile. The default
-classification YAML selects Jina CLIP v2, so choose its environment explicitly.
+Select the Pixi environment matching the model family in
+[development](../development.md#environment-selection). Dependency-family and
+hardware guards are absent from the loader, so environment and GPU selection remain
+manual:
 
-Dependency-family and Jina v4 hardware guards are absent from the current loader.
-Environment and hardware selection remain manual. Target native BF16 hardware for
-v4 and A100/H100-class hardware for Qwen. Qwen has no hardware guard, precision
-adaptation, or batch-size fallback. Keep the modern dependency stack unchanged
-when working on Qwen. Use the [script guide](../../src/classification/scripts/AGENTS.md)
-for submission defaults, environment forwarding, and sweep batch sizes.
-
-The isolated Jina family replaces remote-code compatibility patches following the
-`clip_loss` and default-RoPE failures. Their diagnosis, dated environment checks,
-and real-model acceptance procedure remain in
-[experiment notes](../experiments.md#isolated-jina-environments). Historical claims
-there that guards reject invalid hardware describe earlier code.
+- Target native BF16 hardware (e.g., A100/H100) for Jina v4 and Qwen.
+- Qwen has no precision adaptation or batch-size fallback.
+- Use [script operations](scripts.md) for submission defaults, environment
+  forwarding, and sweep batch sizes, and [experiment notes](../experiments.md) for
+  dependency-isolation details and GPU smoke checks.
 
 ## Vertex
 
@@ -126,8 +118,6 @@ ignored; experiment `batch_size` still bounds dataset and insertion batches.
 `--set embedding.vertex.project=PROJECT_ID` when constructing the backend;
 complete cached evaluations allow an omitted/null project. Reference-source choices,
 saved vocabulary path, cache setting, and artifact names are defined in that YAML.
-Live cloud requests and spending require explicit authorization; checks use mocked
-transports.
 
 Each nonempty encode call owns one context-managed client and a thread pool,
 defaulting to four workers. Requests contain exactly one text record or one RGB
@@ -167,9 +157,3 @@ for real SDK behavior through an in-memory HTTP transport. Local tests patch
 `EmbeddingModel` has no backend-injection argument. Retain explicit dependency
 skips. Synthetic Sentence Transformers modules exercise library batching, order,
 and conversion without model weights.
-
-These checks establish neither real-checkpoint compatibility nor dataset, GPU,
-cloud, shared-filesystem, or HPC acceptance. V4 and Qwen real-checkpoint/GPU
-acceptance remain pending separate authorization; synthetic checks establish no
-memory or throughput guarantees. Latest recorded suite results and pre-existing
-failures are in the dated [verification log](../experiments.md#classification-subpackage-refactor-verification-2026-11-02).
