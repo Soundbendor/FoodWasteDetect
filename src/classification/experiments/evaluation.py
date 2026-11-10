@@ -15,12 +15,10 @@ from classification.schemas import EmbeddingBatch, ImageMetadata, Neighbor, Pred
 
 
 def extract_batch_metadata(batch: dict[str, list]) -> list[ImageMetadata]:
-    """Convert metadata columns into ordered report rows, omitting images."""
-    metadata = batch.copy()
-    metadata.pop("image", None)
+    """Convert metadata-only columns into ordered report rows."""
     return [
-        cast(ImageMetadata, dict(zip(metadata, values, strict=True)))
-        for values in zip(*metadata.values(), strict=True)
+        cast(ImageMetadata, dict(zip(batch, values, strict=True)))
+        for values in zip(*batch.values(), strict=True)
     ]
 
 
@@ -52,8 +50,6 @@ def evaluate_batches(
     expected_count: int,
 ) -> list[Prediction]:
     """Query ordered batches and require a complete, nonempty evaluation."""
-    if type(k) is not int or k <= 0:
-        raise ValueError("k must be a positive integer")
     predictions: list[Prediction] = []
     with tqdm(total=expected_count, desc="Evaluation", unit="image", mininterval=5) as progress:
         for batch, vectors in batches:

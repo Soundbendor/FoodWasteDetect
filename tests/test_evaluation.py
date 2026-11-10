@@ -66,11 +66,10 @@ def test_query_depth_preserves_support_order_and_metadata():
     assert predictions[2]["retrieval_metrics"]["relevant_reference_count"] == 0
 
 
-def test_metadata_conversion_preserves_input_and_extra_columns():
+def test_metadata_conversion_preserves_extra_columns():
     metadata, _ = batch(["A"])
-    metadata.update(image=[object()], extra=["retained"])
+    metadata["extra"] = ["retained"]
     rows = evaluation.extract_batch_metadata(metadata)
-    assert "image" in metadata and "image" not in rows[0]
     assert rows[0]["extra"] == "retained"
     assert rows[0]["source_split"] == "val"
 
@@ -103,15 +102,6 @@ def test_empty_or_incomplete_evaluation_fails(expected_count, labels, message):
         evaluation.evaluate_batches(
             [batch(labels)], query=Mock(return_value=[]), class_counts={},
             k=1, expected_count=expected_count,
-        )
-
-
-@pytest.mark.parametrize("k", [0, -1, True, 1.0, "1"])
-def test_invalid_k_fails_before_consuming_batches(k):
-    batches = Mock()
-    with pytest.raises(ValueError, match="k must be a positive integer"):
-        evaluation.evaluate_batches(
-            batches, query=Mock(), class_counts={}, k=k, expected_count=1,
         )
 
 

@@ -101,11 +101,7 @@ class EmbeddingModel(Embedder):
                 f"Unsupported model {model_id!r}. Supported models: {list(_MODEL_SPECS)}"
             )
         native_dimension = _MODEL_SPECS[model_id]["dimension"]
-        if truncate_dim is not None and (
-            isinstance(truncate_dim, bool)
-            or not isinstance(truncate_dim, int)
-            or not 1 <= truncate_dim <= native_dimension
-        ):
+        if truncate_dim is not None and not 1 <= truncate_dim <= native_dimension:
             raise ValueError(
                 f"truncate_dim must be None or an integer between 1 and {native_dimension} "
                 f"for {model_id}"

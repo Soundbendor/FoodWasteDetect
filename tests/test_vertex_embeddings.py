@@ -164,23 +164,8 @@ def test_dimensions_and_empty_inputs(transport, dimension):
     [
         ("project", None),
         ("project", ""),
-        ("project", " "),
-        ("location", 1),
-        ("location", ""),
-        ("max_concurrency", True),
-        ("max_concurrency", 0),
-        ("max_attempts", 0),
-        ("max_attempts", 1.5),
-        ("request_timeout", True),
-        ("request_timeout", 0),
-        ("request_timeout", float("inf")),
-        ("request_timeout", float("nan")),
-        ("request_timeout", "60"),
-        ("classification_prompt", 1),
-        ("truncate_dim", True),
         ("truncate_dim", 127),
         ("truncate_dim", 3073),
-        ("truncate_dim", 128.0),
     ],
 )
 def test_invalid_settings_before_authentication(setting, value):

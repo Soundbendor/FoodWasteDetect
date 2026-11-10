@@ -66,7 +66,8 @@ not add embedding normalization.
 
 Before evaluation, stream reference class counts once. For each query let `R` be
 the number of stored rows matching its true class and retrieve `max(k, 5, R)`
-neighbors. `k` must be a positive integer excluding booleans. Preserve backend
+neighbors. `ExperimentConfig` validates `k` as a positive integer;
+`evaluate_batches` does not recheck it. Preserve backend
 ranking order. Deeper rows support ranking metrics, then are discarded; voting
 and saved `neighbors` use only the first `k` returned rows.
 

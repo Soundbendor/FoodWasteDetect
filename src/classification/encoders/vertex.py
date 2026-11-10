@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from math import ceil, isfinite
+from math import ceil
 from typing import TypeVar
 
 import numpy as np
@@ -43,17 +43,12 @@ class VertexEmbeddingModel(Embedder):
             truncate_dim: Output dimension from 128 through 3072, or None for 3072.
 
         Raises:
-            ValueError: A setting is outside its supported range or has an invalid type.
+            ValueError: The project is empty or truncate_dim is out of range.
         """
-        self._validate_config(
-            project=project,
-            location=location,
-            max_concurrency=max_concurrency,
-            max_attempts=max_attempts,
-            request_timeout=request_timeout,
-            classification_prompt=classification_prompt,
-            truncate_dim=truncate_dim,
-        )
+        if not project:
+            raise ValueError("vertex.project must be a nonempty string")
+        if truncate_dim is not None and not 128 <= truncate_dim <= 3072:
+            raise ValueError("truncate_dim must be None or an integer between 128 and 3072")
         self.dimension = 3072 if truncate_dim is None else truncate_dim
         self.project = project
         self.location = location
@@ -71,38 +66,6 @@ class VertexEmbeddingModel(Embedder):
                 http_status_codes=[408, 429, 500, 502, 503, 504],
             ),
         )
-
-    @staticmethod
-    def _validate_config(
-        *,
-        project: str,
-        location: str,
-        max_concurrency: int,
-        max_attempts: int,
-        request_timeout: float,
-        classification_prompt: bool,
-        truncate_dim: int | None,
-    ) -> None:
-        """Validate settings before assigning state or constructing SDK options."""
-        for name, value in (("project", project), ("location", location)):
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"vertex.{name} must be a nonempty string")
-        for name, value in (("max_concurrency", max_concurrency), ("max_attempts", max_attempts)):
-            if type(value) is not int or value <= 0:
-                raise ValueError(f"vertex.{name} must be a positive integer")
-        if (
-            isinstance(request_timeout, bool)
-            or not isinstance(request_timeout, (int, float))
-            or not isfinite(request_timeout)
-            or request_timeout <= 0
-        ):
-            raise ValueError("vertex.request_timeout must be positive finite seconds")
-        if type(classification_prompt) is not bool:
-            raise ValueError("vertex.classification_prompt must be a boolean")
-        if truncate_dim is not None and (
-            type(truncate_dim) is not int or not 128 <= truncate_dim <= 3072
-        ):
-            raise ValueError("truncate_dim must be None or an integer between 128 and 3072")
 
     def _request(self, client: genai.Client, content: types.Content) -> NDArray[np.float32]:
         response = client.models.embed_content(

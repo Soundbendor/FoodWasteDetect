@@ -77,8 +77,6 @@ class OllamaSession:
             "Install Ollama or set ollama.binary_path to an existing executable. "
             "See README.md: Ollama setup."
         )
-        if not isinstance(self.binary_path, str) or not self.binary_path.strip():
-            raise ValueError(f"ollama.binary_path must be a nonempty string. {guidance}")
         binary = self.binary_path
         if "/" not in binary and not binary.startswith("~"):
             resolved = shutil.which(binary)

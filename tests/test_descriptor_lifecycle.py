@@ -139,8 +139,6 @@ class OllamaLifecycleTests(unittest.TestCase):
             (str(self.directory / 'missing'), FileNotFoundError),
             (str(self.directory), ValueError),
             (str(non_executable), PermissionError),
-            ('', ValueError),
-            (None, ValueError),
         ]
         for path, error_type in cases:
             with self.subTest(path=path):
@@ -150,8 +148,7 @@ class OllamaLifecycleTests(unittest.TestCase):
                 message = str(caught.exception)
                 self.assertIn('ollama.binary_path', message)
                 self.assertIn('README.md: Ollama setup', message)
-                if path:
-                    self.assertIn(path, message)
+                self.assertIn(path, message)
         self.get.assert_not_called()
         self.popen.assert_not_called()
 

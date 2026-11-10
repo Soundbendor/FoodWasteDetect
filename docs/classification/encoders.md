@@ -69,8 +69,8 @@ Loading and preprocessing contracts:
 ### Dimensions and comparison isolation
 
 `EmbeddingModel(..., *, truncate_dim=None)` preserves the native dimension.
-Non-null values must be integers from 1 through the native dimension; booleans,
-other types, nonpositive values, and oversized values fail before backend loading.
+Non-null values must be from 1 through the native dimension; out-of-range values
+fail before backend loading. `ExperimentConfig` owns type validation.
 The selected value goes to the shared Sentence Transformers `encode()` call for
 every modality and reference source. The library performs truncation; output
 validation, empty matrices, and the database schema use the selected dimension.
@@ -126,8 +126,7 @@ serialization occurs in workers to bound serialized-image memory. The wrapper
 closes its RGB copies and buffers while preserving caller-owned images. Empty
 calls construct no client and require no authentication.
 
-Native dimension is 3072. `truncate_dim` accepts integer dimensions 128–3072,
-excluding booleans, and maps to API `output_dimensionality`; there is no local
+Native dimension is 3072. `truncate_dim` accepts dimensions 128–3072 and maps to API `output_dimensionality`; there is no local
 slicing or normalization. Each response must contain exactly one finite nonzero
 vector of the selected dimension.
 
@@ -137,10 +136,9 @@ part before the image. No `task_type` is sent. Apply the mode consistently to
 reference and validation inputs. Changing prompt mode requires the same fresh
 tables, outputs, and re-embedding as changing model or dimension.
 
-Settings validate before client construction: nonempty project/location,
-positive integer `max_concurrency` and `max_attempts`, positive finite
-`request_timeout` seconds, boolean `classification_prompt`, and valid dimensions.
-Location defaults to `global`; timeout defaults to 60 seconds per attempt.
+`ExperimentConfig` validates setting types and ranges. The constructor itself
+only rejects an empty project and dimensions outside 128–3072, before client
+construction; direct construction with other bad values fails later. Location defaults to `global`; timeout defaults to 60 seconds per attempt.
 SDK retries use five total attempts by default, one-second initial delay, base
 two, one-second jitter, and a 60-second cap. Connection/timeouts and HTTP
 408/429/500/502/503/504 retry; other errors propagate. Failure or interruption
