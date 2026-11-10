@@ -1,6 +1,5 @@
 """Interface for Vertex API to yield vectors from Gemini Embedding 2."""
 
-import functools
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -67,20 +66,23 @@ class VertexEmbeddingModel(Embedder):
                 http_status_codes=[408, 429, 500, 502, 503, 504],
             ),
         )
+        self._client: genai.Client | None = None
 
-    @functools.cached_property
-    def _client(self) -> genai.Client:
-        return genai.Client(
-            vertexai=True,
-            project=self.project,
-            location=self.location,
-            http_options=self.http_options,
-        )
+    def _get_client(self) -> genai.Client:
+        if self._client is None:
+            self._client = genai.Client(
+                vertexai=True,
+                project=self.project,
+                location=self.location,
+                http_options=self.http_options,
+            )
+        return self._client
 
     def close(self) -> None:
         """Close the reused client if one was created; later encodes create a new one."""
-        if "_client" in self.__dict__:
-            self.__dict__.pop("_client").close()
+        if self._client is not None:
+            self._client.close()
+            self._client = None
 
     def _request(self, client: genai.Client, content: types.Content) -> NDArray[np.float32]:
         response = client.models.embed_content(
@@ -105,8 +107,8 @@ class VertexEmbeddingModel(Embedder):
         records = list(inputs)
         if not records:
             return np.empty((0, self.dimension), dtype=np.float32)
-        # Create the client on this thread; cached_property does not lock.
-        client = self._client
+        # Create the client on this thread before workers share it.
+        client = self._get_client()
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
             # Prepare images inside workers to bound serialized image memory too.
             # A failed request cancels the pending ones when map's iterator closes.
