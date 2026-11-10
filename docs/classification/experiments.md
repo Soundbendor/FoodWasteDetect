@@ -99,9 +99,9 @@ directories.
 
 ### Table creation metadata
 
-New reference and validation tables store the full `ExperimentConfig` as JSON under
-the Arrow schema key `classification.build`, with `vector_dimension` set to the
-stored vector size. The snapshot records creation settings and remains unchanged
+`IndexBuilder` sets `config.vector_dimension` to the encoder dimension, then stores
+the full `ExperimentConfig` as JSON under the Arrow schema key `classification.build`
+on new reference and validation tables. The snapshot records creation settings and remains unchanged
 on resume, even when the current configuration differs.
 
 ## Validation caching

@@ -24,8 +24,9 @@ Creation uses an explicit Arrow schema with
 non-null string fields `id`, `class`, `source_kind`, `source_identity`, and `value`,
 plus a fixed-length float32 `vector`. `mode="create", exist_ok=False` refuses
 overwrites. `PointRecord` supplies UUIDs and maps its `label` to stored `class`.
-When `config` is supplied to `create()`, its `vector_dimension` is set to `dimension`
-and serialized under `classification.build` schema metadata.
+`create()` takes only opaque `metadata`; `retrieval` does not import experiment
+configuration. `IndexBuilder` sets `vector_dimension` and passes the
+`classification.build` snapshot.
 
 `append()` pairs rows strictly and asks the backend
 to reject bad vectors. It adds completed batches without application write
@@ -35,7 +36,7 @@ current scope; follow [experiment persistence](experiments.md#reference-builds-a
 | Operation | Contract |
 | --- | --- |
 | `dimension` | Positive fixed-size vector width from the table schema |
-| `create_prefix_table(destination, dimension)` | Reuse a readable destination or shallow-clone the source table and replace its `vector` column with L2-normalized float32 prefixes via PyLance, updating any `classification.build` snapshot's `vector_dimension` |
+| `create_prefix_table(destination, dimension)` | Reuse a readable destination or shallow-clone the source table and replace its `vector` column with L2-normalized float32 prefixes via PyLance, updating any `classification.build` snapshot's `vector_dimension` with plain JSON (no schema validation; malformed JSON fails before cloning) |
 | `get_record_ids()` | Unlimited metadata-only scan of `(source_kind, source_identity)`; includes every stored row |
 | `class_counts()` | Stream only the class column without a result limit; every source type and duplicate row counts |
 | `fetch_vectors(identities)` | Select requested identities and return float32 vectors in caller order, including repeated requests; missing identities fail |

@@ -1,6 +1,7 @@
 """LanceDB storage and exact cosine retrieval."""
 
 import functools
+import json
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
@@ -15,7 +16,6 @@ from lancedb.db import LanceDBConnection
 from lancedb.table import LanceTable
 from numpy.typing import NDArray
 
-from classification.experiments.config import ExperimentConfig
 from classification.schemas import Neighbor, PointRecord, SourceIdentity
 
 
@@ -51,19 +51,14 @@ class LanceDBIndex:
         table: str,
         dimension: int,
         *,
-        config: ExperimentConfig | None = None,
         metadata: Mapping[str, str] | None = None,
     ) -> Self:
         """Create a typed table with schema metadata; refuse existing names."""
-        effective_metadata = dict(metadata or {})
-        if config is not None:
-            config.vector_dimension = dimension
-            effective_metadata["classification.build"] = config.model_dump_json()
         payload_fields = ("id", "class", "source_kind", "source_identity", "value")
         schema = pa.schema(
             [pa.field(name, pa.string(), nullable=False) for name in payload_fields]
             + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)],
-            metadata=effective_metadata,
+            metadata=dict(metadata or {}),
         )
         path = Path(uri).expanduser().resolve()
         opened = LanceDBConnection(path).create_table(
@@ -86,10 +81,9 @@ class LanceDBIndex:
             return self.open(self.uri, destination)
         source_dim = self.dimension
         encoded = (self.table.schema.metadata or {}).get(b"classification.build")
-        snapshot: ExperimentConfig | None = None
+        snapshot = None
         if encoded is not None:
-            snapshot = ExperimentConfig.model_validate_json(encoded)
-            snapshot.vector_dimension = dimension
+            snapshot = json.loads(encoded) | {"vector_dimension": dimension}
 
         vector_type = pa.list_(pa.float32(), dimension)
         prefix_schema = pa.schema([pa.field("vector_prefix", vector_type, nullable=False)])
@@ -118,7 +112,9 @@ class LanceDBIndex:
         dataset.drop_columns(["vector"])
         dataset.alter_columns({"path": "vector_prefix", "name": "vector"})  # ty: ignore[invalid-argument-type]
         if snapshot is not None:
-            dataset.update_schema_metadata({"classification.build": snapshot.model_dump_json()})
+            # Match Pydantic's compact JSON so the snapshot stays byte-comparable.
+            encoded = json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False)
+            dataset.update_schema_metadata({"classification.build": encoded})
         return type(self)(self.uri, connection.open_table(destination))
 
     def append(

@@ -276,11 +276,12 @@ def test_dimension_and_prefix_table_derivation(tmp_path):
     from classification.experiments.config import ExperimentConfig
 
     config = ExperimentConfig.model_validate(config_data())
+    config.vector_dimension = 4
     index = LanceDBIndex.create(
-        tmp_path / 'db', 'source', 4, config=config, metadata={'custom.key': 'preserved'},
+        tmp_path / 'db', 'source', 4,
+        metadata={'custom.key': 'preserved', 'classification.build': config.model_dump_json()},
     )
     assert index.dimension == 4
-    assert config.vector_dimension == 4
     source_meta = index.table.schema.metadata
     assert source_meta[b'custom.key'] == b'preserved'
     assert ExperimentConfig.model_validate_json(source_meta[b'classification.build']).vector_dimension == 4
@@ -292,6 +293,8 @@ def test_dimension_and_prefix_table_derivation(tmp_path):
     assert derived.dimension == 2
     derived_meta = derived.table.schema.metadata
     assert derived_meta[b'custom.key'] == b'preserved'
+    assert derived_meta[b'classification.build'] == config.model_copy(
+        update={'vector_dimension': 2}).model_dump_json().encode()
     assert ExperimentConfig.model_validate_json(derived_meta[b'classification.build']).vector_dimension == 2
     prefixes = vectors[:, :2]
     expected = prefixes / np.linalg.norm(prefixes, axis=1, keepdims=True)

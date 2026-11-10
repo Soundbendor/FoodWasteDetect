@@ -45,6 +45,16 @@ class IndexBuilder:
     def embedder(self) -> Embedder:
         return self._get_embedder()
 
+    def _create_table(self, name: str) -> LanceDBIndex:
+        """Record the encoder dimension in the config, then snapshot it as build metadata."""
+        self.config.vector_dimension = self.embedder.dimension
+        return LanceDBIndex.create(
+            self.uri,
+            name,
+            self.embedder.dimension,
+            metadata={"classification.build": self.config.model_dump_json()},
+        )
+
     def _get_text_inputs(self) -> list[PointRecord]:
         """Read enabled descriptions and construct text references without generation."""
         descriptions = (
@@ -116,12 +126,7 @@ class IndexBuilder:
                 excluded = {identity for kind, identity in existing_ids if kind == "training_image"}
                 images = self.dataset.select_images(images, excluded_source_ids=excluded)
         else:
-            index = LanceDBIndex.create(
-                self.uri,
-                self.table,
-                self.embedder.dimension,
-                config=self.config,
-            )
+            index = self._create_table(self.table)
         self._insert_text_records(index, records)
         if images is not None:
             self._insert_image_records(
@@ -140,12 +145,7 @@ class IndexBuilder:
         if LanceDBIndex.exists(self.uri, table_name):
             cache = LanceDBIndex.open(self.uri, table_name)
         else:
-            cache = LanceDBIndex.create(
-                self.uri,
-                table_name,
-                self.embedder.dimension,
-                config=self.config,
-            )
+            cache = self._create_table(table_name)
         excluded = {
             identity for kind, identity in cache.get_record_ids() if kind == "validation_image"
         }

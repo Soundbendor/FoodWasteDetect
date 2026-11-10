@@ -162,26 +162,15 @@ def test_reuse_has_no_writes_or_source_scan(sources, monkeypatch):
     wrapper.open_table.assert_called_once_with('reference_d768')
 
 
-@pytest.mark.parametrize('invalid', ['json', 'empty', 'partial', 'nested', 'dimension'])
-def test_invalid_snapshot_fails_before_destination_creation(sources, invalid, monkeypatch):
+@pytest.mark.parametrize('encoded', ['{broken', ''])
+def test_invalid_snapshot_fails_before_destination_creation(sources, encoded, monkeypatch):
     config, connection, _, _ = sources
-    document = ExperimentConfig.model_validate(config).model_dump()
-    document['vector_dimension'] = 3072
-    if invalid == 'partial':
-        document = {'dataset': {'name': 'foodx251'}}
-    elif invalid == 'nested':
-        document['embedding']['batch_size'] = '1'
-    elif invalid == 'dimension':
-        document['vector_dimension'] = 0
-    encoded = '{broken' if invalid == 'json' else json.dumps(document)
-    if invalid == 'empty':
-        encoded = ''
     source = LanceDBIndex.create(config['lancedb']['uri'], 'invalid', 3072,
                                 metadata={'classification.build': encoded})
     wrapper = MagicMock(wraps=connection)
     wrapper.__contains__.side_effect = lambda name: name in connection
     monkeypatch.setattr('classification.retrieval.lancedb.LanceDBConnection', Mock(return_value=wrapper))
-    with pytest.raises(ValidationError):
+    with pytest.raises(json.JSONDecodeError):
         source.create_prefix_table('destination', 768)
     wrapper.clone_table.assert_not_called()
     assert 'destination' not in connection
