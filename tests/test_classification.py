@@ -376,7 +376,7 @@ class ExperimentTests(unittest.TestCase):
                     self.assert_no_failed_report(exp, stage)
 
     def test_database_failures_and_interrupts_propagate(self):
-        for stage, method in [('build_vector_database', 'append'), ('evaluate', 'query')]:
+        for stage, method in [('build_vector_database', 'append'), ('evaluate', 'query_batch')]:
             for error in (ConnectionError('offline'), KeyboardInterrupt()):
                 with self.subTest(stage=stage, error=type(error).__name__):
                     exp = self.experiment((True, False, False), f'{stage}-{type(error).__name__}')
@@ -449,10 +449,10 @@ class ExperimentTests(unittest.TestCase):
         index.append(records, np.tile([1., 0.], (7, 1)))
         with patch.object(LanceDBIndex, 'open', return_value=index), \
              patch.object(index, 'class_counts', wraps=index.class_counts) as counts, \
-             patch.object(index, 'query', wraps=index.query) as query:
+             patch.object(index, 'query_batch', wraps=index.query_batch) as query:
             report = exp.evaluate().model_dump(mode="json")
         counts.assert_called_once_with()
-        self.assertEqual([call.args[1] for call in query.call_args_list], [7, 5])
+        self.assertEqual([limit for call in query.call_args_list for limit in call.args[1]], [7, 5])
         self.assertEqual([len(row['neighbors']) for row in report['predictions']], [1, 1])
         for key in ('top5_hit_rate', 'retrieval_precision_at_k', 'mrr_at_k', 'ndcg_at_k', 'map_at_r'):
             self.assertEqual(report['metrics'][key], 0.5)

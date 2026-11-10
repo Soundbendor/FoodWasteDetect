@@ -44,20 +44,22 @@ def prediction(
 def evaluate_batches(
     batches: Iterable[EmbeddingBatch],
     *,
-    query: Callable[[NDArray[np.float32], int], Sequence[Neighbor]],
+    query: Callable[[NDArray[np.float32], Sequence[int]], Sequence[Sequence[Neighbor]]],
     class_counts: Mapping[str, int],
     k: int,
     expected_count: int,
 ) -> list[Prediction]:
-    """Query ordered batches and require a complete, nonempty evaluation."""
+    """Query each ordered batch once and require a complete, nonempty evaluation."""
     predictions: list[Prediction] = []
     with tqdm(total=expected_count, desc="Evaluation", unit="image", mininterval=5) as progress:
         for batch, vectors in batches:
             rows = extract_batch_metadata(batch)
-            for record, vector in zip(rows, vectors, strict=True):
-                relevant_count = class_counts.get(record["class"], 0)
-                ranked = query(vector, max(k, 5, relevant_count))
-                predictions.append(prediction(record, ranked, k, relevant_count))
+            if len(rows) != len(vectors):
+                raise ValueError("Batch metadata and vectors must pair")
+            counts = [class_counts.get(r["class"], 0) for r in rows]
+            ranked = query(vectors, [max(k, 5, c) for c in counts])
+            for record, neighbors, count in zip(rows, ranked, counts, strict=True):
+                predictions.append(prediction(record, neighbors, k, count))
             progress.update(len(rows))
     if not expected_count:
         raise ValueError("No evaluation images; accuracy is undefined")

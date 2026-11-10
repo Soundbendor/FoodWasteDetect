@@ -137,7 +137,7 @@ mutating the cache. `Experiment` prepares validation batches; it opens or comple
 the cache and constructs the metadata iterator eagerly, then fetches vectors lazily.
 Ordinary evaluation prepares references first; cached-only evaluation prepares the
 cache first. Missing vectors fail during consumption after reference preparation. `evaluation.evaluate_batches()` consumes
-these batches through a supplied query callable, owns progress and completeness
+these batches through a supplied batch query callable (one call per batch), owns progress and completeness
 checks, and returns predictions. It performs no report writes or tracking.
 `Experiment` assembles an `EvaluationReport` model with typed configuration,
 writes its JSON-compatible dump, then publishes it.

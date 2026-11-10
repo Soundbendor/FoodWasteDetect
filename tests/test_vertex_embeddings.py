@@ -575,12 +575,12 @@ def test_validation_cache_completes_before_classification(transport, resume_conf
     transport(lambda request: response())
     experiment = Experiment(ExperimentConfig.model_validate(resume_config))
     experiment.build_vector_database()
-    original = LanceDBIndex.query
+    original = LanceDBIndex.query_batch
 
-    def query(index, vector, k):
+    def query(index, vectors, limits):
         cache = LanceDBIndex.open(index.uri, resume_config["lancedb"]["validation_table"])
         assert len(cache.get_record_ids()) == 13
-        return original(index, vector, k)
+        return original(index, vectors, limits)
 
-    with patch.object(LanceDBIndex, "query", query):
+    with patch.object(LanceDBIndex, "query_batch", query):
         experiment.evaluate()

@@ -402,7 +402,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
     assert bar.disable  # Context exit closes the bar.
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
-        patch("classification.experiments.classification.LanceDBIndex.query", side_effect=[[], failure]),
+        patch("classification.experiments.classification.LanceDBIndex.query_batch", side_effect=[failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.evaluate()

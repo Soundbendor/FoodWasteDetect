@@ -58,10 +58,15 @@ class VotingTests(unittest.TestCase):
                     self.assertEqual(classify(reordered), expected)
 
 
+def query(index, vector, k):
+    """Single-vector search through the batch API."""
+    return index.query_batch(np.asarray([vector]), [k])[0]
+
+
 def concurrent_reader(uri, barrier, queue):
     index = LanceDBIndex.open(uri, "fixture")
     barrier.wait(timeout=30)
-    results = [index.query(np.array([1., 0.]), 10) for _ in range(10)]
+    results = [query(index, np.array([1., 0.]), 10) for _ in range(10)]
     queue.put(results)
 
 
@@ -98,15 +103,15 @@ class LanceDBTests(unittest.TestCase):
             for record, vector, point in zip(records, vectors, stored.to_pylist(), strict=True):
                 self.assertEqual({k: v for k, v in point.items() if k != "vector"}, record.to_payload())
                 np.testing.assert_allclose(point["vector"], vector)
-            neighbors = reopened.query(np.array([2., 0.], dtype=dtype), 10)
+            neighbors = query(reopened, np.array([2., 0.], dtype=dtype), 10)
             self.assertEqual([n["label"] for n in neighbors], ["A", "B", "C"])
             np.testing.assert_allclose([n["score"] for n in neighbors], [1., 2**-0.5, -1.], atol=1e-6)
             self.assertEqual(neighbors[0]["id"], records[0].id)
-            self.assertEqual(len(reopened.query(vectors[0], 1)), 1)
+            self.assertEqual(len(query(reopened, vectors[0], 1)), 1)
 
     def test_empty_and_bad_vectors(self):
         self.index = LanceDBIndex.create(self.uri, "fixture", 2)
-        self.assertEqual(self.index.query(np.array([1., 0.]), 10), [])
+        self.assertEqual(query(self.index, np.array([1., 0.]), 10), [])
         for vector in ([[1., 2., 3.]], [[float("nan"), 1.]]):
             with self.assertRaises((ValueError, pa.ArrowInvalid)):
                 self.index.append([PointRecord("A", "class_name", "A", "A")], np.array(vector))
@@ -265,12 +270,12 @@ def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
                      np.asarray([[1.0, i + 1.0]], dtype=np.float32))
     before = index.table.to_arrow().to_pylist()
     fragments = index.table.stats()['fragment_stats']['num_fragments']
-    neighbors = index.query(np.asarray([1.0, 1.0]), 5)
+    neighbors = query(index, np.asarray([1.0, 1.0]), 5)
     index.optimize()
     assert index.table.stats()['fragment_stats']['num_fragments'] < fragments
     assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r['id']) == sorted(
         before, key=lambda r: r['id'])
-    assert index.query(np.asarray([1.0, 1.0]), 5) == neighbors
+    assert query(index, np.asarray([1.0, 1.0]), 5) == neighbors
 
 
 def test_dimension_and_prefix_table_derivation(tmp_path):
@@ -321,3 +326,38 @@ def test_dimension_and_prefix_table_derivation(tmp_path):
     no_meta.append(records, vectors)
     derived_no_meta = no_meta.create_prefix_table('no_meta_d2', 2)
     assert not derived_no_meta.table.schema.metadata
+
+
+def test_query_batch_matches_single_vector_searches(tmp_path):
+    from classification.experiments.evaluation import evaluate_batches
+
+    index = LanceDBIndex.create(tmp_path / 'db', 'references', 2)
+    rng = np.random.default_rng(0)
+    vectors = rng.normal(size=(24, 2)).astype(np.float32)
+    vectors[7] = vectors[3]  # Two references at equal distance from every query.
+    records = [PointRecord('ABC'[i % 3], 'class_name', str(i), str(i)) for i in range(24)]
+    index.append(records, vectors)
+    queries = rng.normal(size=(5, 2)).astype(np.float32)
+    queries[4] = vectors[3]
+    limits = [1, 3, 5, 8, 4]
+
+    batched = index.query_batch(queries, limits)
+    single = [query(index, vector, limit) for vector, limit in zip(queries, limits, strict=True)]
+    assert [len(neighbors) for neighbors in batched] == limits
+    assert batched == single
+    assert {n['id'] for n in batched[4][:2]} == {records[3].id, records[7].id}
+    assert index.query_batch(queries[:0], []) == []
+
+    metadata = {
+        'class': ['A', 'B', 'C', 'A', 'B'],
+        'source_id': [f's{i}' for i in range(5)],
+        'source_split': ['val'] * 5,
+        'fname': [f'{i}.png' for i in range(5)],
+    }
+    rows = [{key: [values[i]] for key, values in metadata.items()} for i in range(5)]
+    options = dict(class_counts=index.class_counts(), k=3, expected_count=5)
+    together = evaluate_batches([(metadata, queries)], query=index.query_batch, **options)
+    apart = evaluate_batches(
+        [(row, queries[i:i + 1]) for i, row in enumerate(rows)], query=index.query_batch, **options
+    )
+    assert together == apart

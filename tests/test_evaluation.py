@@ -38,7 +38,7 @@ def test_query_depth_preserves_support_order_and_metadata():
         Neighbor(id=f"n{i}", label="B" if i == 4 else "A", score=0.9 - 0.1 * i)
         for i in range(5)
     ]
-    query = Mock(side_effect=[ranked, deep_ranked, []])
+    query = Mock(return_value=[ranked, deep_ranked, []])
 
     predictions = evaluation.evaluate_batches(
         [(metadata, vectors)], query=query, class_counts={"A": 7, "B": 1},
@@ -47,9 +47,9 @@ def test_query_depth_preserves_support_order_and_metadata():
 
     assert metadata == snapshot
     json.dumps(predictions)
-    assert [call.args[1] for call in query.call_args_list] == [7, 5, 5]
-    for call, vector in zip(query.call_args_list, vectors, strict=True):
-        np.testing.assert_array_equal(call.args[0], vector)
+    query.assert_called_once()
+    assert query.call_args.args[1] == [7, 5, 5]
+    np.testing.assert_array_equal(query.call_args.args[0], vectors)
     assert [row["extra"] for row in predictions] == ["first", "second", "third"]
     assert predictions[0]["prediction"] == "B"
     assert predictions[0]["nearest"] == "B"
@@ -88,8 +88,7 @@ def test_misaligned_batches_fail(mismatch):
         evaluation.evaluate_batches(
             [(metadata, vectors)], query=query, class_counts={}, k=1, expected_count=2,
         )
-    if mismatch == "columns":
-        query.assert_not_called()
+    query.assert_not_called()
 
 
 @pytest.mark.parametrize("expected_count,labels,message", [
@@ -100,7 +99,7 @@ def test_misaligned_batches_fail(mismatch):
 def test_empty_or_incomplete_evaluation_fails(expected_count, labels, message):
     with pytest.raises(ValueError, match=message):
         evaluation.evaluate_batches(
-            [batch(labels)], query=Mock(return_value=[]), class_counts={},
+            [batch(labels)], query=lambda vectors, limits: [[] for _ in limits], class_counts={},
             k=1, expected_count=expected_count,
         )
 
@@ -115,7 +114,7 @@ def test_query_failure_closes_progress_without_counting_partial_batch(monkeypatc
         return bar
 
     monkeypatch.setattr(evaluation, "tqdm", progress)
-    query = Mock(side_effect=[[], [], failure])
+    query = Mock(side_effect=[[[]], failure])
     with pytest.raises(type(failure)):
         evaluation.evaluate_batches(
             [batch(["A"]), batch(["B", "C"])], query=query,

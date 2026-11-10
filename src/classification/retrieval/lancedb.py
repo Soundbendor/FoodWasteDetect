@@ -182,18 +182,34 @@ class LanceDBIndex:
         vectors = table["vector"].combine_chunks().flatten().to_numpy()
         return vectors.reshape(-1, self.dimension)[[rows[key] for key in identities]]
 
-    def query(
-        self, vector: np.ndarray[tuple[int], np.dtype[np.float32 | np.float64]], k: int
-    ) -> list[Neighbor]:
-        """Retrieve exact cosine neighbors, converting distance to similarity."""
-        points = (
-            self.table.search(vector.tolist())
+    def query_batch(
+        self,
+        vectors: np.ndarray[tuple[int, int], np.dtype[np.float32 | np.float64]],
+        limits: Sequence[int],
+    ) -> list[list[Neighbor]]:
+        """Retrieve exact cosine neighbors for each row, up to its own limit.
+
+        One backend search runs at ``max(limits)`` per query vector; each row's
+        neighbors are then cut to its limit. Rows keep backend order within equal
+        distances, which may differ from separate single-vector searches.
+        """
+        if not limits:
+            return []
+        rows = (
+            self.table.search(vectors.tolist())
             .distance_type("cosine")
             .bypass_vector_index()
             .select(["id", "class"])
-            .limit(k)
+            .limit(max(limits))
             .to_list()
         )
-        return [
-            Neighbor(id=p["id"], label=p["class"], score=1 - float(p["_distance"])) for p in points
-        ]
+        # A one-vector search omits query_index.
+        rows.sort(key=lambda r: (r.get("query_index", 0), r["_distance"]))
+        out: list[list[Neighbor]] = [[] for _ in limits]
+        for r in rows:
+            i = r.get("query_index", 0)
+            if len(out[i]) < limits[i]:
+                out[i].append(
+                    Neighbor(id=r["id"], label=r["class"], score=1 - float(r["_distance"]))
+                )
+        return out

@@ -213,7 +213,7 @@ class Experiment:
     ) -> EvaluationReport:
         predictions = evaluation.evaluate_batches(
             batches,
-            query=index.query,
+            query=index.query_batch,
             class_counts=index.class_counts(),
             k=self.config.k,
             expected_count=len(self.dataset.validation_set()),

@@ -42,7 +42,7 @@ current scope; follow [experiment persistence](experiments.md#reference-builds-a
 | `get_record_ids()` | Unlimited metadata-only scan of `(source_kind, source_identity)`; includes every stored row |
 | `class_counts()` | Stream only the class column without a result limit; every source type and duplicate row counts |
 | `fetch_vectors(identities)` | Select requested identities and return float32 vectors in caller order, including repeated requests; missing identities fail |
-| `query(vector, k)` | Exact cosine neighbors in backend order, as `id`, `label`, and similarity `score` |
+| `query_batch(vectors, limits)` | One exact cosine search for a vector matrix; returns one neighbor list per row, cut to that row's limit, as `id`, `label`, and similarity `score` |
 
 `fetch_vectors()` filters the underlying Lance dataset with PyArrow expressions
 matching both kind and identity, without a row limit. Empty input returns shape
@@ -70,8 +70,11 @@ not add embedding normalization.
 Before evaluation, stream reference class counts once. For each query let `R` be
 the number of stored rows matching its true class and retrieve `max(k, 5, R)`
 neighbors. `ExperimentConfig` validates `k` as a positive integer;
-`evaluate_batches` does not recheck it. Preserve backend
-ranking order. Deeper rows support ranking metrics, then are discarded; voting
+`evaluate_batches` does not recheck it. Each validation batch issues one
+`query_batch()` search at the batch's largest limit; LanceDB applies that limit per
+query vector and tags rows with `query_index` (omitted for a one-vector search).
+Rows sort by `(query_index, distance)` and keep backend order among equal distances,
+which can differ from separate single-vector searches. Preserve that ranking order. Deeper rows support ranking metrics, then are discarded; voting
 and saved `neighbors` use only the first `k` returned rows.
 
 Every support row contributes one vote, including repeated labels and duplicate
