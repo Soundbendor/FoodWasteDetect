@@ -12,9 +12,7 @@ annotation files through pandas, independently of `data_wrappers.foodx251`.
 `FoodX251ImageDataset` exposes a typed Hugging Face `DatasetDict`: `train` holds
 training references and `validation` holds labeled validation images.
 `train_set()` returns the former; `validation_set()` returns the latter.
-The legacy `test_set()` delegates to `validation_set()` for compatibility.
-`test_path` and `val_path` both point at validation images. Official test files are
-not read, and resulting accuracy is validation accuracy.
+Official test files are not read, and resulting accuracy is validation accuracy.
 
 Class IDs map through `annot/class_list.txt`; names are capitalized with underscores
 replaced by spaces. Duplicate IDs, empty taxonomy, and duplicate canonical labels
@@ -35,9 +33,9 @@ Every class still needs a selected training reference when image references are
 enabled. A changed cap needs fresh reference storage; see [experiment
 contracts](experiments.md).
 
-`iter_dataset_batches(dataset, batch_size, decode=True)` batches a prepared dataset.
-`iter_batches()` combines selection and batching for `train`, `val`, or
-`validation`. Both retain the final partial batch through `Dataset.iter()`.
+`iter_dataset_batches(dataset, batch_size, decode=True)` batches a prepared dataset,
+such as `validation_set()` or the output of `select_images()`. It retains the final
+partial batch through `Dataset.iter()`.
 Decoding occurs only after selection; `decode=False` removes the image column and
 supports complete-cache evaluation without reading image files. Batches remain
 column-oriented and ordered. Image-loading failures propagate. Experiment loops

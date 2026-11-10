@@ -34,15 +34,12 @@ class FoodX251ImageDataset:
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
-        self.train_path = self.root / "train/train_set"
-        self.val_path = self.root / "val/val_set"
-        # The experiment evaluates validation data, not the unlabeled test split.
-        self.test_path = self.val_path
         self.class_map = _read_class_map(self.root / "annot/class_list.txt")
+        # The experiment evaluates validation data, not the unlabeled test split.
         self.splits = DatasetDict(
             {
-                "train": self._load_split("train", self.train_path),
-                "validation": self._load_split("val", self.val_path),
+                "train": self._load_split("train", self.root / "train/train_set"),
+                "validation": self._load_split("val", self.root / "val/val_set"),
             }
         )
 
@@ -91,10 +88,6 @@ class FoodX251ImageDataset:
         """Return the official labeled validation split used for evaluation."""
         return self.splits["validation"]
 
-    def test_set(self) -> Dataset:
-        """Compatibility alias for the labeled validation split."""
-        return self.validation_set()
-
     @staticmethod
     def select_images(
         dataset: Dataset,
@@ -138,27 +131,6 @@ class FoodX251ImageDataset:
         else:
             dataset = dataset.cast_column("image", Image())
         return dataset.iter(batch_size=batch_size, drop_last_batch=False)
-
-    def iter_batches(
-        self,
-        split: str,
-        batch_size: int,
-        *,
-        n_imgs_per_class: int | None = None,
-        excluded_source_ids: set[str] | None = None,
-        decode: bool = True,
-    ) -> Iterator[dict[str, list]]:
-        """Select and batch ``train``, ``val``, or ``validation`` in annotation order.
-
-        Apply class caps before exclusions, then decode images only if requested.
-        Metadata-only batches omit the image column; both modes retain partial batches.
-        """
-        dataset = self.select_images(
-            self.splits[SPLIT_NAMES.get(split, split)],
-            n_imgs_per_class=n_imgs_per_class,
-            excluded_source_ids=excluded_source_ids,
-        )
-        return self.iter_dataset_batches(dataset, batch_size, decode=decode)
 
 
 def load_dataset(config: DatasetConfig) -> FoodX251ImageDataset:

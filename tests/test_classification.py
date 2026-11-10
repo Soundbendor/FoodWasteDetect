@@ -47,19 +47,17 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(set(ds.splits), {'train', 'validation'})
             self.assertEqual(ds.get_class_list(), ['Apple pie', 'Pear'])
             self.assertEqual(list(ds.train_set()['class']), ['Pear', 'Apple pie'])
-            self.assertEqual(ds.train_path, root / 'train/train_set')
-            self.assertEqual(ds.test_path, root / 'val/val_set')
-            self.assertEqual(str(ds.test_set().split), 'validation')
+            self.assertEqual(str(ds.validation_set().split), 'validation')
             self.assertEqual(ds.train_set().features['image'], HFImage(decode=False))
-            batch = next(ds.iter_batches('validation', 2))
+            batch = next(ds.iter_dataset_batches(ds.validation_set(), 2))
             self.assertEqual(batch['source_split'], ['val'])
             self.assertEqual(batch['image'][0].getpixel((0, 0)), (0, 0, 255))
             batch['image'][0].close()
             (root / 'annot/val_info.csv').write_text('')
             empty = FoodX251ImageDataset(root)
-            self.assertEqual(len(empty.test_set()), 0)
-            self.assertEqual(empty.test_set().features, empty.train_set().features)
-            self.assertEqual(list(empty.iter_batches('val', 2)), [])
+            self.assertEqual(len(empty.validation_set()), 0)
+            self.assertEqual(empty.validation_set().features, empty.train_set().features)
+            self.assertEqual(list(empty.iter_dataset_batches(empty.validation_set(), 2)), [])
             (root / 'annot/train_info.csv').write_text('pie.png,7\npie.png,7\n')
             with self.assertRaisesRegex(ValueError, 'Duplicate source'):
                 FoodX251ImageDataset(root)
@@ -77,7 +75,7 @@ class DatasetTests(unittest.TestCase):
                 Image.new('RGB', (8, 4), color).save(folder / 'a.png')
                 (root / f'annot/{split}_info.csv').write_text('a.png,0\n')
             ds = FoodX251ImageDataset(root)
-            self.assertEqual(ds.test_set()[0]['source_split'], 'val')
+            self.assertEqual(ds.validation_set()[0]['source_split'], 'val')
             self.assertEqual(ds.train_set()[0]['class'], 'Apple pie')
             self.assertTrue(Path(ds.train_set()[0]['fname']).is_absolute())
             copied = ds.train_set()[0]; copied['class'] = 'mutated'
@@ -85,7 +83,7 @@ class DatasetTests(unittest.TestCase):
             (root / 'val/val_set/a.png').write_bytes((root / 'train/train_set/a.png').read_bytes())
             duplicate_content = FoodX251ImageDataset(root)
             self.assertNotIn('sha256', duplicate_content.train_set().column_names)
-            self.assertNotIn('sha256', duplicate_content.test_set().column_names)
+            self.assertNotIn('sha256', duplicate_content.validation_set().column_names)
             (root / 'val/val_set/a.png').unlink()
             (root / 'val/val_set/a.png').symlink_to(root / 'train/train_set/a.png')
             with self.assertRaises(ValueError): FoodX251ImageDataset(root)
@@ -340,8 +338,8 @@ class ExperimentTests(unittest.TestCase):
     def test_early_ending_evaluation_is_incomplete(self):
         exp = self.experiment()
         exp.build_vector_database()
-        original = self.dataset.iter_batches
-        with patch.object(self.dataset, 'iter_batches', side_effect=lambda split, size, **kwargs: itertools.islice(original(split, 1, **kwargs), 1)):
+        original = self.dataset.iter_dataset_batches
+        with patch.object(self.dataset, 'iter_dataset_batches', side_effect=lambda dataset, size, **kwargs: itertools.islice(original(dataset, 1, **kwargs), 1)):
             with self.assertRaisesRegex(ValueError, 'Incomplete evaluation'):
                 exp.evaluate()
         self.assertFalse(list(exp.output.glob('evaluation_*/report.json')))
@@ -536,11 +534,12 @@ class ExperimentTests(unittest.TestCase):
     def test_image_limits_preserve_order_alignment_and_splits(self):
         rows = self.interleaved_training()
         train = self.dataset.train_set()
-        validation = self.dataset.test_set()
+        validation = self.dataset.validation_set()
         for limit, selected in [(None, [0, 1, 2, 3, 4]), (1, [0, 1]), (2, [0, 1, 2, 4]), (20, [0, 1, 2, 3, 4])]:
             for size in (1, 3, 8):
                 with self.subTest(limit=limit, size=size):
-                    batches = list(self.dataset.iter_batches('train', size, n_imgs_per_class=limit))
+                    selected_set = self.dataset.select_images(train, n_imgs_per_class=limit)
+                    batches = list(self.dataset.iter_dataset_batches(selected_set, size))
                     self.assertEqual([sid for b in batches for sid in b['source_id']],
                                      [rows[i]['source_id'] for i in selected])
                     self.assertEqual([len(b['image']) for b in batches],
@@ -552,7 +551,7 @@ class ExperimentTests(unittest.TestCase):
                             self.assertEqual(image.getpixel((0, 0))[1], i)
                             image.close()
         self.assertIs(self.dataset.train_set(), train)
-        self.assertIs(self.dataset.test_set(), validation)
+        self.assertIs(self.dataset.validation_set(), validation)
         self.assertFalse(train.features['image'].decode)
         self.assertEqual(len(train), 5)
 
@@ -640,7 +639,7 @@ class ExperimentTests(unittest.TestCase):
                     self.assertEqual(point['class'], rows[i]['class'])
                     self.assertEqual(point['vector'], [1., 0.] if rows[i]['class'] == 'Apple' else [0., 1.])
                 report = exp.evaluate().model_dump(mode="json")
-                self.assertEqual(report['metrics']['evaluated'], len(self.dataset.test_set()))
+                self.assertEqual(report['metrics']['evaluated'], len(self.dataset.validation_set()))
                 self.assertEqual([p['source_id'] for p in report['predictions']], ['0', '1'])
                 self.assertEqual(report['config']['n_imgs_per_class'], limit)
 

@@ -58,11 +58,11 @@ def sources(tmp_path, monkeypatch):
     dataset.validation_set.return_value = [0, 1]
 
     def batches(split, batch_size, *, decode):
-        assert (split, batch_size, decode) == ('val', 1, False)
+        assert (split, batch_size, decode) == ([0, 1], 1, False)
         for identity in ['first', 'second']:
             yield dict(source_id=[identity], source_split=['val'], fname=[identity], **{'class': ['A']})
 
-    dataset.iter_batches.side_effect = batches
+    dataset.iter_dataset_batches.side_effect = batches
     monkeypatch.setattr('classification.experiments.classification.load_dataset', Mock(return_value=dataset))
     monkeypatch.setattr(Experiment, '_create_embedder', Mock(side_effect=AssertionError('embedding forbidden')))
     return config, connection, vectors, query

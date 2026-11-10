@@ -81,7 +81,9 @@ class Experiment:
         self,
     ) -> Iterator[EmbeddingBatch]:
         """Encode uncached validation images in bounded batches."""
-        for batch in self.dataset.iter_batches("val", self.config.embedding.batch_size):
+        for batch in self.dataset.iter_dataset_batches(
+            self.dataset.validation_set(), self.config.embedding.batch_size
+        ):
             vectors = self.embedder.encode_images(batch.pop("image"))
             yield batch, vectors
 
@@ -153,7 +155,9 @@ class Experiment:
             cache = LanceDBIndex.open(uri=options.uri, table=table)
         else:
             cache = self._index_builder().build_validation_table(table)
-        metadata = self.dataset.iter_batches("val", self.config.embedding.batch_size, decode=False)
+        metadata = self.dataset.iter_dataset_batches(
+            self.dataset.validation_set(), self.config.embedding.batch_size, decode=False
+        )
         return (
             (
                 batch,
