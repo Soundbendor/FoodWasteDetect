@@ -20,7 +20,6 @@ selection and image ownership use [data](data.md); for scoring use
 | `descriptions.py`   | Saved-vocabulary reading and ordered text-reference construction                                          |
 | `evaluation.py`     | Batch evaluation, metadata-row conversion, predictions, and completeness checks                           |
 | `config.py`         | Experiment settings                                                                                      |
-| `batches.py`        | `EmbeddingBatch` type alias                                       |
 | `artifacts.py`      | Shared `write_json()`                                                                                     |
 | `report_types.py`   | Index summary and evaluation report models                                                                |
 | `matroyshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
@@ -83,6 +82,7 @@ loading the encoder. Existing builds follow this sequence:
 5. Optimize the reference table, including a no-work resume, then return the
    index and counts to `Experiment` for summary publication.
 
+`classification.py` defines the shared `EmbeddingBatch` type alias.
 Image records are built directly from column-oriented batches, with strict
 pairing of `class`, `source_id`, and `fname` columns. `EmbeddingBatch` is an
 ordered metadata dictionary and vector matrix; row conversion belongs to

@@ -10,15 +10,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from classification.datasets.image_dataset import load_dataset
 from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
+from classification.experiments import evaluation
 from classification.experiments.artifacts import write_json
-from classification.experiments.batches import EmbeddingBatch
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions
-from classification.experiments.evaluation import evaluate_batches
 from classification.experiments.index_builder import IndexBuilder
 from classification.experiments.report_types import (
     EvaluationReport,
@@ -29,6 +30,8 @@ from classification.llm.ollama import OllamaSession
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.retrieval.metrics import metrics
 from classification.tracking import Tracker
+
+type EmbeddingBatch = tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
 
 
 class Experiment:
@@ -218,7 +221,7 @@ class Experiment:
         artifact: dict[str, Any] | None,
         batches: Iterable[EmbeddingBatch],
     ) -> EvaluationReport:
-        predictions = evaluate_batches(
+        predictions = evaluation.evaluate_batches(
             batches,
             query=index.query,
             class_counts=index.class_counts(),

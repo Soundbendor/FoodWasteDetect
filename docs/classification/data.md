@@ -61,7 +61,7 @@ backend construction:
 | `QueryRetrievalMetrics` | Top-five hit, precision, reciprocal rank, nDCG, AP@R, and relevant-reference count. Definitions are in [retrieval](retrieval.md). |
 
 Keep metadata/vector associations ordered through selection, batching, storage,
-retrieval, and reporting. `experiments.batches.EmbeddingBatch` carries column
+retrieval, and reporting. `experiments.classification.EmbeddingBatch` carries column
 metadata alongside its NumPy vector matrix; conversion to prediction rows happens
 at evaluation.
 
