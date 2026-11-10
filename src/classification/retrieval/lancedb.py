@@ -6,7 +6,7 @@ import operator
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import lance
 import numpy as np
@@ -122,14 +122,18 @@ class LanceDBIndex:
         records: Sequence[PointRecord],
         vectors: np.ndarray[tuple[int, int], np.dtype[np.float32 | np.float64]],
     ) -> None:
-        """Append paired records; malformed vectors fail backend validation."""
-        self.table.add(
-            [
-                dict(r.to_payload(), vector=v.tolist())
-                for r, v in zip(records, vectors, strict=True)
-            ],
-            on_bad_vectors="error",
+        """Append paired records as one Arrow table; NaN vectors fail backend validation."""
+        vectors = np.ascontiguousarray(vectors, dtype=np.float32)
+        if vectors.shape != (len(records), self.dimension):
+            raise ValueError("Records and vectors must pair with the table dimension")
+        if not records:
+            return
+        payloads = [r.to_payload() for r in records]
+        columns: dict[str, Any] = {name: [p[name] for p in payloads] for name in payloads[0]}
+        columns["vector"] = pa.FixedSizeListArray.from_arrays(
+            pa.array(vectors.reshape(-1)), self.dimension
         )
+        self.table.add(pa.table(columns, schema=self.table.schema), on_bad_vectors="error")
 
     def optimize(self) -> None:
         """Compact sharded LanceDB table files into larger chunks for optimized queries."""

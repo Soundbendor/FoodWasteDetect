@@ -28,8 +28,10 @@ overwrites. `PointRecord` supplies UUIDs and maps its `label` to stored `class`.
 configuration. `IndexBuilder` sets `vector_dimension` and passes the
 `classification.build` snapshot.
 
-`append()` pairs rows strictly and asks the backend
-to reject bad vectors. It adds completed batches without application write
+`append()` requires a `(len(records), dimension)` vector matrix, converts it to
+float32, and adds one Arrow table with the stored schema; an empty batch writes
+nothing. The backend rejects NaN vectors (`on_bad_vectors="error"`); infinite
+values are not rejected here, so encoders own finiteness checks. It adds completed batches without application write
 retries. Compatibility checks and transaction/rollback guarantees are outside the
 current scope; follow [experiment persistence](experiments.md#reference-builds-and-resumption).
 

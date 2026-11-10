@@ -111,6 +111,9 @@ class LanceDBTests(unittest.TestCase):
             with self.assertRaises((ValueError, pa.ArrowInvalid)):
                 self.index.append([PointRecord("A", "class_name", "A", "A")], np.array(vector))
             self.assertEqual(self.index.table.count_rows(), 0)
+        version = self.index.table.version
+        self.index.append([], np.empty((0, 2), dtype=np.float32))
+        self.assertEqual(self.index.table.version, version)
 
     def test_missing_storage_is_not_created(self):
         self.assertFalse(LanceDBIndex.exists(self.uri, "fixture"))
