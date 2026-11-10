@@ -191,7 +191,8 @@ changed. Other schema metadata is preserved; absent snapshots remain absent.
 
 Existing destinations are reused if they open. Open/create/stream failures
 propagate without scan, repair, overwrite, or cleanup; this is not a crash
-durability guarantee. The sweep delegates cached validation preparation to `Experiment.evaluate_cached()`.
+durability guarantee. The sweep delegates cached validation preparation to `Experiment.evaluate_cached()`;
+the CLI loads dataset metadata once and passes it to each dimension's `Experiment`.
 
 Each dimension enables validation caching and uses its own table names and output
 directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`.

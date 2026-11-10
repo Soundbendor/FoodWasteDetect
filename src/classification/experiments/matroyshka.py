@@ -6,11 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from classification.experiments.artifacts import write_json
-from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
 from classification.retrieval.lancedb import LanceDBIndex
-from classification.tracking import Tracker
 
 
 def table_names(config: ExperimentConfig, dimension: int, source_width: int) -> tuple[str, str]:
@@ -33,11 +31,6 @@ def validate_config(config: ExperimentConfig, dimensions: list[int], source_widt
     ]
     if len(set(all_names)) != len(all_names):
         raise ValueError("Sweep source and destination table names must be distinct")
-
-
-def evaluate_cached(config: ExperimentConfig, tracker: Tracker) -> EvaluationReport:
-    """Evaluate cached vectors in validation order and publish the complete report."""
-    return Experiment(config, tracker=tracker).evaluate_cached()
 
 
 def run_sweep(

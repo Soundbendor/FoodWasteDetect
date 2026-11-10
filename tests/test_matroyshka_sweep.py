@@ -63,7 +63,9 @@ def sources(tmp_path, monkeypatch):
             yield dict(source_id=[identity], source_split=['val'], fname=[identity], **{'class': ['A']})
 
     dataset.iter_dataset_batches.side_effect = batches
-    monkeypatch.setattr('classification.experiments.classification.load_dataset', Mock(return_value=dataset))
+    loader = Mock(return_value=dataset)
+    monkeypatch.setattr('classification.experiments.classification.load_dataset', loader)
+    monkeypatch.setattr('classification.cli.load_dataset', loader)
     monkeypatch.setattr(Experiment, '_create_embedder', Mock(side_effect=AssertionError('embedding forbidden')))
     return config, connection, vectors, query
 
@@ -97,6 +99,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
     summary_path, = Path(config['output_dir']).glob('matroyshka_sweep_*/summary.json')
     summary = json.loads(summary_path.read_text())['results']
     assert len(summary) == len(runs) == 3
+    cli.load_dataset.assert_called_once()
     for dimension, result, (run, kwargs) in zip(config['sweep_dimensions'], summary, runs, strict=True):
         effective = kwargs['config']
         assert effective['k'] == 1
@@ -214,14 +217,13 @@ def test_missing_vector_has_no_embedding_or_summary(sources, runs):
 
 def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     config, _, _, _ = sources
-    original = cli.evaluate_cached
+    class FailingExperiment(Experiment):
+        def evaluate_cached(self):
+            if self.config.embedding.truncate_dim == 1536:
+                raise RuntimeError('later failure')
+            return super().evaluate_cached()
 
-    def evaluate(effective, tracker):
-        if effective.embedding.truncate_dim == 1536:
-            raise RuntimeError('later failure')
-        return original(effective, tracker)
-
-    monkeypatch.setattr(cli, 'evaluate_cached', evaluate)
+    monkeypatch.setattr(cli, 'Experiment', FailingExperiment)
     with pytest.raises(RuntimeError, match='later failure'):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert len(list(Path(config['output_dir']).rglob('report.json'))) == 1

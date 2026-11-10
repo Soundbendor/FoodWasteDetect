@@ -9,7 +9,7 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from classification.datasets.image_dataset import load_dataset
+from classification.datasets.image_dataset import FoodX251ImageDataset, load_dataset
 from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
@@ -40,7 +40,13 @@ class Experiment:
     running classification evaluation.
     """
 
-    def __init__(self, config: ExperimentConfig, *, tracker: Tracker | None = None) -> None:
+    def __init__(
+        self,
+        config: ExperimentConfig,
+        *,
+        tracker: Tracker | None = None,
+        dataset: FoodX251ImageDataset | None = None,
+    ) -> None:
         self.tracker = tracker
         # Load dataset metadata and settings
         self.config = config
@@ -52,7 +58,8 @@ class Experiment:
             if descriptions_file is not None
             else self.output / "descriptions.json"
         )
-        self.dataset = load_dataset(config.dataset)
+        # Sweeps pass one loaded dataset to every dimension's experiment.
+        self.dataset = dataset or load_dataset(config.dataset)
         self.classes = self.dataset.get_class_list()
 
         self._embedder: Embedder | None = None

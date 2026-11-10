@@ -7,9 +7,10 @@ from typing import Any
 import wandb
 import yaml
 
+from classification.datasets.image_dataset import load_dataset
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig, OllamaConfig
-from classification.experiments.matroyshka import evaluate_cached, run_sweep
+from classification.experiments.matroyshka import run_sweep
 from classification.tracking import Tracker
 
 
@@ -97,7 +98,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run_experiment(config: ExperimentConfig, stage: str) -> None:
     if stage == "matroyshka-sweep":
-        run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
+        dataset = load_dataset(config.dataset)
+        run_sweep(
+            config,
+            lambda effective: _tracked_run(
+                effective,
+                stage,
+                lambda c, t: Experiment(c, tracker=t, dataset=dataset).evaluate_cached(),
+            ),
+        )
         return
 
     def execute(effective: ExperimentConfig, tracker: Tracker) -> Any:
