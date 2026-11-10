@@ -1,0 +1,145 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foodwaste-classification"
+version = "0.1.0"
+description = "Whole-image food classification with Jina CLIP and LanceDB"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "datasets<5",
+    "einops>=0.8.2",
+    "httpx>=0.28.1",
+    "numpy>=2.5.4",
+    "ollama>=0.6.3",
+    "pandas>=3.0.6",
+    "packaging>=23",
+    "pillow>=13.0.0",
+    "pydantic>=2.14.1",
+    "pyyaml>=6.0.3",
+    "lancedb>=0.40,<0.41",
+    "pylance>=9.0,<10",
+    "pyarrow>=16",
+    "requests>=2.34.2",
+    "sentence-transformers>=5.7,<7",
+    "timm>=1.0.30",
+    "tqdm>=4.70.1",
+    "transformers>=4.57.6,<6",
+    "wandb>=0.28.1,<0.29",
+    "peft>=0.15.2",
+    "google-genai==2.33.0",
+]
+
+[project.scripts]
+classification = "classification.cli:main"
+
+[tool.setuptools]
+packages = ["classification", "classification.datasets", "classification.scripts", "classification.llm", "classification.encoders", "classification.retrieval", "classification.experiments"]
+package-dir = {classification = "."}
+
+[tool.setuptools.package-data]
+classification = ["scripts/*.sh"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["datasets"]
+
+[tool.pytest.ini_options]
+testpaths = ["../../tests"]
+addopts = "--cov=classification --cov-report=term-missing"
+
+[tool.ty.environment]
+root = [".."]
+python-version = "3.13"
+
+[tool.ty.src]
+include = ["cli.py", "schemas.py", "tracking.py", "encoders", "experiments", "retrieval", "datasets", "llm", "scripts"]
+
+[dependency-groups]
+dev = [
+    "ruff",
+    "ty",
+]
+test = [
+    "pytest",
+    "pytest-cov",
+]
+
+[tool.pixi.workspace]
+channels = ["conda-forge", "anaconda"]
+channel-priority = "strict"
+requires-pixi = ">=0.81.0"
+platforms = [
+    {name = "linux-64-cpu", platform = "linux-64", glibc = "2.28"},
+    {name = "linux-64-cu126", platform = "linux-64", glibc = "2.28", cuda = "12.9"},
+]
+
+[tool.pixi.workspace.conda-pypi-map]
+conda-forge = {mapping-mode = "overlay", mapping = {ollama = false}}
+
+[tool.pixi.dependencies]
+python = {version = "==3.13.13", build = "*_cp313"}
+qdrant = {version = "==1.19.0", channel = "anaconda"}
+
+[tool.pixi.pypi-dependencies]
+foodwaste-classification = {path = ".", editable = true}
+datasets = "==4.8.5"
+build = "*"
+setuptools = ">=77"
+wheel = "*"
+
+[tool.pixi.feature.modern.pypi-dependencies]
+sentence-transformers = "==6.2.0"
+transformers = "==5.20.2"
+peft = "==0.21.2"
+
+[tool.pixi.feature.jina.pypi-dependencies]
+sentence-transformers = "==5.7.0"
+transformers = "==4.57.6"
+peft = "==0.17.1"
+
+[tool.pixi.feature.cpu]
+platforms = ["linux-64-cpu"]
+
+[tool.pixi.feature.cpu.dependencies]
+ollama = {version = "==0.9.6", build = "cpu_hba3e463_4"}
+
+[tool.pixi.feature.cpu.pypi-dependencies]
+torch = {version = "==2.7.1", index = "https://download.pytorch.org/whl/cpu"}
+torchvision = {version = "==0.22.1", index = "https://download.pytorch.org/whl/cpu"}
+
+[tool.pixi.feature.cu126]
+platforms = ["linux-64-cu126"]
+
+[tool.pixi.feature.cu126.dependencies]
+ollama = {version = "==0.9.6", build = "cuda_129h63bc95c_4"}
+# Ollama bundles CUDA 12.9; the cu126 environment name refers to PyTorch.
+cuda-version = "==12.9"
+
+[tool.pixi.feature.cu126.pypi-dependencies]
+torch = {version = "==2.7.1", index = "https://download.pytorch.org/whl/cu126"}
+torchvision = {version = "==0.22.1", index = "https://download.pytorch.org/whl/cu126"}
+
+[tool.pixi.environments]
+default = {features = ["modern", "cpu", "dev", "test"], solve-group = "cpu"}
+cu126 = {features = ["modern", "cu126", "dev", "test"], solve-group = "cu126"}
+
+jina-cpu = {features = ["jina", "cpu", "dev", "test"], solve-group = "jina-cpu"}
+jina-cu126 = {features = ["jina", "cu126", "dev", "test"], solve-group = "jina-cu126"}
+
+[tool.pixi.tasks]
+classification = {cmd = "python -m classification", cwd = "../.."}
+test = {cmd = "pytest -c src/classification/pyproject.toml", cwd = "../..", env = {CUDA_VISIBLE_DEVICES = "", HF_HUB_OFFLINE = "1"}}
+lint = {cmd = "ruff check src/classification", cwd = "../.."}
+format-check = {cmd = "ruff format --check src/classification", cwd = "../.."}
+typecheck = {cmd = 'ty check --project src/classification --python "$CONDA_PREFIX"', cwd = "../.."}
+build = {cmd = "python -m build --no-isolation src/classification --outdir src/classification/dist", cwd = "../.."}
+qdrant = {cmd = "bash scripts/start_qdrant.sh", cwd = "../.."}

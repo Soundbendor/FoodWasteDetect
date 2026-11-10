@@ -1,0 +1,19 @@
+# Experiment orchestration
+
+This package runs the whole-image classification baseline. `Experiment` owns
+stage orchestration, validation-batch preparation, and report publication; `evaluation.py` owns batch prediction,
+progress, and completeness checks. `IndexBuilder` owns reference selection and
+encoding batches. Database operations, including derived prefix tables, use
+`retrieval`; `matroyshka.py` orchestrates the dimension sweep.
+
+| Task | Read before changing |
+| --- | --- |
+| Stages, configuration, or description inputs | [Experiment lifecycle](../../../docs/classification/experiments.md#lifecycle-and-configuration) |
+| Reference selection, restart behavior, or validation caching | [Builds and resumption](../../../docs/classification/experiments.md#reference-builds-and-resumption), [validation caching](../../../docs/classification/experiments.md#validation-caching) |
+| JSON output or failure handling | [Artifact and failure contract](../../../docs/classification/experiments.md#artifact-and-failure-contract) |
+| Cached dimension sweeps | [Matryoshka sweep](../../../docs/classification/experiments.md#cached-matryoshka-sweep) |
+| Query depth, voting, or reported metrics | [Retrieval contract](../../../docs/classification/retrieval.md) |
+| Progress bars or W&B publication | [Tracking](../../../docs/classification/tracking.md) |
+
+`Experiment.evaluate()` completes an enabled cache; `evaluate_cached()` reads existing
+vectors regardless of the cache flag. Cache setup is eager and vector fetching lazy.

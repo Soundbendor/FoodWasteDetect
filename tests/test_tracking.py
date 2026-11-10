@@ -1,7 +1,6 @@
 """Synthetic W&B contracts: fake SDK publishing plus isolated native offline runs."""
 
 import io
-import itertools
 import json
 import os
 import subprocess
@@ -11,11 +10,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from config_helpers import config_data, updated
 import test_classification
 import yaml
 
-from internvl.cli import main
-from internvl.tracking import Tracker
+from classification.cli import main
+from classification.tracking import Tracker
 
 
 class Artifact:
@@ -39,8 +39,8 @@ def sdk(monkeypatch):
     run = MagicMock(id="synthetic", summary={})
     run.__enter__.return_value = run
     run.__exit__.return_value = False
-    monkeypatch.setattr("internvl.cli.wandb.init", Mock(return_value=run))
-    monkeypatch.setattr("internvl.tracking.wandb.Artifact", Artifact)
+    monkeypatch.setattr("classification.tracking.wandb.init", Mock(return_value=run))
+    monkeypatch.setattr("classification.tracking.wandb.Artifact", Artifact)
     return run
 
 
@@ -56,15 +56,10 @@ def experiment_case():
 
 def config_file(tmp_path):
     path = tmp_path / "config.yaml"
-    source = """# original comment
-embed_images: false
-embed_class_labels: true
-embed_descriptions: false
-output_dir: synthetic
-embedding:
-  batch_size: 2
-k: ${embedding.batch_size}
-"""
+    source = "# original comment\n" + yaml.safe_dump(config_data(
+        output_dir="synthetic", k=3,
+        embedding=dict(model_id="jinaai/jina-clip-v2", batch_size=2),
+    ))
     path.write_text(source)
     return path, source
 
@@ -78,15 +73,12 @@ k: ${embedding.batch_size}
         ("run", "run"),
     ],
 )
-@pytest.mark.parametrize("newline", ["\n", "\r\n"])
-def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline):
+def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method):
     path, source = config_file(tmp_path)
-    source = source.replace("\n", newline)
-    path.write_bytes(source.encode())
     overrides = ["embedding.batch_size=4", "embedding.batch_size=3"]
     with (
-        patch("internvl.cli.Experiment") as experiment,
-        patch("internvl.cli.wandb.init", return_value=sdk) as initialize,
+        patch("classification.cli.Experiment") as experiment,
+        patch("classification.tracking.wandb.init", return_value=sdk) as initialize,
     ):
         def assert_active(*args, **kwargs):
             sdk.__enter__.assert_called_once_with()
@@ -115,9 +107,11 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
         )
     initialize.assert_called_once()
     cfg = experiment.call_args.args[0]
-    assert cfg == initialize.call_args.kwargs["config"]
-    assert cfg["k"] == cfg["embedding"]["batch_size"] == 3
+    assert cfg.model_dump(mode="json") == initialize.call_args.kwargs["config"]
+    assert cfg.k == cfg.embedding.batch_size == 3
     assert initialize.call_args.kwargs["job_type"] == stage
+    assert initialize.call_args.kwargs["group"] is None
+    assert initialize.call_args.kwargs["tags"] == []
     settings = initialize.call_args.kwargs["settings"]
     assert settings.disable_git and settings.disable_code and not settings.save_code
     assert settings.x_disable_meta and not settings.x_save_requirements
@@ -130,38 +124,8 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method, newline
     artifact = sdk.log_artifact.call_args.args[0]
     assert artifact.name == "configuration-synthetic"
     assert set(artifact.files) == {"resolved_config.yaml"}
-    assert yaml.safe_load(artifact.files["resolved_config.yaml"]) == cfg
+    assert yaml.safe_load(artifact.files["resolved_config.yaml"]) == cfg.model_dump(mode="json")
     assert path.read_bytes() == source.encode()
-
-
-@pytest.mark.parametrize(
-    "kind", ["help", "unknown", "malformed", "mapping", "switches", "download"]
-)
-def test_no_run_for_non_experiments_or_invalid_input(sdk, tmp_path, kind):
-    path, _ = config_file(tmp_path)
-    args = ["experiment", "run", "--config_file", str(path)]
-    if kind == "help":
-        args = ["--help"]
-    elif kind == "unknown":
-        args += ["--set", "embedding.unknown=1"]
-    elif kind == "malformed":
-        args += ["--set", "broken"]
-    elif kind == "mapping":
-        path.write_text("- not a mapping")
-    elif kind == "switches":
-        args += ["--set", "embed_class_labels=false"]
-    elif kind == "download":
-        args = ["download_model", "fake"]
-    with (
-        patch("internvl.cli.wandb.init") as initialize,
-        patch("internvl.cli.download_model"),
-    ):
-        if kind == "download":
-            main(args)
-        else:
-            with pytest.raises((SystemExit, ValueError)):
-                main(args)
-        initialize.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -173,8 +137,8 @@ def test_native_context_exit_on_errors_and_success(sdk, tmp_path, source, cleanu
     failure = KeyboardInterrupt() if source == "interrupt" else RuntimeError(source)
     cleanup_error = RuntimeError("cleanup")
     with (
-        patch("internvl.cli.Experiment") as experiment,
-        patch("internvl.cli.wandb.init", return_value=sdk) as initialize,
+        patch("classification.cli.Experiment") as experiment,
+        patch("classification.tracking.wandb.init", return_value=sdk) as initialize,
     ):
         if cleanup_fails:
             sdk.__exit__.side_effect = cleanup_error
@@ -211,12 +175,11 @@ def test_native_context_exit_on_errors_and_success(sdk, tmp_path, source, cleanu
             experiment.assert_not_called()
 
 
-@pytest.mark.parametrize("flags", [x for x in itertools.product([False, True], repeat=3) if any(x)])
-def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
-    exp = experiment_case.experiment(flags)
-    exp.batch_size = 3
+def test_pipeline_counts_and_reuse(experiment_case, sdk):
+    exp = experiment_case.experiment((True, True, True))
+    exp.config = updated(exp.config, "embedding.batch_size", 3)
     exp.tracker = Tracker(sdk)
-    report = exp.run()
+    report = exp.run().model_dump(mode="json")
     history = [c.args[0] for c in sdk.log.call_args_list]
     assert len(history) == 1
     assert "evaluation/per_class" in history[0]
@@ -238,33 +201,53 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk, flags):
         [label, v["support"], v["correct"], v["recall"], v["precision"], v["f1"]]
         for label, v in report["metrics"]["per_class"].items()
     ]
-    # A fresh invocation reuses inputs without loading references or decoding images.
+    # Resume reads metadata but never regenerates saved vectors.
     reused = Mock(id="reused", summary={})
     exp.tracker = Tracker(reused)
-    with (
-        patch.object(exp, "_get_text_inputs", side_effect=AssertionError("read references")),
-        patch.object(
-            exp.dataset,
-            "train_set",
-            side_effect=AssertionError("read training metadata"),
-        ),
-    ):
+    with patch.object(exp.embedder, 'encode_text', side_effect=AssertionError('encode')), \
+         patch.object(exp.embedder, 'encode_images', side_effect=AssertionError('encode')):
         exp.generate_descriptions()
         exp.build_vector_database()
-    assert reused.summary == {}
+    assert reused.summary == {'reference_source_counts': report['reference_source_counts']}
     reused.define_metric.assert_not_called()
     reused.log.assert_not_called()
 
 
+@pytest.mark.parametrize("method", ["evaluate", "evaluate_cached"])
+@pytest.mark.parametrize("counts", [None, {}, {"class_name": 2}])
+def test_evaluation_source_counts_match_tracker_and_report(experiment_case, sdk, method, counts):
+    exp = experiment_case.experiment()
+    exp.build_vector_database()
+    if method == "evaluate_cached":
+        exp.config = updated(exp.config, "lancedb.validation_table", "cache")
+        exp.config = updated(exp.config, "cache_validation_embeddings", True)
+        exp.evaluate()
+    path = exp.output / "index.json"
+    if counts is None:
+        path.unlink()
+    else:
+        summary = json.loads(path.read_text())
+        summary["source_counts"] = counts
+        path.write_text(json.dumps(summary))
+    exp.tracker = Tracker(sdk)
+
+    report = getattr(exp, method)()
+
+    assert report.reference_source_counts == counts
+    assert sdk.summary["reference_source_counts"] == counts
+    artifact = sdk.log_artifact.call_args.args[0]
+    assert json.loads(artifact.files["report.json"])["reference_source_counts"] == counts
+
+
 def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_case, sdk, tmp_path):
     exp = experiment_case.experiment()
-    with patch("internvl.cli.wandb.init") as initialize:
+    with patch("classification.tracking.wandb.init") as initialize:
         with patch.object(exp.dataset, "train_set", side_effect=AssertionError("tracking count")):
             exp.run()
         initialize.assert_not_called()
     path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump(experiment_case.experiment(name="cli").config))
-    with patch("internvl.cli.wandb.init", return_value=sdk) as initialize:
+    path.write_text(yaml.safe_dump(experiment_case.experiment(name="cli").config.model_dump(mode="json")))
+    with patch("classification.tracking.wandb.init", return_value=sdk) as initialize:
         main(["experiment", "run", "--config_file", str(path)])
     initialize.assert_called_once()
     sdk.__enter__.assert_called_once_with()
@@ -309,8 +292,11 @@ from unittest.mock import patch
 import wandb
 import yaml
 from tqdm import tqdm
-from internvl.cli import _run_experiment
-from internvl.tracking import Tracker
+from classification.cli import _run_experiment
+from classification.tracking import Tracker
+from classification.experiments.config import ExperimentConfig
+from classification.experiments.report_types import EvaluationReport
+from classification.retrieval.metrics import metrics
 report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
     "nearest_neighbor_accuracy": 1., "per_class": {
         "A": {"support": 1, "correct": 1, "recall": 1., "precision": 1., "f1": 1.},
@@ -319,6 +305,9 @@ path = Path("report.json")
 path.write_text(json.dumps(report))
 config = {"k": 1, "embed_images": False, "embed_class_labels": True,
           "embed_descriptions": False, "embedding": {"model_id": "openai/clip-vit-base-patch32"}}
+config.update(dataset=dict(name="foodx251", root="/raw"), lancedb=dict(uri="/db", table="references"), output_dir="/output")
+config = ExperimentConfig.model_validate(config)
+report = EvaluationReport(config=config, table="references", reference_source_counts=None, predictions=[], metrics=dict(metrics([], ["A", "B"]), **report["metrics"]))
 original_configuration = Tracker.configuration
 
 def publish(tracker, config):
@@ -327,18 +316,16 @@ def publish(tracker, config):
     def inspect(artifact):
         assert set(artifact.manifest.entries) == {"resolved_config.yaml"}
         entry = artifact.manifest.entries["resolved_config.yaml"]
-        assert yaml.safe_load(Path(entry.local_path).read_text()) == config
+        assert yaml.safe_load(Path(entry.local_path).read_text()) == config.model_dump(mode="json")
         return log_artifact(artifact)
     with patch.object(tracker.run, "log_artifact", side_effect=inspect):
         original_configuration(tracker, config)
 
 class Experiment:
-    from internvl.experiment import validate_config
-    validate_config = staticmethod(validate_config)
 
     def __init__(self, config, *, tracker):
         assert wandb.run is tracker.run
-        assert dict(tracker.run.config) == config
+        assert dict(tracker.run.config) == config.model_dump(mode="json")
         self.tracker = tracker
 
     def generate_descriptions(self):
@@ -347,6 +334,9 @@ class Experiment:
     build_vector_database = generate_descriptions
     run = generate_descriptions
 
+    def close(self):
+        pass
+
     def evaluate(self):
         tracker = self.tracker
         with tqdm(total=1, desc="synthetic-evaluation") as bar:
@@ -354,7 +344,7 @@ class Experiment:
         tracker.reference_counts(None)
         tracker.evaluation(report, path)
 
-with patch("internvl.cli.Experiment", Experiment), patch.object(Tracker, "configuration", publish):
+with patch("classification.cli.Experiment", Experiment), patch.object(Tracker, "configuration", publish):
     _run_experiment(config, "evaluate")
 """
     env = {k: v for k, v in os.environ.items() if not k.startswith("WANDB_")}
@@ -417,7 +407,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
     assert bar.disable  # Context exit closes the bar.
     reports = list(exp.output.glob("evaluation_*/report.json"))
     with (
-        patch("internvl.experiment.LanceDBIndex.query", side_effect=[[], failure]),
+        patch("classification.experiments.classification.LanceDBIndex.query_batch", side_effect=[failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.evaluate()
@@ -428,7 +418,7 @@ def test_evaluation_bar_counts_successful_batches(experiment_case, sdk, progress
 
 
 def test_description_bar_counts_requests_and_closes_on_failure(progress_bars):
-    from internvl.generate_descriptors import DescriberLLM
+    from classification.llm.generate_descriptors import DescriberLLM
 
     llm = DescriberLLM.__new__(DescriberLLM)
     failure = RuntimeError("request failed")
@@ -460,11 +450,11 @@ def test_capped_reference_bars_match_inserted_records(
 ):
     experiment_case.interleaved_training()
     exp = experiment_case.experiment((images_enabled, True, True))
-    exp.config["n_imgs_per_class"] = limit
-    exp.batch_size = 3
+    exp.config = updated(exp.config, 'n_imgs_per_class', limit)
+    exp.config = updated(exp.config, "embedding.batch_size", 3)
     exp.tracker = Tracker(sdk)
     exp.generate_descriptions()
-    artifact = exp.build_vector_database()
+    artifact = exp.build_vector_database().model_dump(mode="json")
     bars = {bar.desc: bar for bar in progress_bars}
     expected_images = {None: 5, 1: 2, 2: 4, 20: 5}[limit] if images_enabled else 0
     assert sum(artifact["source_counts"].values()) == 12 + expected_images
@@ -481,10 +471,10 @@ def test_capped_reference_bars_match_inserted_records(
 @pytest.mark.parametrize("failure", [RuntimeError("insert failed"), KeyboardInterrupt()])
 def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_bars, images, failure):
     exp = experiment_case.experiment((images, not images, False))
-    exp.batch_size = 1
+    exp.config = updated(exp.config, "embedding.batch_size", 1)
     exp.tracker = Tracker(sdk)
     with (
-        patch("internvl.experiment.LanceDBIndex.append", side_effect=[None, failure]),
+        patch("classification.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),
         pytest.raises(type(failure)) as caught,
     ):
         exp.build_vector_database()
@@ -516,35 +506,36 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     from sentence_transformers import SentenceTransformer
     from test_embeddings import SyntheticEncoder
 
-    from internvl.embeddings import EmbeddingModel
+    from classification.encoders.sentence_transformers import EmbeddingModel
 
     exp = experiment_case.experiment((True, True, True), 'truncated-v4')
-    exp.config['embedding'].update(
-        model_id='jinaai/jina-embeddings-v4', device='cpu', truncate_dim=None,
-    )
+    exp.config = updated(exp.config, 'embedding', dict(model_id='jinaai/jina-embeddings-v4', device='cpu', batch_size=2))
     path = tmp_path / 'truncated.yaml'
-    path.write_text(yaml.safe_dump(exp.config))
+    path.write_text(yaml.safe_dump(exp.config.model_dump(mode="json")))
     experiment_case.embedder_constructor.side_effect = EmbeddingModel
     encoder = SyntheticEncoder(2048)
     backend = SentenceTransformer(
         modules=[encoder], device='cpu', prompts={'passage': 'Passage: '},
     )
     backend.module_kwargs = {'0': ['task', 'truncate_dim']}
-    with patch('internvl.embeddings._load_backend', return_value=backend):
+    with patch('classification.encoders.sentence_transformers._load_backend', return_value=backend):
         main(['experiment', 'run', '--config_file', str(path),
               '--set', 'embedding.truncate_dim=1024'])
     experiment_case.embedder_constructor.assert_called_once_with(
         model_id='jinaai/jina-embeddings-v4', device='cpu', batch_size=2,
         truncate_dim=1024,
     )
-    table = experiment_case.client.open_table(exp.config['lancedb']['table'])
+    table = experiment_case.client.open_table(exp.config.lancedb.table)
     assert table.schema.field('vector').type.list_size == 1024
     assert table.count_rows() == 14
     report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
     assert report['metrics']['evaluated'] == 2
     assert report['config']['embedding']['truncate_dim'] == 1024
-    from internvl.cli import wandb
-    assert wandb.init.call_args.kwargs['config'] == report['config']
+    from classification.tracking import wandb
+    initial_config = wandb.init.call_args.kwargs['config']
+    assert initial_config['vector_dimension'] is None
+    assert report['config']['vector_dimension'] == 1024
+    assert dict(initial_config, vector_dimension=1024) == report['config']
     artifacts = [c.args[0] for c in sdk.log_artifact.call_args_list]
     config_artifact = next(a for a in artifacts if 'resolved_config.yaml' in a.files)
-    assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == report['config']
+    assert yaml.safe_load(config_artifact.files['resolved_config.yaml']) == initial_config

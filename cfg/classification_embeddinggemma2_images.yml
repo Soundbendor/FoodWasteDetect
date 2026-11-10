@@ -1,3 +1,4 @@
+cache_validation_embeddings: false
 # Image-only references; all paths resolve from the working directory.
 dataset:
   name: foodx251
@@ -21,6 +22,7 @@ ollama:
   startup_timeout: 120
   request_timeout: 600
 lancedb:
+  validation_table: null
   uri: assets/lancedb
   table: foodx251_embeddinggemma2_images
 k: 10

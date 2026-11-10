@@ -20,4 +20,4 @@ py-modules = ["app", "yolo", "util", "clip_finetune"]
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
-exclude = ["internvl", "internvl.*"]
+exclude = ["classification", "classification.*"]

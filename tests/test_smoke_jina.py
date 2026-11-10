@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from internvl.scripts.smoke_jina import _run_worker
+from classification.scripts.smoke_jina import _run_worker
 
 
 class SmokeCleanupTests(unittest.TestCase):
@@ -39,7 +39,7 @@ class SmokeCleanupTests(unittest.TestCase):
                     "os.environ['HF_HOME'] + '\\n' + str(os.getpid())); time.sleep(60)"
                 )
                 parent = (
-                    "from internvl.scripts.smoke_jina import _run_worker; "
+                    "from classification.scripts.smoke_jina import _run_worker; "
                     f"_run_worker({[sys.executable, '-c', child]!r})"
                 )
                 process = subprocess.Popen([sys.executable, "-c", parent])

@@ -1,3 +1,4 @@
+cache_validation_embeddings: false
 # One reference strategy per output directory. All paths resolve from the CWD.
 dataset:
   name: foodx251
@@ -22,6 +23,7 @@ ollama:
   startup_timeout: 120
   request_timeout: 600
 lancedb:
+  validation_table: null
   uri: assets/lancedb
   table: foodx251_whole_image
 k: 10

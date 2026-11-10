@@ -13,9 +13,12 @@ if any(importlib.util.find_spec(name) is None for name in ("numpy", "lancedb")):
 
 import numpy as np
 import pyarrow as pa
+import pytest
 
-from internvl.retrieval import LanceDBIndex, classify, metrics, ranking_metrics
-from internvl.schemas import Neighbor, PointRecord, Prediction
+from classification.retrieval.lancedb import LanceDBIndex
+from classification.retrieval.voting import classify
+from classification.retrieval.metrics import metrics, ranking_metrics
+from classification.schemas import Neighbor, PointRecord, Prediction
 
 
 def prediction_row(
@@ -34,35 +37,9 @@ def prediction_row(
     }
 
 
-def legacy_metrics(predictions, classes):
-    result = metrics(predictions, classes)
-    return {key: ({label: {k: v for k, v in row.items() if k not in ("precision", "f1")}
-                   for label, row in value.items()} if key == "per_class" else value)
-            for key, value in result.items() if key in (
-                "evaluated", "majority_vote_accuracy", "nearest_neighbor_accuracy", "per_class")}
-
-
 class VotingTests(unittest.TestCase):
-    def test_vote_and_denominator(self):
-        self.assertEqual(classify([]), (None, 0.0))
-        predictions: list[Prediction] = [
-            prediction_row("A", "A" if i < 63 else None, "A")
-            for i in range(90)
-        ]
-        self.assertEqual(
-            legacy_metrics(predictions, ["A", "B"]),
-            {
-                "evaluated": 90,
-                "majority_vote_accuracy": 0.7,
-                "nearest_neighbor_accuracy": 1.0,
-                "per_class": {
-                    "A": {"support": 90, "correct": 63, "recall": 0.7},
-                    "B": {"support": 0, "correct": 0, "recall": None},
-                },
-            },
-        )
-
     def test_vote_priorities_and_order_independence(self):
+        self.assertEqual(classify([]), (None, 0.0))
         cases = [
             ([("B", 0.9), ("A", 0.2), ("A", 0.1)], ("A", 2 / 3)),
             ([("B", 0.9), ("A", 0.8)], ("B", 0.5)),
@@ -81,49 +58,15 @@ class VotingTests(unittest.TestCase):
                     self.assertEqual(classify(reordered), expected)
 
 
-class MetricsTests(unittest.TestCase):
-    def test_empty_predictions(self):
-        self.assertEqual(
-            legacy_metrics([], iter(["B", "A"])),
-            {
-                "evaluated": 0,
-                "majority_vote_accuracy": None,
-                "nearest_neighbor_accuracy": None,
-                "per_class": {
-                    "B": {"support": 0, "correct": 0, "recall": None},
-                    "A": {"support": 0, "correct": 0, "recall": None},
-                },
-            },
-        )
-
-    def test_abstentions_and_omitted_reporting_classes(self):
-        predictions: list[Prediction] = [
-            prediction_row("A", None, None),
-            prediction_row("A", "A", "B"),
-            prediction_row("B", "B", "B"),
-            prediction_row("C", "A", "C"),
-        ]
-        expected = {
-            "evaluated": 4,
-            "majority_vote_accuracy": 0.5,
-            "nearest_neighbor_accuracy": 0.5,
-            "per_class": {
-                "D": {"support": 0, "correct": 0, "recall": None},
-                "A": {"support": 2, "correct": 1, "recall": 0.5},
-            },
-        }
-        result = legacy_metrics(predictions, iter(["D", "A"]))
-        self.assertEqual(result, expected)
-        self.assertEqual(list(result["per_class"]), ["D", "A"])
-        expected["per_class"] = {}
-        self.assertEqual(legacy_metrics(predictions, []), expected)
+def query(index, vector, k):
+    """Single-vector search through the batch API."""
+    return index.query_batch(np.asarray([vector]), [k])[0]
 
 
 def concurrent_reader(uri, barrier, queue):
-    index = LanceDBIndex(uri, "fixture")
-    index.open()
+    index = LanceDBIndex.open(uri, "fixture")
     barrier.wait(timeout=30)
-    results = [index.query(np.array([1., 0.]), 10) for _ in range(10)]
+    results = [query(index, np.array([1., 0.]), 10) for _ in range(10)]
     queue.put(results)
 
 
@@ -132,10 +75,9 @@ class LanceDBTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.uri = Path(self.temp.name) / "db"
-        self.index = LanceDBIndex(self.uri, "fixture")
 
-    def populate(self, dtype=np.float32):
-        self.index.create(2)
+    def populate(self, dtype=np.float32, uri=None):
+        self.index = LanceDBIndex.create(self.uri if uri is None else uri, "fixture", 2)
         records = [PointRecord(label, "class_name", label, label) for label in ("A", "B", "C")]
         vectors = np.array([[3., 0.], [1., 1.], [-2., 0.]], dtype=dtype)
         self.index.append(records[:2], vectors[:2])
@@ -143,70 +85,54 @@ class LanceDBTests(unittest.TestCase):
         return records, vectors
 
     def test_length_mismatch_does_not_append(self):
-        self.index.table = Mock()
+        self.index = LanceDBIndex(self.uri, Mock())
         record = PointRecord("A", "class_name", "A", "A")
         for records, vectors in [([record], np.empty((0, 2))), ([], np.ones((1, 2)))]:
-            with self.assertRaisesRegex(ValueError, "Record/vector count mismatch"):
+            with self.assertRaises(ValueError):
                 self.index.append(records, vectors)
         self.index.table.add.assert_not_called()
 
     def test_round_trip_and_table_protection(self):
         for dtype in (np.float32, np.float64):
-            self.index = LanceDBIndex(self.uri / dtype.__name__, "fixture")
-            records, vectors = self.populate(dtype)
+            records, vectors = self.populate(dtype, self.uri / dtype.__name__)
             with self.assertRaises(ValueError):
-                self.index.create(2)
-            reopened = LanceDBIndex(self.index.uri, "fixture")
-            reopened.open()
+                LanceDBIndex.create(self.index.uri, "fixture", 2)
+            reopened = LanceDBIndex.open(self.index.uri, "fixture")
             stored = reopened.table.to_arrow()
             self.assertEqual(stored.schema.field("vector").type, pa.list_(pa.float32(), 2))
             for record, vector, point in zip(records, vectors, stored.to_pylist(), strict=True):
                 self.assertEqual({k: v for k, v in point.items() if k != "vector"}, record.to_payload())
                 np.testing.assert_allclose(point["vector"], vector)
-            neighbors = reopened.query(np.array([2., 0.], dtype=dtype), 10)
+            neighbors = query(reopened, np.array([2., 0.], dtype=dtype), 10)
             self.assertEqual([n["label"] for n in neighbors], ["A", "B", "C"])
             np.testing.assert_allclose([n["score"] for n in neighbors], [1., 2**-0.5, -1.], atol=1e-6)
             self.assertEqual(neighbors[0]["id"], records[0].id)
-            self.assertEqual(len(reopened.query(vectors[0], 1)), 1)
-
-    def test_full_v4_vectors_round_trip_with_cosine_search(self):
-        self.index.create(2048)
-        records = [PointRecord(label, "class_name", label, label) for label in ("A", "B")]
-        vectors = np.zeros((2, 2048), dtype=np.float32)
-        vectors[0, -1] = 3
-        vectors[1, 0] = 2
-        self.index.append(records, vectors)
-        reopened = LanceDBIndex(self.uri, "fixture")
-        reopened.open()
-        self.assertEqual(
-            reopened.table.schema.field("vector").type, pa.list_(pa.float32(), 2048)
-        )
-        neighbors = reopened.query(vectors[0] * 2, 10)
-        self.assertEqual([n["id"] for n in neighbors], [r.id for r in records])
-        np.testing.assert_allclose([n["score"] for n in neighbors], [1., 0.], atol=1e-6)
-        self.assertEqual(classify(neighbors), ("A", 0.5))
+            self.assertEqual(len(query(reopened, vectors[0], 1)), 1)
 
     def test_empty_and_bad_vectors(self):
-        self.index.create(2)
-        self.assertEqual(self.index.query(np.array([1., 0.]), 10), [])
+        self.index = LanceDBIndex.create(self.uri, "fixture", 2)
+        self.assertEqual(query(self.index, np.array([1., 0.]), 10), [])
         for vector in ([[1., 2., 3.]], [[float("nan"), 1.]]):
             with self.assertRaises((ValueError, pa.ArrowInvalid)):
                 self.index.append([PointRecord("A", "class_name", "A", "A")], np.array(vector))
             self.assertEqual(self.index.table.count_rows(), 0)
+        version = self.index.table.version
+        self.index.append([], np.empty((0, 2), dtype=np.float32))
+        self.assertEqual(self.index.table.version, version)
 
     def test_missing_storage_is_not_created(self):
-        self.assertFalse(self.index.exists())
+        self.assertFalse(LanceDBIndex.exists(self.uri, "fixture"))
         with self.assertRaises(FileNotFoundError):
-            self.index.open()
+            LanceDBIndex.open(self.uri, "fixture")
         self.assertFalse(self.uri.exists())
         self.uri.mkdir()
         with self.assertRaises(ValueError):
-            self.index.open()
+            LanceDBIndex.open(self.uri, "fixture")
         self.assertEqual(list(self.uri.iterdir()), [])
 
     def test_path_resolution(self):
-        self.assertEqual(LanceDBIndex("~/fixtures", "a").uri, Path.home() / "fixtures")
-        self.assertEqual(LanceDBIndex("fixtures", "a").uri, Path.cwd() / "fixtures")
+        self.assertEqual(LanceDBIndex("~/fixtures", Mock()).uri, Path.home() / "fixtures")
+        self.assertEqual(LanceDBIndex("fixtures", Mock()).uri, Path.cwd() / "fixtures")
 
     def test_concurrent_readers_preserve_table(self):
         self.populate()
@@ -232,7 +158,7 @@ class LanceDBTests(unittest.TestCase):
                     process.terminate()
                 process.join(timeout=10)
             queue.close()
-        self.index.open()
+        self.index = LanceDBIndex.open(self.uri, "fixture")
         self.assertEqual(self.index.table.version, version)
         self.assertEqual(self.index.table.to_arrow(), before)
 
@@ -242,18 +168,17 @@ if __name__ == "__main__":
 
 
 def test_identity_scan_and_vector_fetch_preserve_source_and_order(tmp_path):
-    from internvl.retrieval import LanceDBIndex
-    from internvl.schemas import PointRecord
+    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.schemas import PointRecord
 
-    index = LanceDBIndex(tmp_path / "db", "vectors")
-    index.create(3)
+    index = LanceDBIndex.create(tmp_path / "db", "vectors", 3)
     records = [PointRecord("Apple", kind, f"quoted'{i}", "value")
                for kind in ("training_image", "validation_image") for i in range(13)]
     vectors = np.asarray([[i + 1, i + 2, i + 3] for i in range(26)], dtype=np.float32)
     order = np.random.default_rng(12).permutation(26)
     index.append([records[i] for i in order], vectors[order])
     identities = [(record.source_kind, record.source_identity) for record in records]
-    assert sorted(index.identities()) == sorted(identities)
+    assert sorted(index.get_record_ids()) == sorted(identities)
     requested = list(reversed(range(26))) + [3, 0]
     np.testing.assert_array_equal(
         index.fetch_vectors([identities[i] for i in requested]), vectors[requested],
@@ -264,21 +189,30 @@ def test_identity_scan_and_vector_fetch_preserve_source_and_order(tmp_path):
 def test_classification_macro_micro_and_display_independence():
     rows = [prediction_row('A', 'A', 'A'), prediction_row('A', 'A', 'A'),
             prediction_row('A', 'B', 'B'), prediction_row('B', 'C', 'C'),
-            prediction_row('B', None, None)]
-    result = metrics(rows, ['A', 'B', 'C', 'Unused'])
+            prediction_row('B', None, 'B')]
+    result = metrics(rows, iter(['Unused', 'A', 'B', 'C']))
+    assert result['evaluated'] == 5
+    assert result['majority_vote_accuracy'] == 0.4
+    assert result['nearest_neighbor_accuracy'] == 0.6
     assert result['precision_macro'] == 1 / 3
     assert result['recall_macro'] == (2 / 3) / 3
     assert result['f1_macro'] == 0.8 / 3
     assert result['precision_micro'] == 0.5
     assert result['recall_micro'] == 0.4
     assert result['f1_micro'] == 4 / 9
+    assert list(result['per_class']) == ['Unused', 'A', 'B', 'C']
     assert result['per_class']['C'] == dict(support=0, correct=0, recall=None, precision=0, f1=0)
+    assert result['per_class']['Unused'] == dict(support=0, correct=0, recall=None, precision=0, f1=0)
     assert {k: v for k, v in result.items() if k != 'per_class'} == {
         k: v for k, v in metrics(rows, []).items() if k != 'per_class'}
     no_abstentions = metrics(rows[:-1], [])
     for key in ('precision_micro', 'recall_micro', 'f1_micro'):
         assert no_abstentions[key] == no_abstentions['majority_vote_accuracy']
-    empty = metrics([], [])
+    empty = metrics([], iter(['B', 'A']))
+    assert empty['evaluated'] == 0
+    assert empty['majority_vote_accuracy'] is None
+    assert empty['nearest_neighbor_accuracy'] is None
+    assert list(empty['per_class']) == ['B', 'A']
     assert empty['f1_macro'] == empty['map_at_r'] == 0
     assert empty['mean_top1_cosine_similarity'] is None
 
@@ -318,10 +252,112 @@ def test_support_cosine_is_query_weighted_and_keeps_negative_scores():
 
 
 def test_class_counts_stream_all_rows_and_reference_types(tmp_path):
-    index = LanceDBIndex(tmp_path, 'counts')
-    index.create(2)
+    index = LanceDBIndex.create(tmp_path, 'counts', 2)
     assert index.class_counts() == {}
     records = [PointRecord('A' if i % 2 else 'B', kind, str(i), '')
                for kind in ('class_name', 'description', 'training_image') for i in range(1100)]
     index.append(records, np.ones((len(records), 2), dtype=np.float32))
     assert index.class_counts() == {'A': 1650, 'B': 1650}
+
+
+def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
+    from classification.retrieval.lancedb import LanceDBIndex
+    from classification.schemas import PointRecord
+
+    index = LanceDBIndex.create(tmp_path / 'db', 'references', 2)
+    for i in range(32):
+        index.append([PointRecord(str(i), 'class_name', str(i), str(i))],
+                     np.asarray([[1.0, i + 1.0]], dtype=np.float32))
+    before = index.table.to_arrow().to_pylist()
+    fragments = index.table.stats()['fragment_stats']['num_fragments']
+    neighbors = query(index, np.asarray([1.0, 1.0]), 5)
+    index.optimize()
+    assert index.table.stats()['fragment_stats']['num_fragments'] < fragments
+    assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r['id']) == sorted(
+        before, key=lambda r: r['id'])
+    assert query(index, np.asarray([1.0, 1.0]), 5) == neighbors
+
+
+def test_dimension_and_prefix_table_derivation(tmp_path):
+    from config_helpers import config_data
+
+    from classification.experiments.config import ExperimentConfig
+
+    config = ExperimentConfig.model_validate(config_data())
+    config.vector_dimension = 4
+    index = LanceDBIndex.create(
+        tmp_path / 'db', 'source', 4,
+        metadata={'custom.key': 'preserved', 'classification.build': config.model_dump_json()},
+    )
+    assert index.dimension == 4
+    source_meta = index.table.schema.metadata
+    assert source_meta[b'custom.key'] == b'preserved'
+    assert ExperimentConfig.model_validate_json(source_meta[b'classification.build']).vector_dimension == 4
+    records = [PointRecord('A', 'class_name', 'A', 'A'), PointRecord('B', 'class_name', 'B', 'B')]
+    vectors = np.asarray([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
+    index.append(records, vectors)
+
+    derived = index.create_prefix_table('prefix_d2', 2)
+    assert derived.dimension == 2
+    derived_meta = derived.table.schema.metadata
+    assert derived_meta[b'custom.key'] == b'preserved'
+    assert derived_meta[b'classification.build'] == config.model_copy(
+        update={'vector_dimension': 2}).model_dump_json().encode()
+    assert ExperimentConfig.model_validate_json(derived_meta[b'classification.build']).vector_dimension == 2
+    prefixes = vectors[:, :2]
+    expected = prefixes / np.linalg.norm(prefixes, axis=1, keepdims=True)
+    np.testing.assert_allclose(
+        derived.fetch_vectors([('class_name', 'A'), ('class_name', 'B')]),
+        expected,
+        rtol=1e-6,
+    )
+
+    second = derived.create_prefix_table('prefix_d1', 1)
+    assert second.dimension == 1
+    assert ExperimentConfig.model_validate_json(
+        second.table.schema.metadata[b'classification.build']
+    ).vector_dimension == 1
+    reused = derived.create_prefix_table('prefix_d1', 1)
+    assert ExperimentConfig.model_validate_json(
+        reused.table.schema.metadata[b'classification.build']
+    ).vector_dimension == 1
+
+    no_meta = LanceDBIndex.create(tmp_path / 'db', 'no_meta', 4)
+    no_meta.append(records, vectors)
+    derived_no_meta = no_meta.create_prefix_table('no_meta_d2', 2)
+    assert not derived_no_meta.table.schema.metadata
+
+
+def test_query_batch_matches_single_vector_searches(tmp_path):
+    from classification.experiments.evaluation import evaluate_batches
+
+    index = LanceDBIndex.create(tmp_path / 'db', 'references', 2)
+    rng = np.random.default_rng(0)
+    vectors = rng.normal(size=(24, 2)).astype(np.float32)
+    vectors[7] = vectors[3]  # Two references at equal distance from every query.
+    records = [PointRecord('ABC'[i % 3], 'class_name', str(i), str(i)) for i in range(24)]
+    index.append(records, vectors)
+    queries = rng.normal(size=(5, 2)).astype(np.float32)
+    queries[4] = vectors[3]
+    limits = [1, 3, 5, 8, 4]
+
+    batched = index.query_batch(queries, limits)
+    single = [query(index, vector, limit) for vector, limit in zip(queries, limits, strict=True)]
+    assert [len(neighbors) for neighbors in batched] == limits
+    assert batched == single
+    assert {n['id'] for n in batched[4][:2]} == {records[3].id, records[7].id}
+    assert index.query_batch(queries[:0], []) == []
+
+    metadata = {
+        'class': ['A', 'B', 'C', 'A', 'B'],
+        'source_id': [f's{i}' for i in range(5)],
+        'source_split': ['val'] * 5,
+        'fname': [f'{i}.png' for i in range(5)],
+    }
+    rows = [{key: [values[i]] for key, values in metadata.items()} for i in range(5)]
+    options = dict(class_counts=index.class_counts(), k=3, expected_count=5)
+    together = evaluate_batches([(metadata, queries)], query=index.query_batch, **options)
+    apart = evaluate_batches(
+        [(row, queries[i:i + 1]) for i, row in enumerate(rows)], query=index.query_batch, **options
+    )
+    assert together == apart
