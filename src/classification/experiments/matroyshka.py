@@ -81,7 +81,9 @@ def run_sweep(config: ExperimentConfig) -> dict[str, list[dict[str, Any]]]:
         if dimension != source_width:
             for source, destination in zip(sources, (reference, validation), strict=True):
                 source.create_prefix_table(destination, dimension)
-        report, run_id = tracked_run(effective, "matroyshka-sweep", execute)
+        report, run_id = tracked_run(
+            effective, "matroyshka-sweep", execute, group=output.name, tags=[f"d{dimension}"]
+        )
         results.append(
             dict(
                 dimension=dimension,

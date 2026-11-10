@@ -196,8 +196,9 @@ each dimension's `Experiment.evaluate_cached()`, which prepares cached validatio
 
 Each dimension enables validation caching and uses its own table names and output
 directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`.
-The sweep opens one tracked run per dimension through `tracking.tracked_run()`, with
-no outer run, explicit identity/group settings, or resume checks. Standard reports have null reference counts unless a matching
+The sweep opens one tracked run per dimension through `tracking.tracked_run()`, grouped
+by the sweep folder name and tagged `d<dimension>` ([tracking](tracking.md#run-lifetime)),
+with no outer run, explicit identity settings, or resume checks. Standard reports have null reference counts unless a matching
 index summary exists in their output directory.
 
 Only complete success writes `summary.json`, with dimensions, tables, output

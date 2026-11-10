@@ -93,7 +93,7 @@ def tracked(monkeypatch):
     """Replace W&B runs with synthetic reports and record each effective config."""
     variants = []
 
-    def fake(effective, stage, execute):
+    def fake(effective, stage, execute, *, group, tags):
         assert stage == 'matroyshka-sweep'
         variants.append(effective)
         return EvaluationReport(
@@ -129,6 +129,9 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
     summary = json.loads(summary_path.read_text())['results']
     assert len(summary) == len(runs) == 3
     sweep.load_dataset.assert_called_once()
+    group = Path(summary_path).parent.name
+    assert [kwargs['group'] for _, kwargs in runs] == [group] * 3
+    assert [kwargs['tags'] for _, kwargs in runs] == [[f'd{d}'] for d in config['sweep_dimensions']]
     for dimension, result, (run, kwargs) in zip(config['sweep_dimensions'], summary, runs, strict=True):
         effective = kwargs['config']
         assert effective['k'] == 1

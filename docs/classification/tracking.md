@@ -19,8 +19,10 @@ Authentication, destination, and mode use native `WANDB_*` settings. Automatic G
 code, system metadata, and dependency-list capture remain disabled through W&B
 settings. Do not add separate provenance capture to the whole-image runner.
 
-`experiments.matroyshka.run_sweep()` opens one native context per dimension, with no outer run or
-explicit grouping/resume settings. Direct Python `Experiment(config)` calls are
+`experiments.matroyshka.run_sweep()` opens one native context per dimension, with no
+outer run. Every run in a sweep shares the W&B `group` `matroyshka_sweep_<UTC>`, the
+name of its local summary folder, and carries its own `d<dimension>` tag. CLI stages
+pass no group or tags. Resume is unsupported. Direct Python `Experiment(config)` calls are
 untracked by default; their progress bars still work.
 
 ## Published data

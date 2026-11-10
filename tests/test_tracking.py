@@ -110,6 +110,8 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method):
     assert cfg.model_dump(mode="json") == initialize.call_args.kwargs["config"]
     assert cfg.k == cfg.embedding.batch_size == 3
     assert initialize.call_args.kwargs["job_type"] == stage
+    assert initialize.call_args.kwargs["group"] is None
+    assert initialize.call_args.kwargs["tags"] == []
     settings = initialize.call_args.kwargs["settings"]
     assert settings.disable_git and settings.disable_code and not settings.save_code
     assert settings.x_disable_meta and not settings.x_save_requirements

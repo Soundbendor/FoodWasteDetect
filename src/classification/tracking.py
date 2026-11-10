@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -63,11 +63,16 @@ def tracked_run(
     config: ExperimentConfig,
     stage: str,
     execute: Callable[[ExperimentConfig, Tracker], Any],
+    *,
+    group: str | None = None,
+    tags: Sequence[str] = (),
 ) -> tuple[Any, str]:
     """Run ``execute`` inside one native W&B context and return its result and run ID."""
     with wandb.init(
         config=config.model_dump(mode="json"),
         job_type=stage,
+        group=group,
+        tags=list(tags),
         settings=wandb.Settings(
             disable_git=True,
             disable_code=True,
