@@ -1,14 +1,18 @@
 """Evaluate cached embeddings at stored and shorter prefix dimensions."""
 
+import contextlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from classification.datasets.image_dataset import FoodX251ImageDataset, load_dataset
 from classification.experiments.artifacts import write_json
+from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
 from classification.retrieval.lancedb import LanceDBIndex
+from classification.tracking import Tracker, tracked_run
 
 
 def table_names(config: ExperimentConfig, dimension: int, source_width: int) -> tuple[str, str]:
@@ -33,10 +37,20 @@ def validate_config(config: ExperimentConfig, dimensions: list[int], source_widt
         raise ValueError("Sweep source and destination table names must be distinct")
 
 
-def run_sweep(
-    config: ExperimentConfig,
-    evaluate: Callable[[ExperimentConfig], tuple[EvaluationReport, str]],
-) -> dict[str, list[dict[str, Any]]]:
+def _evaluate_cached(
+    dataset: FoodX251ImageDataset,
+) -> Callable[[ExperimentConfig, Tracker], EvaluationReport]:
+    """Evaluate one effective configuration against the shared dataset."""
+
+    def execute(config: ExperimentConfig, tracker: Tracker) -> EvaluationReport:
+        experiment = Experiment(config, tracker=tracker, dataset=dataset)
+        with contextlib.closing(experiment):
+            return experiment.evaluate_cached()
+
+    return execute
+
+
+def run_sweep(config: ExperimentConfig) -> dict[str, list[dict[str, Any]]]:
     """Prepare each dimension and publish a combined summary only after all succeed."""
     dimensions = config.sweep_dimensions
     if dimensions is None:
@@ -49,6 +63,7 @@ def run_sweep(
         raise ValueError("Source vector widths must match")
     source_width = reference_index.dimension
     validate_config(config, dimensions, source_width)
+    execute = _evaluate_cached(load_dataset(config.dataset))
     output = Path(config.output_dir).expanduser().resolve() / datetime.now(UTC).strftime(
         "matroyshka_sweep_%Y%m%dT%H%M%S_%fZ"
     )
@@ -66,7 +81,7 @@ def run_sweep(
         if dimension != source_width:
             for source, destination in zip(sources, (reference, validation), strict=True):
                 source.create_prefix_table(destination, dimension)
-        report, run_id = evaluate(effective)
+        report, run_id = tracked_run(effective, "matroyshka-sweep", execute)
         results.append(
             dict(
                 dimension=dimension,

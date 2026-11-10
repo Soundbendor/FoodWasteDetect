@@ -1,16 +1,17 @@
 # W&B monitoring and progress
 
 Read this document when changing W&B initialization, artifacts, final summaries,
-or progress reporting. [`cli.py`](../../src/classification/cli.py) owns run lifetime;
-[`tracking.py`](../../src/classification/tracking.py) only publishes through a supplied
-run. Experiment and description loops own their progress bars.
+or progress reporting. [`tracking.py`](../../src/classification/tracking.py) owns run
+lifetime through `tracked_run()`, used by both the CLI stages and the dimension sweep,
+and `Tracker` publishes through the run it opens. Experiment and description loops own
+their progress bars.
 
 ## Run lifetime
 
-`_tracked_run()` enters W&B's native `wandb.init(...)` context with the initial
+`tracked_run(config, stage, execute)` enters W&B's native `wandb.init(...)` context with the initial
 experiment settings and stage as `job_type`.
 Configuration publication, `Experiment` construction, and stage execution all
-occur inside it. Native context exit handles success, exceptions, and interrupts,
+occur inside it; it returns the result of `execute(config, tracker)` and the run ID. Native context exit handles success, exceptions, and interrupts,
 including cleanup failures. There is no application wrapper to preserve an earlier
 exception when W&B cleanup itself raises, and no manual `finish()` call.
 
@@ -18,7 +19,7 @@ Authentication, destination, and mode use native `WANDB_*` settings. Automatic G
 code, system metadata, and dependency-list capture remain disabled through W&B
 settings. Do not add separate provenance capture to the whole-image runner.
 
-The dimension sweep has one native context per dimension, with no outer run or
+`experiments.matroyshka.run_sweep()` opens one native context per dimension, with no outer run or
 explicit grouping/resume settings. Direct Python `Experiment(config)` calls are
 untracked by default; their progress bars still work.
 

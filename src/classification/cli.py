@@ -2,17 +2,15 @@
 
 import argparse
 import contextlib
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
-import wandb
 import yaml
 
-from classification.datasets.image_dataset import load_dataset
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig, OllamaConfig
 from classification.experiments.matroyshka import run_sweep
-from classification.tracking import Tracker
+from classification.tracking import Tracker, tracked_run
 
 # Method names, not bound methods, so tests that replace cli.Experiment keep working.
 STAGES = {
@@ -107,42 +105,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run_experiment(config: ExperimentConfig, stage: str) -> None:
     if stage == "matroyshka-sweep":
-        dataset = load_dataset(config.dataset)
-
-        def evaluate_cached(effective: ExperimentConfig, tracker: Tracker) -> Any:
-            experiment = Experiment(effective, tracker=tracker, dataset=dataset)
-            with contextlib.closing(experiment):
-                return experiment.evaluate_cached()
-
-        run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
+        run_sweep(config)
         return
 
     def execute(effective: ExperimentConfig, tracker: Tracker) -> Any:
         with contextlib.closing(Experiment(effective, tracker=tracker)) as experiment:
             return getattr(experiment, STAGES[stage])()
 
-    _tracked_run(config, stage, execute)
-
-
-def _tracked_run(
-    config: ExperimentConfig,
-    stage: str,
-    execute: Callable[[ExperimentConfig, Tracker], Any],
-) -> tuple[Any, str]:
-    with wandb.init(
-        config=config.model_dump(mode="json"),
-        job_type=stage,
-        settings=wandb.Settings(
-            disable_git=True,
-            disable_code=True,
-            save_code=False,
-            x_disable_meta=True,
-            x_save_requirements=False,
-        ),
-    ) as run:
-        tracker = Tracker(run)
-        tracker.configuration(config)
-        return execute(config, tracker), run.id
+    tracked_run(config, stage, execute)
 
 
 def main(argv: Sequence[str] | None = None) -> None:

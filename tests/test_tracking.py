@@ -39,7 +39,7 @@ def sdk(monkeypatch):
     run = MagicMock(id="synthetic", summary={})
     run.__enter__.return_value = run
     run.__exit__.return_value = False
-    monkeypatch.setattr("classification.cli.wandb.init", Mock(return_value=run))
+    monkeypatch.setattr("classification.tracking.wandb.init", Mock(return_value=run))
     monkeypatch.setattr("classification.tracking.wandb.Artifact", Artifact)
     return run
 
@@ -78,7 +78,7 @@ def test_cli_owns_one_run_and_exact_config(sdk, tmp_path, stage, method):
     overrides = ["embedding.batch_size=4", "embedding.batch_size=3"]
     with (
         patch("classification.cli.Experiment") as experiment,
-        patch("classification.cli.wandb.init", return_value=sdk) as initialize,
+        patch("classification.tracking.wandb.init", return_value=sdk) as initialize,
     ):
         def assert_active(*args, **kwargs):
             sdk.__enter__.assert_called_once_with()
@@ -136,7 +136,7 @@ def test_native_context_exit_on_errors_and_success(sdk, tmp_path, source, cleanu
     cleanup_error = RuntimeError("cleanup")
     with (
         patch("classification.cli.Experiment") as experiment,
-        patch("classification.cli.wandb.init", return_value=sdk) as initialize,
+        patch("classification.tracking.wandb.init", return_value=sdk) as initialize,
     ):
         if cleanup_fails:
             sdk.__exit__.side_effect = cleanup_error
@@ -239,13 +239,13 @@ def test_evaluation_source_counts_match_tracker_and_report(experiment_case, sdk,
 
 def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_case, sdk, tmp_path):
     exp = experiment_case.experiment()
-    with patch("classification.cli.wandb.init") as initialize:
+    with patch("classification.tracking.wandb.init") as initialize:
         with patch.object(exp.dataset, "train_set", side_effect=AssertionError("tracking count")):
             exp.run()
         initialize.assert_not_called()
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(experiment_case.experiment(name="cli").config.model_dump(mode="json")))
-    with patch("classification.cli.wandb.init", return_value=sdk) as initialize:
+    with patch("classification.tracking.wandb.init", return_value=sdk) as initialize:
         main(["experiment", "run", "--config_file", str(path)])
     initialize.assert_called_once()
     sdk.__enter__.assert_called_once_with()
@@ -529,7 +529,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
     assert report['metrics']['evaluated'] == 2
     assert report['config']['embedding']['truncate_dim'] == 1024
-    from classification.cli import wandb
+    from classification.tracking import wandb
     initial_config = wandb.init.call_args.kwargs['config']
     assert initial_config['vector_dimension'] is None
     assert report['config']['vector_dimension'] == 1024

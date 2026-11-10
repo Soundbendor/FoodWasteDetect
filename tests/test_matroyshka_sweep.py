@@ -17,6 +17,8 @@ from classification.experiments.config import ExperimentConfig
 from classification import cli
 from classification.experiments import matroyshka as sweep
 from classification.experiments.classification import Experiment
+from classification.experiments.report_types import EvaluationReport
+from classification.retrieval.metrics import metrics
 from classification.retrieval.lancedb import LanceDBIndex
 
 
@@ -65,7 +67,7 @@ def sources(tmp_path, monkeypatch):
     dataset.iter_dataset_batches.side_effect = batches
     loader = Mock(return_value=dataset)
     monkeypatch.setattr('classification.experiments.classification.load_dataset', loader)
-    monkeypatch.setattr('classification.cli.load_dataset', loader)
+    monkeypatch.setattr(sweep, 'load_dataset', loader)
     monkeypatch.setattr(Experiment, '_create_embedder', Mock(side_effect=AssertionError('embedding forbidden')))
     return config, connection, vectors, query
 
@@ -81,9 +83,36 @@ def runs(monkeypatch):
         contexts.append((run, kwargs))
         return run
 
-    monkeypatch.setattr(cli.wandb, 'init', Mock(side_effect=initialize))
+    monkeypatch.setattr('classification.tracking.wandb.init', Mock(side_effect=initialize))
     monkeypatch.setattr('classification.tracking.wandb.Artifact', Artifact)
     return contexts
+
+
+@pytest.fixture
+def tracked(monkeypatch):
+    """Replace W&B runs with synthetic reports and record each effective config."""
+    variants = []
+
+    def fake(effective, stage, execute):
+        assert stage == 'matroyshka-sweep'
+        variants.append(effective)
+        return EvaluationReport(
+            config=effective, table=effective.lancedb.table,
+            reference_source_counts=None, predictions=[], metrics=metrics([], ['A', 'B']),
+        ), 'synthetic'
+
+    monkeypatch.setattr(sweep, 'tracked_run', fake)
+    return variants
+
+
+def test_run_experiment_delegates_sweep_without_tracking(monkeypatch):
+    run_sweep, initialize = Mock(), Mock()
+    monkeypatch.setattr(cli, 'run_sweep', run_sweep)
+    monkeypatch.setattr('classification.tracking.wandb.init', initialize)
+    config = Mock()
+    cli._run_experiment(config, 'matroyshka-sweep')
+    run_sweep.assert_called_once_with(config)
+    initialize.assert_not_called()
 
 
 def test_shared_cli_sweep(sources, runs, tmp_path):
@@ -99,7 +128,7 @@ def test_shared_cli_sweep(sources, runs, tmp_path):
     summary_path, = Path(config['output_dir']).glob('matroyshka_sweep_*/summary.json')
     summary = json.loads(summary_path.read_text())['results']
     assert len(summary) == len(runs) == 3
-    cli.load_dataset.assert_called_once()
+    sweep.load_dataset.assert_called_once()
     for dimension, result, (run, kwargs) in zip(config['sweep_dimensions'], summary, runs, strict=True):
         effective = kwargs['config']
         assert effective['k'] == 1
@@ -223,7 +252,7 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
                 raise RuntimeError('later failure')
             return super().evaluate_cached()
 
-    monkeypatch.setattr(cli, 'Experiment', FailingExperiment)
+    monkeypatch.setattr(sweep, 'Experiment', FailingExperiment)
     with pytest.raises(RuntimeError, match='later failure'):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
     assert len(list(Path(config['output_dir']).rglob('report.json'))) == 1
@@ -302,23 +331,12 @@ def test_native_stream_creation_error(sources, monkeypatch, failure):
     assert connection.open_table('reference').count_rows() == 2
 
 
-def test_sweep_variants_are_independent_validated_models(sources):
-    from classification.experiments.report_types import EvaluationReport
-    from classification.retrieval.metrics import metrics
-
+def test_sweep_variants_are_independent_validated_models(sources, tracked):
     raw, _, _, _ = sources
     config = ExperimentConfig.model_validate(raw)
-    variants = []
-
-    def evaluate(effective):
-        assert isinstance(effective, ExperimentConfig)
-        variants.append(effective)
-        return EvaluationReport(
-            config=effective, table=effective.lancedb.table,
-            reference_source_counts=None, predictions=[], metrics=metrics([], ["A", "B"]),
-        ), "synthetic"
-
-    sweep.run_sweep(config, evaluate)
+    sweep.run_sweep(config)
+    variants = tracked
+    assert all(isinstance(variant, ExperimentConfig) for variant in variants)
     assert [variant.embedding.truncate_dim for variant in variants] == raw['sweep_dimensions']
     assert [variant.vector_dimension for variant in variants] == raw['sweep_dimensions']
     assert len({id(variant.embedding) for variant in variants}) == 3
@@ -334,20 +352,20 @@ def test_invalid_dimensions_rejected(sources, dimensions):
         ExperimentConfig.model_validate(config)
 
 
-def test_missing_and_oversized_dimensions_fail_before_writes(sources, monkeypatch):
+def test_missing_and_oversized_dimensions_fail_before_writes(sources, tracked, monkeypatch):
     config, _, _, _ = sources
     prepare = Mock()
-    evaluate = Mock()
     monkeypatch.setattr(LanceDBIndex, "create_prefix_table", prepare)
     for dimensions in (None, [3073]):
         config["sweep_dimensions"] = dimensions
         with pytest.raises(ValueError):
-            sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+            sweep.run_sweep(ExperimentConfig.model_validate(config))
     prepare.assert_not_called()
-    evaluate.assert_not_called()
+    sweep.load_dataset.assert_not_called()
+    assert tracked == []
 
 
-def test_custom_non_gemini_order_and_truncated_sources(sources):
+def test_custom_non_gemini_order_and_truncated_sources(sources, tracked):
     config, connection, _, _ = sources
     uri = config['lancedb']['uri']
     LanceDBIndex.open(uri, 'reference').create_prefix_table('short_ref', 16)
@@ -355,16 +373,8 @@ def test_custom_non_gemini_order_and_truncated_sources(sources):
     config['embedding']['model_id'] = 'example/custom'
     config['lancedb'].update(table='short_ref', validation_table='short_val')
     config['sweep_dimensions'] = [8, 16, 4]
-    variants = []
-    from classification.experiments.report_types import EvaluationReport
-    from classification.retrieval.metrics import metrics
-
-    def evaluate(effective):
-        variants.append(effective)
-        return EvaluationReport(config=effective, table=effective.lancedb.table,
-            reference_source_counts=None, predictions=[], metrics=metrics([], ['A', 'B'])), 'run'
-
-    result = sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+    result = sweep.run_sweep(ExperimentConfig.model_validate(config))
+    variants = tracked
     assert [item['dimension'] for item in result['results']] == [8, 16, 4]
     assert [item.lancedb.table for item in variants] == ['short_ref_d8', 'short_ref', 'short_ref_d4']
     for width in (8, 4):
@@ -377,16 +387,16 @@ def test_custom_non_gemini_order_and_truncated_sources(sources):
     Experiment._create_embedder.assert_not_called()
 
 
-def test_mismatched_source_widths_fail_before_writes(sources, monkeypatch):
+def test_mismatched_source_widths_fail_before_writes(sources, tracked, monkeypatch):
     config, _, _, _ = sources
     LanceDBIndex.open(config['lancedb']['uri'], 'validation').create_prefix_table('short_val', 16)
     config['lancedb']['validation_table'] = 'short_val'
-    prepare, evaluate = Mock(), Mock()
+    prepare = Mock()
     monkeypatch.setattr(LanceDBIndex, 'create_prefix_table', prepare)
     with pytest.raises(ValueError, match='widths must match'):
-        sweep.run_sweep(ExperimentConfig.model_validate(config), evaluate)
+        sweep.run_sweep(ExperimentConfig.model_validate(config))
     prepare.assert_not_called()
-    evaluate.assert_not_called()
+    assert tracked == []
 
 
 def test_cli_non_gemini_override_omits_source_width(sources, runs, tmp_path):

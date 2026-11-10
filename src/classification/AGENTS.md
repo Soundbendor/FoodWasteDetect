@@ -22,8 +22,8 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 
 | Files | Responsibility and when to read more |
 | --- | --- |
-| `cli.py`, `__main__.py` | Parse once, resolve YAML overrides, validate shared settings, and dispatch stages within native W&B contexts. Read [CLI](../../docs/classification/cli.md) when changing commands, configuration, or dispatch. |
-| `tracking.py` | Publish resolved configuration, reference counts, and completed evaluation results. Read [tracking](../../docs/classification/tracking.md) when changing W&B lifecycle, artifacts, summaries, or progress. |
+| `cli.py`, `__main__.py` | Parse once, resolve YAML overrides, validate shared settings, and dispatch stages through `tracking.tracked_run()` or `run_sweep()`. Read [CLI](../../docs/classification/cli.md) when changing commands, configuration, or dispatch. |
+| `tracking.py` | Own W&B run lifetime (`tracked_run()`) and publish resolved configuration, reference counts, and completed evaluation results. Read [tracking](../../docs/classification/tracking.md) when changing W&B lifecycle, artifacts, summaries, or progress. |
 | `datasets/image_dataset.py` | Load local FoodX251 metadata and select/decode ordered batches. Read [data](../../docs/classification/data.md) when changing splits, identities, image caps, or image ownership. |
 | `schemas.py` | Shared reference, neighbor, prediction, and retrieval-metric records. Read [data](../../docs/classification/data.md#shared-records) when changing fields or record/vector associations. |
 | `__init__.py` | Package description; no backend imports. |
@@ -45,7 +45,8 @@ the encoder loads on first use; `IndexBuilder` prepares and persists references 
 validation caches; `LanceDBIndex` owns storage operations, including build-metadata
 snapshots and derived prefix tables. The cached dimension sweep in
 `experiments.matroyshka` orchestrates prefix-table preparation through `LanceDBIndex`
-and delegates validation evaluation to `Experiment.evaluate_cached()`.
+loads the dataset once, and opens one `tracked_run()` per dimension around
+`Experiment.evaluate_cached()`.
 `experiments.evaluation` computes predictions from supplied batches; `Experiment`
 writes a complete local report before `Tracker` publishes it. Direct
 `Experiment(config: ExperimentConfig)` calls have no W&B run unless a tracker is supplied.

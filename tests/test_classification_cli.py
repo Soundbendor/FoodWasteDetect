@@ -41,7 +41,7 @@ def test_help_before_loading(command):
 ])
 def test_typed_dispatch_before_tracking(config_path, stage, method):
     content = config_path.read_bytes()
-    with patch("classification.cli.Experiment") as experiment, patch("classification.cli.wandb.init") as initialize, patch("classification.cli.Tracker"):
+    with patch("classification.cli.Experiment") as experiment, patch("classification.tracking.wandb.init") as initialize, patch("classification.tracking.Tracker"):
         def track(**kwargs):
             assert kwargs["config"]["embedding"]["batch_size"] == 16
             return MagicMock()
@@ -93,7 +93,7 @@ def test_overrides_can_repair_invalid_yaml_values(config_path):
     "cache_validation_embeddings=1", 'embedding.batch_size="32"',
 ])
 def test_invalid_assignments_before_tracking(config_path, assignment):
-    with patch("classification.cli.wandb.init") as initialize, patch("classification.cli.Experiment") as experiment, pytest.raises(SystemExit) as error:
+    with patch("classification.tracking.wandb.init") as initialize, patch("classification.cli.Experiment") as experiment, pytest.raises(SystemExit) as error:
         main(["experiment", "run", "--config_file", str(config_path), "--set", assignment])
     assert error.value.code == 2
     initialize.assert_not_called()
@@ -103,7 +103,7 @@ def test_invalid_assignments_before_tracking(config_path, assignment):
 @pytest.mark.parametrize("content", ["- sequence", "null", "embedding: [", "k: invalid"])
 def test_invalid_yaml_before_tracking(config_path, content):
     config_path.write_text(content)
-    with patch("classification.cli.wandb.init") as initialize, pytest.raises(SystemExit) as error:
+    with patch("classification.tracking.wandb.init") as initialize, pytest.raises(SystemExit) as error:
         main(["experiment", "run", "--config_file", str(config_path)])
     assert error.value.code == 2
     initialize.assert_not_called()
@@ -118,7 +118,7 @@ def test_missing_section_created(config_path):
 
 @pytest.mark.parametrize("failure", [RuntimeError("stage failed"), KeyboardInterrupt()])
 def test_stage_failures_propagate(config_path, failure):
-    with patch("classification.cli.wandb.init"), patch("classification.cli.Tracker"), patch("classification.cli.Experiment") as experiment, pytest.raises(type(failure)) as error:
+    with patch("classification.tracking.wandb.init"), patch("classification.tracking.Tracker"), patch("classification.cli.Experiment") as experiment, pytest.raises(type(failure)) as error:
         experiment.return_value.run.side_effect = failure
         main(["experiment", "run", "--config_file", str(config_path)])
     assert error.value is failure
@@ -129,7 +129,7 @@ def test_download_validates_only_ollama_section(failure):
     settings = dict(binary_path="ollama", host="localhost:11434", startup_timeout=2, request_timeout=3)
     with (
         patch("builtins.open", mock_open(read_data=yaml.safe_dump(dict(ollama=settings, unrelated="legacy")))),
-        patch("classification.cli.wandb.init") as initialize,
+        patch("classification.tracking.wandb.init") as initialize,
         patch("classification.llm.ollama.OllamaSession") as session,
     ):
         session.return_value.__enter__.return_value.download_model.side_effect = failure

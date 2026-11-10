@@ -191,14 +191,13 @@ changed. Other schema metadata is preserved; absent snapshots remain absent.
 
 Existing destinations are reused if they open. Open/create/stream failures
 propagate without scan, repair, overwrite, or cleanup; this is not a crash
-durability guarantee. The sweep delegates cached validation preparation to `Experiment.evaluate_cached()`;
-the CLI loads dataset metadata once and passes it to each dimension's `Experiment`.
+durability guarantee. After configuration checks, the sweep loads dataset metadata once and passes it to
+each dimension's `Experiment.evaluate_cached()`, which prepares cached validation vectors.
 
 Each dimension enables validation caching and uses its own table names and output
 directory under `<output_dir>/matroyshka_sweep_<UTC>/d<dimension>`.
-The CLI owns one native W&B context per dimension, with no outer run, explicit
-identity/group settings, or
-resume checks. Standard reports have null reference counts unless a matching
+The sweep opens one tracked run per dimension through `tracking.tracked_run()`, with
+no outer run, explicit identity/group settings, or resume checks. Standard reports have null reference counts unless a matching
 index summary exists in their output directory.
 
 Only complete success writes `summary.json`, with dimensions, tables, output

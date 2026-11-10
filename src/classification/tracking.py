@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import wandb
 import yaml
@@ -55,3 +57,25 @@ class Tracker:
         artifact = wandb.Artifact(f"evaluation-{self.run.id}", type="evaluation")
         artifact.add_file(str(report_path), name="report.json")
         self.run.log_artifact(artifact)
+
+
+def tracked_run(
+    config: ExperimentConfig,
+    stage: str,
+    execute: Callable[[ExperimentConfig, Tracker], Any],
+) -> tuple[Any, str]:
+    """Run ``execute`` inside one native W&B context and return its result and run ID."""
+    with wandb.init(
+        config=config.model_dump(mode="json"),
+        job_type=stage,
+        settings=wandb.Settings(
+            disable_git=True,
+            disable_code=True,
+            save_code=False,
+            x_disable_meta=True,
+            x_save_requirements=False,
+        ),
+    ) as run:
+        tracker = Tracker(run)
+        tracker.configuration(config)
+        return execute(config, tracker), run.id
