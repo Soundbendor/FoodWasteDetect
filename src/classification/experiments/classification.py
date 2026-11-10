@@ -35,18 +35,18 @@ type EmbeddingBatch = tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtyp
 
 
 class Experiment:
-    """Classify whole images with configured embeddings and LanceDB retrieval.
+    """Run food image classification experiment with image vector retrieval.
 
-    Construction loads dataset metadata; the encoder loads on first use.
-    Stages generate or reuse descriptions, build references, and publish complete
-    evaluation reports. Tracking uses the supplied tracker when present.
+    Primary entry-point for image classification experiments. Uses LanceDB to
+    build vector databases from image and text embeddings. Breaks experiments
+    into three stages: (optionally) generating description captions via Ollama,
+    building the vector database with the configured embedding model, and
+    running classification evaluation.
     """
 
     def __init__(self, config: ExperimentConfig, *, tracker: Tracker | None = None) -> None:
         self.tracker = tracker
         # Load dataset metadata and settings
-        if not isinstance(config, ExperimentConfig):
-            raise TypeError("config must be an ExperimentConfig")
         self.config = config
         self.output = Path(config.output_dir).expanduser().resolve()
         descriptions_file = config.descriptions_file
@@ -72,8 +72,6 @@ class Experiment:
         options = self.config.embedding
         if options.model_id == "google/ge-v2":
             vertex = options.vertex
-            if not vertex.project or not vertex.project.strip():
-                raise ValueError("embedding.vertex.project is required for the Vertex backend")
             return VertexEmbeddingModel(
                 project=vertex.project,
                 location=vertex.location,
@@ -133,6 +131,7 @@ class Experiment:
     def _index_builder(self) -> IndexBuilder:
         options = self.config.lancedb
         return IndexBuilder(
+            # enable lazy loading for embedding model
             get_embedder=lambda: self.embedder,
             dataset=self.dataset,
             uri=options.uri,
@@ -184,21 +183,21 @@ class Experiment:
 
     def evaluate(self) -> EvaluationReport:
         """Complete optional validation caching, then classify the full split."""
-        index, artifact = self._prepare_evaluation()
+        index, source_counts = self._prepare_evaluation()
         batches = self._prepare_validation_batches(cached_only=False)
-        return self._execute_evaluation(index, artifact, batches)
+        return self._execute_evaluation(index, source_counts, batches)
 
     def evaluate_cached(self) -> EvaluationReport:
         """Classify the validation split using existing cached vectors only."""
         batches = self._prepare_validation_batches(cached_only=True)
-        index, artifact = self._prepare_evaluation()
-        return self._execute_evaluation(index, artifact, batches)
+        index, source_counts = self._prepare_evaluation()
+        return self._execute_evaluation(index, source_counts, batches)
 
-    def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict[str, Any] | None]:
+    def _prepare_evaluation(self) -> tuple[LanceDBIndex, dict[str, int] | None]:
         options = self.config.lancedb
         table = options.table
         index = LanceDBIndex.open(uri=options.uri, table=table)
-        artifact: dict[str, Any] | None = None
+        source_counts = None
         path = self.output / "index.json"
         if path.exists():
             logging.info("Loading index.json from checkpoint...")
@@ -208,17 +207,15 @@ class Experiment:
                 summary["table"] == table
                 and Path(summary["uri"]).expanduser().resolve() == index.uri
             ):
-                artifact = summary
+                source_counts = summary["source_counts"]
         if self.tracker:
-            self.tracker.reference_counts(
-                artifact["source_counts"] if artifact is not None else None
-            )
-        return index, artifact
+            self.tracker.reference_counts(source_counts)
+        return index, source_counts
 
     def _execute_evaluation(
         self,
         index: LanceDBIndex,
-        artifact: dict[str, Any] | None,
+        source_counts: dict[str, int] | None,
         batches: Iterable[EmbeddingBatch],
     ) -> EvaluationReport:
         predictions = evaluation.evaluate_batches(
@@ -231,7 +228,7 @@ class Experiment:
         report = EvaluationReport(
             config=self.config,
             table=index.name,
-            reference_source_counts=artifact["source_counts"] if artifact is not None else None,
+            reference_source_counts=source_counts,
             predictions=predictions,
             metrics=metrics(predictions, self.classes),
         )

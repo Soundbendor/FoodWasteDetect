@@ -211,6 +211,32 @@ def test_pipeline_counts_and_reuse(experiment_case, sdk):
     reused.log.assert_not_called()
 
 
+@pytest.mark.parametrize("method", ["evaluate", "evaluate_cached"])
+@pytest.mark.parametrize("counts", [None, {}, {"class_name": 2}])
+def test_evaluation_source_counts_match_tracker_and_report(experiment_case, sdk, method, counts):
+    exp = experiment_case.experiment()
+    exp.build_vector_database()
+    if method == "evaluate_cached":
+        exp.config = updated(exp.config, "lancedb.validation_table", "cache")
+        exp.config = updated(exp.config, "cache_validation_embeddings", True)
+        exp.evaluate()
+    path = exp.output / "index.json"
+    if counts is None:
+        path.unlink()
+    else:
+        summary = json.loads(path.read_text())
+        summary["source_counts"] = counts
+        path.write_text(json.dumps(summary))
+    exp.tracker = Tracker(sdk)
+
+    report = getattr(exp, method)()
+
+    assert report.reference_source_counts == counts
+    assert sdk.summary["reference_source_counts"] == counts
+    artifact = sdk.log_artifact.call_args.args[0]
+    assert json.loads(artifact.files["report.json"])["reference_source_counts"] == counts
+
+
 def test_direct_python_is_untracked_and_full_cli_run_shares_tracker(experiment_case, sdk, tmp_path):
     exp = experiment_case.experiment()
     with patch("classification.cli.wandb.init") as initialize:
