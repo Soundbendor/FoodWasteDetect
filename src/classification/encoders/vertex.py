@@ -1,19 +1,17 @@
 """Interface for Vertex API to yield vectors from Gemini Embedding 2."""
 
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from math import ceil, isfinite
-from pathlib import Path
 from typing import TypeVar
 
 import numpy as np
 from google import genai
 from google.genai import types
 from numpy.typing import NDArray
-from PIL import Image
 
-from classification.encoders.base import Embedder, ImageInput
+from classification.encoders.base import Embedder, ImageInput, load_rgb
 
 _Input = TypeVar("_Input")
 _PREFIX = "task: classification | query: "
@@ -129,27 +127,20 @@ class VertexEmbeddingModel(Embedder):
         records = list(inputs)
         if not records:
             return np.empty((0, self.dimension), dtype=np.float32)
-        vectors = np.empty((len(records), self.dimension), dtype=np.float32)
-        with genai.Client(
-            vertexai=True,
-            project=self.project,
-            location=self.location,
-            http_options=self.http_options,
-        ) as client:
-            executor = ThreadPoolExecutor(max_workers=self.max_concurrency)
-            futures = {}
-            try:
-                # Prepare images inside workers to bound serialized image memory too.
-                def encode(record: _Input) -> NDArray[np.float32]:
-                    return self._request(client, prepare(record))
-
-                for index, record in enumerate(records):
-                    futures[executor.submit(encode, record)] = index
-                for future in as_completed(futures):
-                    vectors[futures[future]] = future.result()
-            finally:
-                executor.shutdown(wait=True, cancel_futures=True)
-        return vectors
+        with (
+            genai.Client(
+                vertexai=True,
+                project=self.project,
+                location=self.location,
+                http_options=self.http_options,
+            ) as client,
+            ThreadPoolExecutor(max_workers=self.max_concurrency) as executor,
+        ):
+            # Prepare images inside workers to bound serialized image memory too.
+            # A failed request cancels the pending ones when map's iterator closes.
+            return np.stack(
+                list(executor.map(lambda record: self._request(client, prepare(record)), records))
+            )
 
     def encode_text(
         self,
@@ -171,12 +162,7 @@ class VertexEmbeddingModel(Embedder):
         """Send RGB PNG pixels without labels, filenames, or resizing."""
 
         def prepare(image: ImageInput) -> types.Content:
-            if isinstance(image, (str, Path)):
-                with Image.open(image) as original:
-                    rgb = original.convert("RGB")
-            else:
-                rgb = image.convert("RGB")
-            with rgb, BytesIO() as buffer:
+            with load_rgb(image) as rgb, BytesIO() as buffer:
                 rgb.save(buffer, format="PNG")
                 part = types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/png")
             parts = [part]

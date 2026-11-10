@@ -54,6 +54,7 @@ backend construction:
 | Record | Meaning |
 | --- | --- |
 | `SourceIdentity` | `(source_kind, source_identity)`, the storage/resumption key. |
+| `EmbeddingBatch` | Column metadata dictionary paired with its float32 vector matrix. |
 | `ImageMetadata` | Filename, canonical class, source ID, and source split. |
 | `PointRecord` | Frozen reference/cache record with label, source kind/identity, value, and generated UUID. `to_payload()` stores the label under `class`. |
 | `Neighbor` | Retrieved ID, label, and cosine similarity score. |
@@ -61,9 +62,8 @@ backend construction:
 | `QueryRetrievalMetrics` | Top-five hit, precision, reciprocal rank, nDCG, AP@R, and relevant-reference count. Definitions are in [retrieval](retrieval.md). |
 
 Keep metadata/vector associations ordered through selection, batching, storage,
-retrieval, and reporting. `experiments.classification.EmbeddingBatch` carries column
-metadata alongside its NumPy vector matrix; conversion to prediction rows happens
-at evaluation.
+retrieval, and reporting. Conversion from `EmbeddingBatch` to prediction rows
+happens at evaluation.
 
 ## Class descriptions and Ollama
 

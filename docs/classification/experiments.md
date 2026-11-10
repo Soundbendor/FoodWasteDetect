@@ -70,21 +70,21 @@ training image caps and before-exclusion selection order are defined in
 New builds prepare and validate reference inputs before creating a table or
 loading the encoder. Existing builds follow this sequence:
 
-1. Open the table, prepare the capped unbatched training selection, check class
-   coverage, and prepare text references.
-2. Scan all `(source_kind, source_identity)` metadata once, without a result
-   limit. Initialize counts from every stored row, including duplicates and
-   extra rows; use the identity set to exclude saved inputs.
+1. Prepare the capped unbatched training selection, check class coverage,
+   prepare text references, and open the table.
+2. Scan all `(source_kind, source_identity)` metadata, without a result limit,
+   and use the identity set to exclude saved inputs.
 3. Batch and decode only remaining images, preserving the original dataset
    splits and order. Caps apply before saved-identity exclusion.
 4. Encode each text/image batch and append its strictly paired records/vectors
-   once. Advance counts and progress only after successful append.
-5. Optimize the reference table, including a no-work resume, then return the
-   index and counts to `Experiment` for summary publication.
+   once. Advance progress only after successful append.
+5. Rescan the table to count every stored row by source kind, including
+   duplicates and extra rows. Optimize the reference table, including a no-work
+   resume, then return the index and counts to `Experiment` for summary
+   publication.
 
-`classification.py` defines the shared `EmbeddingBatch` type alias.
 Image records are built directly from column-oriented batches, with strict
-pairing of `class`, `source_id`, and `fname` columns. `EmbeddingBatch` is an
+pairing of `class`, `source_id`, and `fname` columns. `schemas.EmbeddingBatch` is an
 ordered metadata dictionary and vector matrix; row conversion belongs to
 evaluation and reporting. Keep final partial batches. The dataset and encoder
 [image ownership rules](data.md) apply.

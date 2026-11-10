@@ -5,8 +5,8 @@ selection, persistence, retrieval, and tracking in their owning modules.
 
 | Module | Responsibility |
 | --- | --- |
-| `base.py` | Backend-independent `Embedder` interface and `ImageInput` alias. |
-| `sentence_transformers.py` | Local model specifications, loading, RGB preparation, library encoding, and vector validation. |
+| `base.py` | Backend-independent `Embedder` interface, `ImageInput` alias, and RGB preparation. |
+| `sentence_transformers.py` | Local model specifications, loading, library encoding, and vector validation. |
 | `vertex.py` | Vertex request construction, concurrency, SDK retries, response validation, and client cleanup. |
 
 Import concrete modules directly; `__init__.py` stays free of backend imports.

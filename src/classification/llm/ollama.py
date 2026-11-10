@@ -22,14 +22,12 @@ class OllamaSession:
 
         The context manager starts the server on entry and stops it on exit.
         """
-        startup_timeout = config.startup_timeout
-        request_timeout = config.request_timeout
         self.binary_path = config.binary_path
         self.host = config.host
         if "://" not in self.host:
             self.host = "http://" + self.host
-        self.startup_timeout = startup_timeout
-        self.client = Client(host=self.host, timeout=request_timeout)
+        self.startup_timeout = config.startup_timeout
+        self.client = Client(host=self.host, timeout=config.request_timeout)
         self._process: subprocess.Popen[bytes] | None = None
 
     def __enter__(self) -> Self:

@@ -162,11 +162,5 @@ class FoodX251ImageDataset:
 
 
 def load_dataset(config: DatasetConfig) -> FoodX251ImageDataset:
-    """Load metadata from ``config.root`` for the supported ``foodx251`` dataset.
-
-    Raises:
-        ValueError: The configured dataset name is unsupported.
-    """
-    if config.name.lower() != "foodx251":
-        raise ValueError("Only foodx251 is supported")
+    """Load metadata from ``config.root``; the config admits only ``foodx251``."""
     return FoodX251ImageDataset(config.root)

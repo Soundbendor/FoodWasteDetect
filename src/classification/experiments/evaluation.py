@@ -9,10 +9,9 @@ import numpy as np
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-from classification.experiments import classification
 from classification.retrieval.metrics import ranking_metrics
 from classification.retrieval.voting import classify
-from classification.schemas import ImageMetadata, Neighbor, Prediction
+from classification.schemas import EmbeddingBatch, ImageMetadata, Neighbor, Prediction
 
 
 def extract_batch_metadata(batch: dict[str, list]) -> list[ImageMetadata]:
@@ -45,7 +44,7 @@ def prediction(
 
 
 def evaluate_batches(
-    batches: Iterable[classification.EmbeddingBatch],
+    batches: Iterable[EmbeddingBatch],
     *,
     query: Callable[[NDArray[np.float32], int], Sequence[Neighbor]],
     class_counts: Mapping[str, int],

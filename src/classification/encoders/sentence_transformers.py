@@ -1,17 +1,14 @@
 """Inference-only multimodal embeddings. No import-time backends."""
 
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
-from PIL import Image
 from sentence_transformers import SentenceTransformer
 
-from classification.encoders.base import Embedder
-from classification.encoders.base import ImageInput as ImageInput
+from classification.encoders.base import Embedder, ImageInput, load_rgb
 
 
 class _ModelSpec(TypedDict):
@@ -87,17 +84,6 @@ def _load_backend(model_id: str, device: str) -> SentenceTransformer:
     return backend
 
 
-def _prepare_rgb_image(image: ImageInput) -> Image.Image:
-    """Convert images to RGB colorspace, loading the image if not already open."""
-    if isinstance(image, (str, Path)):
-        original = Image.open(image)
-        try:
-            return original.convert("RGB")
-        finally:
-            original.close()
-    return image.convert("RGB")
-
-
 class EmbeddingModel(Embedder):
     """Batch text and images into optionally truncated model vectors."""
 
@@ -159,7 +145,7 @@ class EmbeddingModel(Embedder):
 
     def encode_images(self, images: Iterable[ImageInput]) -> NDArray[np.float32]:
         """Load images into memory and convert to embedding vectors."""
-        prepared = [_prepare_rgb_image(image) for image in images]
+        prepared = [load_rgb(image) for image in images]
         if _MODEL_SPECS[self.model_id].get("image_dict"):
             return self._encode([{"image": image} for image in prepared])
         return self._encode(prepared)

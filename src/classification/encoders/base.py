@@ -11,6 +11,18 @@ from PIL import Image
 ImageInput = str | Path | Image.Image
 
 
+def load_rgb(image: ImageInput) -> Image.Image:
+    """Return a new RGB image, opening paths and leaving caller-owned images open."""
+    if isinstance(image, (str, Path)):
+        original = Image.open(image)
+        try:
+            return original.convert("RGB")
+        finally:
+            # close() also releases pixel data; the context manager closes only the file.
+            original.close()
+    return image.convert("RGB")
+
+
 class Embedder(ABC):
     """Encode inputs as ordered float32 matrices with ``dimension`` columns.
 

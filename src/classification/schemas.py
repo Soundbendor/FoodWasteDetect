@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from typing import TypedDict
 from uuid import uuid4
 
+import numpy as np
+
 type SourceIdentity = tuple[str, str]
+type EmbeddingBatch = tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
 
 ImageMetadata = TypedDict(
     "ImageMetadata",

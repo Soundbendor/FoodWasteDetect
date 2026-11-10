@@ -17,4 +17,3 @@ encoding batches. Database operations, including derived prefix tables, use
 
 `Experiment.evaluate()` completes an enabled cache; `evaluate_cached()` reads existing
 vectors regardless of the cache flag. Cache setup is eager and vector fetching lazy.
-`classification.py` owns the shared `EmbeddingBatch` type.

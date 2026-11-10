@@ -8,9 +8,6 @@ from collections import Counter
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-
-import numpy as np
 
 from classification.datasets.image_dataset import load_dataset
 from classification.encoders.base import Embedder
@@ -29,9 +26,8 @@ from classification.llm.generate_descriptors import DescriberLLM
 from classification.llm.ollama import OllamaSession
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.retrieval.metrics import metrics
+from classification.schemas import EmbeddingBatch
 from classification.tracking import Tracker
-
-type EmbeddingBatch = tuple[dict[str, list], np.ndarray[tuple[int, int], np.dtype[np.float32]]]
 
 
 class Experiment:
@@ -71,15 +67,8 @@ class Experiment:
     def _create_embedder(self) -> Embedder:
         options = self.config.embedding
         if options.model_id == "google/ge-v2":
-            vertex = options.vertex
             return VertexEmbeddingModel(
-                project=vertex.project,
-                location=vertex.location,
-                max_concurrency=vertex.max_concurrency,
-                max_attempts=vertex.max_attempts,
-                request_timeout=vertex.request_timeout,
-                classification_prompt=vertex.classification_prompt,
-                truncate_dim=options.truncate_dim,
+                **options.vertex.model_dump(), truncate_dim=options.truncate_dim
             )
         return EmbeddingModel(
             model_id=options.model_id,
@@ -194,7 +183,7 @@ class Experiment:
         source_counts = None
         if self.index_path.exists():
             logging.info("Loading index.json from checkpoint...")
-            summary: dict[str, Any] = json.loads(self.index_path.read_text(encoding="utf-8"))
+            summary = json.loads(self.index_path.read_text(encoding="utf-8"))
             # Only attach metadata identifying this database and table.
             if (
                 summary["table"] == table

@@ -23,13 +23,14 @@ def table_names(config: ExperimentConfig, dimension: int, source_width: int) -> 
 
 def validate_config(config: ExperimentConfig, dimensions: list[int], source_width: int) -> None:
     """Check target widths and distinct source and destination names."""
-    validation = config.lancedb.require_validation_table()
     if any(dimension > source_width for dimension in dimensions):
         raise ValueError("Sweep dimensions must not exceed the source vector width")
-    all_names = [config.lancedb.table, validation]
-    for dimension in dimensions:
-        if dimension != source_width:
-            all_names.extend(table_names(config, dimension, source_width))
+    # table_names returns the source names at the source width.
+    all_names = [
+        name
+        for dimension in {*dimensions, source_width}
+        for name in table_names(config, dimension, source_width)
+    ]
     if len(set(all_names)) != len(all_names):
         raise ValueError("Sweep source and destination table names must be distinct")
 

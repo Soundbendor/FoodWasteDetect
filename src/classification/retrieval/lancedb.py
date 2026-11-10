@@ -44,19 +44,6 @@ class LanceDBIndex:
             raise FileNotFoundError(f"LanceDB database does not exist: {path}")
         return cls(path, LanceDBConnection(path).open_table(table))
 
-    @staticmethod
-    def _make_schema(
-        schema_parameters: Sequence[str],
-        dimension: int,
-        metadata: Mapping[str, str] | None = None,
-    ) -> pa.Schema:
-        """Construct an Arrow schema with string fields, a fixed-size vector, and metadata."""
-        return pa.schema(
-            [pa.field(name, pa.string(), nullable=False) for name in schema_parameters]
-            + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)],
-            metadata=metadata,
-        )
-
     @classmethod
     def create(
         cls,
@@ -72,8 +59,12 @@ class LanceDBIndex:
         if config is not None:
             config.vector_dimension = dimension
             effective_metadata["classification.build"] = config.model_dump_json()
-        schema_parameters = ["id", "class", "source_kind", "source_identity", "value"]
-        schema = cls._make_schema(schema_parameters, dimension, metadata=effective_metadata)
+        payload_fields = ("id", "class", "source_kind", "source_identity", "value")
+        schema = pa.schema(
+            [pa.field(name, pa.string(), nullable=False) for name in payload_fields]
+            + [pa.field("vector", pa.list_(pa.float32(), dimension), nullable=False)],
+            metadata=effective_metadata,
+        )
         path = Path(uri).expanduser().resolve()
         opened = LanceDBConnection(path).create_table(
             table, schema=schema, mode="create", exist_ok=False
@@ -157,8 +148,8 @@ class LanceDBIndex:
 
     def get_record_ids(self) -> list[SourceIdentity]:
         """Get a list of files/source IDs currently stored in database."""
-        rows = self.table.search().select(["source_kind", "source_identity"]).limit(None).to_list()
-        return [(row["source_kind"], row["source_identity"]) for row in rows]
+        table = self.table.to_lance().to_table(columns=["source_kind", "source_identity"])
+        return list(zip(*(table[name].to_pylist() for name in table.column_names), strict=True))
 
     def fetch_vectors(self, identities: Sequence[SourceIdentity]) -> NDArray[np.float32]:
         """Fetch vectors in the requested identity order, including repeats.
@@ -180,16 +171,16 @@ class LanceDBIndex:
                 for kind, ids in by_kind.items()
             ),
         )
-        rows = (
-            self.table.to_lance()
-            .to_table(
-                columns=["source_kind", "source_identity", "vector"],
-                filter=predicate,
-            )
-            .to_pylist()
+        table = self.table.to_lance().to_table(
+            columns=["source_kind", "source_identity", "vector"], filter=predicate
         )
-        vectors = {(row["source_kind"], row["source_identity"]): row["vector"] for row in rows}
-        return np.asarray([vectors[key] for key in identities], dtype=np.float32)
+        keys = zip(
+            table["source_kind"].to_pylist(), table["source_identity"].to_pylist(), strict=True
+        )
+        rows = {key: row for row, key in enumerate(keys)}
+        # Read vectors from the Arrow buffer instead of building Python floats.
+        vectors = table["vector"].combine_chunks().flatten().to_numpy()
+        return vectors.reshape(-1, self.dimension)[[rows[key] for key in identities]]
 
     def query(
         self, vector: np.ndarray[tuple[int], np.dtype[np.float32 | np.float64]], k: int
@@ -199,6 +190,7 @@ class LanceDBIndex:
             self.table.search(vector.tolist())
             .distance_type("cosine")
             .bypass_vector_index()
+            .select(["id", "class"])
             .limit(k)
             .to_list()
         )

@@ -36,7 +36,15 @@ class DescriberLLM:
 
     def describe_class(self, label: str) -> FoodDescriptor:
         """Generate one description, preserving the supplied label and stripping asterisks."""
-        return self._describe_class(label, descriptor_prompt(label))
+        response: ChatResponse = self.client.chat(
+            model=self.model,
+            messages=[descriptor_prompt(label)],
+            format=FoodDescriptor.model_json_schema(),
+        )
+        output = FoodDescriptor.model_validate_json(response.message.content or "")
+        output.food_class = label
+        output.description = output.description.replace("*", "")
+        return output
 
     def generate_descriptions(
         self,
@@ -70,15 +78,3 @@ class DescriberLLM:
                 if not descriptions[label] or any(not text.strip() for text in descriptions[label]):
                     raise ValueError(f"Empty generated description for {label}")
         return descriptions
-
-    def _describe_class(self, label: str, prompt: dict[str, str]) -> FoodDescriptor:
-        """Request and validate one description, retaining the supplied class label."""
-        response: ChatResponse = self.client.chat(
-            model=self.model,
-            messages=[prompt],
-            format=FoodDescriptor.model_json_schema(),
-        )
-        output = FoodDescriptor.model_validate_json(response.message.content or "")
-        output.food_class = label
-        output.description = output.description.replace("*", "")
-        return output
