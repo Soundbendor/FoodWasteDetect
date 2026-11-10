@@ -17,7 +17,7 @@ configuration or dataset files. Abbreviated flags are disabled.
 | `index` | `Experiment.build_vector_database()` |
 | `evaluate` | `Experiment.evaluate()` |
 | `run` | `Experiment.run()` |
-| `matroyshka-sweep` | `experiments.matryoshka.run_sweep()` with a tracked evaluation callback |
+| `matroyshka-sweep` | `experiments.matroyshka.run_sweep()` with a tracked evaluation callback |
 
 Preserve the public `matroyshka-sweep` spelling. Experiment modules have no separate
 CLI parser. Stage ordering and cache behavior are defined in

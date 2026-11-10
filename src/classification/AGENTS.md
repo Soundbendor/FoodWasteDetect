@@ -44,7 +44,7 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 the encoder loads on first use; `IndexBuilder` prepares and persists references or
 validation caches; `LanceDBIndex` owns storage operations, including build-metadata
 snapshots and derived prefix tables. The cached dimension sweep in
-`experiments.matryoshka` orchestrates prefix-table preparation through `LanceDBIndex`
+`experiments.matroyshka` orchestrates prefix-table preparation through `LanceDBIndex`
 and delegates validation evaluation to `Experiment.evaluate_cached()`.
 `experiments.evaluation` computes predictions from supplied batches; `Experiment`
 writes a complete local report before `Tracker` publishes it. Direct

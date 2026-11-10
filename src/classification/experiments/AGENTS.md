@@ -4,7 +4,7 @@ This package runs the whole-image classification baseline. `Experiment` owns
 stage orchestration, validation-batch preparation, and report publication; `evaluation.py` owns batch prediction,
 progress, and completeness checks. `IndexBuilder` owns reference selection and
 encoding batches. Database operations, including derived prefix tables, use
-`retrieval`; `matryoshka.py` orchestrates the dimension sweep.
+`retrieval`; `matroyshka.py` orchestrates the dimension sweep.
 
 | Task | Read before changing |
 | --- | --- |

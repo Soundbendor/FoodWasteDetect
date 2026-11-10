@@ -23,7 +23,7 @@ selection and image ownership use [data](data.md); for scoring use
 | `batches.py`        | `EmbeddingBatch` type alias                                       |
 | `artifacts.py`      | Shared `write_json()`                                                                                     |
 | `report_types.py`   | Index summary and evaluation report models                                                                |
-| `matryoshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
+| `matroyshka.py`     | Cached dimension sweep, table prefixes, and sweep summary                                          |
 
 `LanceDBIndex` owns database operations, including build-metadata snapshots,
 vector-dimension inspection, and streaming creation of derived prefix tables.

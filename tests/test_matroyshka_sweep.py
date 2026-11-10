@@ -15,7 +15,7 @@ from test_tracking import Artifact
 
 from classification.experiments.config import ExperimentConfig
 from classification import cli
-from classification.experiments import matryoshka as sweep
+from classification.experiments import matroyshka as sweep
 from classification.experiments.classification import Experiment
 from classification.retrieval.lancedb import LanceDBIndex
 

@@ -9,7 +9,7 @@ import yaml
 
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig, OllamaConfig
-from classification.experiments.matryoshka import evaluate_cached, run_sweep
+from classification.experiments.matroyshka import evaluate_cached, run_sweep
 from classification.tracking import Tracker
 
 
