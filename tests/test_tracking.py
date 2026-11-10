@@ -175,7 +175,7 @@ def test_native_context_exit_on_errors_and_success(sdk, tmp_path, source, cleanu
 
 def test_pipeline_counts_and_reuse(experiment_case, sdk):
     exp = experiment_case.experiment((True, True, True))
-    exp.batch_size = 3
+    exp.config = updated(exp.config, "embedding.batch_size", 3)
     exp.tracker = Tracker(sdk)
     report = exp.run().model_dump(mode="json")
     history = [c.args[0] for c in sdk.log.call_args_list]
@@ -446,7 +446,7 @@ def test_capped_reference_bars_match_inserted_records(
     experiment_case.interleaved_training()
     exp = experiment_case.experiment((images_enabled, True, True))
     exp.config = updated(exp.config, 'n_imgs_per_class', limit)
-    exp.batch_size = 3
+    exp.config = updated(exp.config, "embedding.batch_size", 3)
     exp.tracker = Tracker(sdk)
     exp.generate_descriptions()
     artifact = exp.build_vector_database().model_dump(mode="json")
@@ -466,7 +466,7 @@ def test_capped_reference_bars_match_inserted_records(
 @pytest.mark.parametrize("failure", [RuntimeError("insert failed"), KeyboardInterrupt()])
 def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_bars, images, failure):
     exp = experiment_case.experiment((images, not images, False))
-    exp.batch_size = 1
+    exp.config = updated(exp.config, "embedding.batch_size", 1)
     exp.tracker = Tracker(sdk)
     with (
         patch("classification.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),

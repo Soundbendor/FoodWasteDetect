@@ -1,6 +1,8 @@
 """LanceDB storage and exact cosine retrieval."""
 
-from collections import Counter
+import functools
+import operator
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Self
@@ -167,11 +169,17 @@ class LanceDBIndex:
         if not identities:
             return np.empty((0, self.dimension), dtype=np.float32)
 
-        predicate = pc.scalar(False)
+        # One isin per kind; a per-identity OR chain plans in exponential memory.
+        by_kind: defaultdict[str, list[str]] = defaultdict(list)
         for kind, identity in identities:
-            predicate = predicate | (
-                (pc.field("source_kind") == kind) & (pc.field("source_identity") == identity)
-            )
+            by_kind[kind].append(identity)
+        predicate = functools.reduce(
+            operator.or_,
+            (
+                (pc.field("source_kind") == kind) & pc.field("source_identity").isin(ids)
+                for kind, ids in by_kind.items()
+            ),
+        )
         rows = (
             self.table.to_lance()
             .to_table(

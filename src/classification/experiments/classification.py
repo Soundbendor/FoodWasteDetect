@@ -49,6 +49,7 @@ class Experiment:
         # Load dataset metadata and settings
         self.config = config
         self.output = Path(config.output_dir).expanduser().resolve()
+        self.index_path = self.output / "index.json"
         descriptions_file = config.descriptions_file
         self.descriptions_path = (
             Path(descriptions_file).expanduser().resolve()
@@ -57,7 +58,6 @@ class Experiment:
         )
         self.dataset = load_dataset(config.dataset)
         self.classes = self.dataset.get_class_list()
-        self.batch_size = config.embedding.batch_size
 
         self._embedder: Embedder | None = None
 
@@ -85,14 +85,14 @@ class Experiment:
             model_id=options.model_id,
             device=options.device,
             truncate_dim=options.truncate_dim,
-            batch_size=self.batch_size,
+            batch_size=options.batch_size,
         )
 
     def _evaluation_batches(
         self,
     ) -> Iterator[EmbeddingBatch]:
         """Encode uncached validation images in bounded batches."""
-        for batch in self.dataset.iter_batches("val", self.batch_size):
+        for batch in self.dataset.iter_batches("val", self.config.embedding.batch_size):
             vectors = self.embedder.encode_images(batch.pop("image"))
             yield batch, vectors
 
@@ -118,9 +118,8 @@ class Experiment:
         if settings is None or settings.llm is None or self.config.description_count is None:
             raise ValueError("Generating descriptions requires ollama.llm and description_count")
         self.output.mkdir(parents=True, exist_ok=True)
-        model = settings.llm
         with OllamaSession(settings) as session:
-            llm = DescriberLLM(session.client, model)
+            llm = DescriberLLM(session.client, settings.llm)
             descriptions = llm.generate_descriptions(
                 self.classes,
                 self.config.description_count,
@@ -129,17 +128,12 @@ class Experiment:
         return descriptions
 
     def _index_builder(self) -> IndexBuilder:
-        options = self.config.lancedb
         return IndexBuilder(
+            self.config,
+            dataset=self.dataset,
+            descriptions_path=self.descriptions_path,
             # enable lazy loading for embedding model
             get_embedder=lambda: self.embedder,
-            dataset=self.dataset,
-            uri=options.uri,
-            table=options.table,
-            config=self.config,
-            descriptions_path=self.descriptions_path,
-            classes=self.classes,
-            batch_size=self.batch_size,
         )
 
     def build_vector_database(self) -> IndexSummary:
@@ -156,7 +150,7 @@ class Experiment:
             config=self.config,
         )
         self.output.mkdir(parents=True, exist_ok=True)
-        write_json(self.output / "index.json", artifact.model_dump(mode="json"))
+        write_json(self.index_path, artifact.model_dump(mode="json"))
         if self.tracker:
             self.tracker.reference_counts(dict(counts))
         return artifact
@@ -170,7 +164,7 @@ class Experiment:
             cache = LanceDBIndex.open(uri=options.uri, table=table)
         else:
             cache = self._index_builder().build_validation_table(table)
-        metadata = self.dataset.iter_batches("val", self.batch_size, decode=False)
+        metadata = self.dataset.iter_batches("val", self.config.embedding.batch_size, decode=False)
         return (
             (
                 batch,
@@ -198,10 +192,9 @@ class Experiment:
         table = options.table
         index = LanceDBIndex.open(uri=options.uri, table=table)
         source_counts = None
-        path = self.output / "index.json"
-        if path.exists():
+        if self.index_path.exists():
             logging.info("Loading index.json from checkpoint...")
-            summary: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+            summary: dict[str, Any] = json.loads(self.index_path.read_text(encoding="utf-8"))
             # Only attach metadata identifying this database and table.
             if (
                 summary["table"] == table

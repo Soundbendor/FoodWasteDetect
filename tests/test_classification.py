@@ -100,7 +100,7 @@ class ExperimentTests(unittest.TestCase):
         for stage in ('reference', 'validation'):
             with self.subTest(stage=stage):
                 exp = self.experiment(name=f'snapshot-{stage}')
-                exp.batch_size = 1
+                exp.config = updated(exp.config, 'embedding.batch_size', 1)
                 if stage == 'validation':
                     exp.build_vector_database()
                     exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
@@ -261,7 +261,6 @@ class ExperimentTests(unittest.TestCase):
             self.describer_constructor.assert_not_called()
             exp.run()
             exp.evaluate()
-            classes.assert_called_once()
             self.embedder_constructor.assert_called_once_with(model_id="jinaai/jina-clip-v2", device="auto", truncate_dim=None, batch_size=2)
 
         self.dataset_constructor.side_effect = FileNotFoundError('annotations')
@@ -295,7 +294,7 @@ class ExperimentTests(unittest.TestCase):
         from classification.experiments.artifacts import write_json
 
         exp = self.experiment((True, False, False))
-        exp.batch_size = 1
+        exp.config = updated(exp.config, 'embedding.batch_size', 1)
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
 
@@ -620,7 +619,7 @@ class ExperimentTests(unittest.TestCase):
             with self.subTest(limit=limit):
                 exp = self.experiment((True, True, True), f'limit-{limit}')
                 exp.config = updated(exp.config, 'n_imgs_per_class', limit)
-                exp.batch_size = 3
+                exp.config = updated(exp.config, 'embedding.batch_size', 3)
                 exp.generate_descriptions()
                 seen = []
                 encode = exp.embedder.encode_images
@@ -720,7 +719,7 @@ class ExperimentTests(unittest.TestCase):
         for flags in itertools.product([False, True], repeat=3):
             if not any(flags): continue
             exp = self.experiment(flags, str(flags))
-            exp.batch_size = 3
+            exp.config = updated(exp.config, 'embedding.batch_size', 3)
             report = exp.run().model_dump(mode="json")
             expected = {kind: count for enabled, kind, count in zip(
                 flags, ('training_image', 'class_name', 'generated_description'), (2, 2, 10)

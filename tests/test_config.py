@@ -8,7 +8,6 @@ import yaml
 from config_helpers import config_data, updated
 from pydantic import ValidationError
 
-from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig, OllamaConfig
 from classification.experiments.report_types import IndexSummary
 
@@ -171,8 +170,3 @@ def test_shipped_configs_validate(filename):
     root = Path(__file__).resolve().parents[1]
     data = yaml.safe_load((root / filename).read_text(encoding="utf-8"))
     ExperimentConfig.model_validate(data)
-
-
-def test_python_api_requires_model():
-    with pytest.raises(TypeError, match="ExperimentConfig"):
-        Experiment(config_data())

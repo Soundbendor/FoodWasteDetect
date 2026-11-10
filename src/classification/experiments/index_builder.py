@@ -27,24 +27,20 @@ class IndexBuilder:
 
     def __init__(
         self,
-        *,
-        get_embedder: Callable[[], Embedder],
-        dataset: FoodX251ImageDataset,
-        uri: str | Path,
-        table: str,
         config: ExperimentConfig,
+        *,
+        dataset: FoodX251ImageDataset,
         descriptions_path: Path,
-        classes: list[str],
-        batch_size: int,
+        get_embedder: Callable[[], Embedder],
     ) -> None:
-        self._get_embedder = get_embedder
-        self.dataset = dataset
-        self.uri = uri
-        self.table = table
         self.config = config
+        self.dataset = dataset
         self.descriptions_path = descriptions_path
-        self.classes = classes
-        self.batch_size = batch_size
+        self._get_embedder = get_embedder
+        self.uri = config.lancedb.uri
+        self.table = config.lancedb.table
+        self.batch_size = config.embedding.batch_size
+        self.classes = dataset.get_class_list()
 
     @property
     def embedder(self) -> Embedder:
