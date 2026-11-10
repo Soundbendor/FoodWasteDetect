@@ -41,8 +41,9 @@ current scope; follow [experiment persistence](experiments.md#reference-builds-a
 | `fetch_vectors(identities)` | Select requested identities and return float32 vectors in caller order, including repeated requests; missing identities fail |
 | `query(vector, k)` | Exact cosine neighbors in backend order, as `id`, `label`, and similarity `score` |
 
-`fetch_vectors()` escapes single quotes in identity predicates and uses both kind
-and identity. Empty input returns shape `(0, table dimension)`. It performs no
+`fetch_vectors()` filters the underlying Lance dataset with PyArrow expressions
+matching both kind and identity, without a row limit. Empty input returns shape
+`(0, table dimension)`. It performs no
 duplicate-row or compatibility validation; identity resumption is not content
 verification.
 

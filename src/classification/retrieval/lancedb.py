@@ -8,6 +8,7 @@ from typing import Self
 import lance
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 from lancedb.db import LanceDBConnection
 from lancedb.table import LanceTable
 from numpy.typing import NDArray
@@ -142,18 +143,18 @@ class LanceDBIndex:
         )
 
     def optimize(self) -> None:
-        """Compact with LanceDB's default maintenance and version-retention policy."""
+        """Compact sharded LanceDB table files into larger chunks for optimized queries."""
         self.table.optimize()
 
     def class_counts(self) -> Counter[str]:
-        """Stream all class metadata, counting every stored row without loading vectors."""
+        """Return count of items in table by class."""
         counts: Counter[str] = Counter()
         for batch in self.table.search().select(["class"]).limit(None).to_batches():
             counts.update(batch.column(0).to_pylist())
         return counts
 
     def get_record_ids(self) -> list[SourceIdentity]:
-        """Scan all identity metadata without reading vectors."""
+        """Get a list of files/source IDs currently stored in database."""
         rows = self.table.search().select(["source_kind", "source_identity"]).limit(None).to_list()
         return [(row["source_kind"], row["source_identity"]) for row in rows]
 
@@ -166,19 +167,18 @@ class LanceDBIndex:
         if not identities:
             return np.empty((0, self.dimension), dtype=np.float32)
 
-        def literal(value: str) -> str:
-            return "'" + value.replace("'", "''") + "'"
-
-        predicate = " OR ".join(
-            f"(source_kind = {literal(kind)} AND source_identity = {literal(identity)})"
-            for kind, identity in identities
-        )
+        predicate = pc.scalar(False)
+        for kind, identity in identities:
+            predicate = predicate | (
+                (pc.field("source_kind") == kind) & (pc.field("source_identity") == identity)
+            )
         rows = (
-            self.table.search()
-            .where(predicate)
-            .select(["source_kind", "source_identity", "vector"])
-            .limit(None)
-            .to_list()
+            self.table.to_lance()
+            .to_table(
+                columns=["source_kind", "source_identity", "vector"],
+                filter=predicate,
+            )
+            .to_pylist()
         )
         vectors = {(row["source_kind"], row["source_identity"]): row["vector"] for row in rows}
         return np.asarray([vectors[key] for key in identities], dtype=np.float32)
