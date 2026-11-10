@@ -1,5 +1,6 @@
 """Interface for Vertex API to yield vectors from Gemini Embedding 2."""
 
+import functools
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -31,7 +32,7 @@ class VertexEmbeddingModel(Embedder):
         classification_prompt: bool = False,
         truncate_dim: int | None = None,
     ) -> None:
-        """Configure Vertex requests; each nonempty encode call owns its client.
+        """Configure Vertex requests; the first nonempty encode call creates the client.
 
         Args:
             project: Google Cloud project used for Vertex requests.
@@ -67,6 +68,20 @@ class VertexEmbeddingModel(Embedder):
             ),
         )
 
+    @functools.cached_property
+    def _client(self) -> genai.Client:
+        return genai.Client(
+            vertexai=True,
+            project=self.project,
+            location=self.location,
+            http_options=self.http_options,
+        )
+
+    def close(self) -> None:
+        """Close the reused client if one was created; later encodes create a new one."""
+        if "_client" in self.__dict__:
+            self.__dict__.pop("_client").close()
+
     def _request(self, client: genai.Client, content: types.Content) -> NDArray[np.float32]:
         response = client.models.embed_content(
             model="gemini-embedding-2",
@@ -90,15 +105,9 @@ class VertexEmbeddingModel(Embedder):
         records = list(inputs)
         if not records:
             return np.empty((0, self.dimension), dtype=np.float32)
-        with (
-            genai.Client(
-                vertexai=True,
-                project=self.project,
-                location=self.location,
-                http_options=self.http_options,
-            ) as client,
-            ThreadPoolExecutor(max_workers=self.max_concurrency) as executor,
-        ):
+        # Create the client on this thread; cached_property does not lock.
+        client = self._client
+        with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
             # Prepare images inside workers to bound serialized image memory too.
             # A failed request cancels the pending ones when map's iterator closes.
             return np.stack(

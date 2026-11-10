@@ -7,7 +7,9 @@ resumption, and persistence belong to [experiments](experiments.md).
 ## Shared interface
 
 `base.Embedder` declares `dimension: int` and abstract `encode_text()` /
-`encode_images()` methods, with no shared constructor. `ImageInput` accepts a
+`encode_images()` methods, with no shared constructor. `close()` releases backend
+resources and defaults to a no-op; `Experiment.close()` calls it on a constructed
+encoder, and the CLI closes each `Experiment` with `contextlib.closing`. `ImageInput` accepts a
 string path, `Path`, or PIL image and is re-exported by
 `encoders.sentence_transformers`. Importing the interface loads neither concrete
 backends nor experiment modules. Package initializers remain lightweight.
@@ -119,8 +121,10 @@ ignored; experiment `batch_size` still bounds dataset and insertion batches.
 complete cached evaluations allow an omitted/null project. Reference-source choices,
 saved vocabulary path, cache setting, and artifact names are defined in that YAML.
 
-Each nonempty encode call owns one context-managed client and a thread pool,
-defaulting to four workers. Requests contain exactly one text record or one RGB
+The first nonempty encode call creates one `genai.Client`, which later calls reuse
+until `close()`; a call after `close()` creates a new client. Each encode call owns
+its own thread pool, defaulting to four workers. Token refresh over a long build on
+one client is unverified. Requests contain exactly one text record or one RGB
 inline PNG image, with no resizing, filenames, labels, or dataset metadata. Image
 serialization occurs in workers to bound serialized-image memory. The wrapper
 closes its RGB copies and buffers while preserving caller-owned images. Empty
@@ -142,7 +146,8 @@ construction; direct construction with other bad values fails later. Location de
 SDK retries use five total attempts by default, one-second initial delay, base
 two, one-second jitter, and a 60-second cap. Connection/timeouts and HTTP
 408/429/500/502/503/504 retry; other errors propagate. Failure or interruption
-cancels queued work, waits for running requests, and closes the client. Failed
+cancels queued work and waits for running requests; the client stays open for
+reuse until `close()`. Failed
 batches return no vectors; a restart may repeat paid requests from that batch.
 
 ## Verification

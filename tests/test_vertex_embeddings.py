@@ -94,7 +94,9 @@ def test_text_order_concurrency_and_request_contract(transport, prompt):
     np.testing.assert_array_equal(vectors[:, 0], [1, 2, 3, 4, 5])
     assert vectors.dtype == np.float32
     assert peak == 2
-    assert len(clients) == 1 and clients[0].is_closed
+    assert len(clients) == 1 and not clients[0].is_closed
+    encoder.close()
+    assert clients[0].is_closed
     for request in requests:
         assert "/v1/projects/fixture-project/locations/global/" in str(request.url)
         assert str(request.url).endswith("/models/gemini-embedding-2:embedContent")
@@ -141,7 +143,26 @@ def test_images_are_rgb_png_without_metadata(transport, tmp_path, prompt):
         with Image.open(BytesIO(base64.b64decode(data["data"]))) as decoded:
             assert decoded.mode == "RGB" and decoded.size == (7, 9)
             assert decoded.getpixel((0, 0)) == (100, 20, 30)
-    assert all(client.is_closed for client in clients)
+    assert len(clients) == 1
+    encoder.close()
+    assert clients[0].is_closed
+
+
+def test_client_reused_until_close(transport):
+    requests, clients, _ = transport(lambda request: response())
+    encoder = model()
+    encoder.close()  # No client yet.
+    assert not clients
+    encoder.encode_text(["a"])
+    encoder.encode_images([Image.new("RGB", (2, 2))])
+    assert len(requests) == 2 and len(clients) == 1 and not clients[0].is_closed
+    encoder.close()
+    encoder.close()
+    assert clients[0].is_closed
+    encoder.encode_text(["b"])
+    assert len(clients) == 2 and not clients[1].is_closed
+    encoder.close()
+    assert clients[1].is_closed
 
 
 @pytest.mark.parametrize("dimension", [None, 128, 3072])
@@ -188,15 +209,18 @@ def test_invalid_settings_before_authentication(setting, value):
         {"embeddings": [{"values": ["Infinity"] * 128}]},
     ],
 )
-def test_invalid_response_closes_client(transport, payload):
+def test_invalid_response_keeps_client_until_close(transport, payload):
     if "embeddings" in payload:
         payload = {
             "predictions": [{"embeddings": item} for item in payload["embeddings"]]
         }
     requests, clients, _ = transport(lambda request: httpx.Response(200, json=payload))
+    encoder = model()
     with pytest.raises(ValueError):
-        model().encode_text(["class"])
-    assert len(requests) == 1 and clients[0].is_closed
+        encoder.encode_text(["class"])
+    assert len(requests) == 1 and not clients[0].is_closed
+    encoder.close()
+    assert clients[0].is_closed
 
 
 @pytest.mark.parametrize(
@@ -226,6 +250,7 @@ def test_sdk_retries(transport, failure, recover):
     else:
         with pytest.raises((errors.APIError, httpx.ConnectError, httpx.ReadTimeout)):
             encoder.encode_text(["class"])
+    encoder.close()
     assert attempts == 3 and clients[0].is_closed
 
 
@@ -236,8 +261,10 @@ def test_nonretryable_errors(transport, status):
             status, json={"error": {"code": status, "message": "synthetic"}}
         )
     )
+    encoder = model()
     with pytest.raises(errors.APIError):
-        model().encode_text(["class"])
+        encoder.encode_text(["class"])
+    encoder.close()
     assert len(requests) == 1 and clients[0].is_closed
 
 
@@ -265,6 +292,7 @@ def test_failure_cancels_queue_and_waits_for_workers(transport, monkeypatch, fai
     with pytest.raises(type(failure)):
         encoder.encode_text(map(str, range(100)))
     assert completed.is_set() and len(calls) < 100
+    encoder.close()
     assert clients[0].is_closed
 
 
@@ -355,7 +383,7 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
         "training_image": 3,
     }
     assert len(requests) == 7
-    assert all(client.is_closed for client in clients)
+    assert len(clients) == 1 and not clients[0].is_closed
     with patch("classification.encoders.vertex.genai.Client") as client:
         cached = Experiment(ExperimentConfig.model_validate(config))
         assert cached.build_vector_database().model_dump(mode="json")["source_counts"] == summary["source_counts"]
@@ -365,6 +393,10 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
     assert report["metrics"]["evaluated"] == 3
     assert len(report["predictions"]) == 3
     assert len(requests) == 10
+    assert len(clients) == 1
+    # Closing drops the client, so the next encode uses the replacement transport.
+    experiment.close()
+    assert clients[0].is_closed
     previous = set(experiment.output.glob("evaluation_*/report.json"))
     failures = 0
 
@@ -383,7 +415,8 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
         experiment.evaluate()
     assert failures == 3
     assert set(experiment.output.glob("evaluation_*/report.json")) == previous
-    assert all(client.is_closed for client in clients)
+    experiment.close()
+    assert len(clients) == 2 and all(client.is_closed for client in clients)
 
 
 @pytest.fixture
@@ -476,6 +509,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
             return httpx.Response(400, json={"error": {"code": 400, "message": "failed"}})
         return response()
 
+    experiment.close()
     transport(fail)
     action = experiment.evaluate if stage == "validation" else experiment.build_vector_database
     with pytest.raises(errors.APIError):

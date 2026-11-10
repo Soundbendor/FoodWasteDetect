@@ -84,6 +84,11 @@ class Experiment:
             batch_size=options.batch_size,
         )
 
+    def close(self) -> None:
+        """Close the encoder if this experiment constructed one."""
+        if self._embedder is not None:
+            self._embedder.close()
+
     def _evaluation_batches(
         self,
     ) -> Iterator[EmbeddingBatch]:

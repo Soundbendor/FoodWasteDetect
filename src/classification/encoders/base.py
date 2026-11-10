@@ -40,3 +40,6 @@ class Embedder(ABC):
     @abstractmethod
     def encode_images(self, images: Iterable[ImageInput]) -> NDArray[np.float32]:
         """Encode paths or PIL images in input order, preserving caller-owned images."""
+
+    def close(self) -> None:  # noqa: B027 - optional hook, not abstract
+        """Release backend resources; the default backend holds none."""

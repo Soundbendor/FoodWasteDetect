@@ -1,6 +1,7 @@
 """Parse commands and merge experiment configuration overrides."""
 
 import argparse
+import contextlib
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -99,25 +100,24 @@ def _build_parser() -> argparse.ArgumentParser:
 def _run_experiment(config: ExperimentConfig, stage: str) -> None:
     if stage == "matroyshka-sweep":
         dataset = load_dataset(config.dataset)
-        run_sweep(
-            config,
-            lambda effective: _tracked_run(
-                effective,
-                stage,
-                lambda c, t: Experiment(c, tracker=t, dataset=dataset).evaluate_cached(),
-            ),
-        )
+
+        def evaluate_cached(effective: ExperimentConfig, tracker: Tracker) -> Any:
+            experiment = Experiment(effective, tracker=tracker, dataset=dataset)
+            with contextlib.closing(experiment):
+                return experiment.evaluate_cached()
+
+        run_sweep(config, lambda effective: _tracked_run(effective, stage, evaluate_cached))
         return
 
     def execute(effective: ExperimentConfig, tracker: Tracker) -> Any:
-        experiment = Experiment(effective, tracker=tracker)
-        stages = {
-            "describe": experiment.generate_descriptions,
-            "index": experiment.build_vector_database,
-            "evaluate": experiment.evaluate,
-            "run": experiment.run,
-        }
-        return stages[stage]()
+        with contextlib.closing(Experiment(effective, tracker=tracker)) as experiment:
+            stages = {
+                "describe": experiment.generate_descriptions,
+                "index": experiment.build_vector_database,
+                "evaluate": experiment.evaluate,
+                "run": experiment.run,
+            }
+            return stages[stage]()
 
     _tracked_run(config, stage, execute)
 

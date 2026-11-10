@@ -51,7 +51,7 @@ def test_typed_dispatch_before_tracking(config_path, stage, method):
     assert isinstance(config, ExperimentConfig)
     assert config.embedding.batch_size == 16
     experiment.assert_called_once_with(config, tracker=ANY)
-    assert experiment.return_value.method_calls == [getattr(call, method)()]
+    assert experiment.return_value.method_calls == [getattr(call, method)(), call.close()]
     assert config_path.read_bytes() == content
 
 

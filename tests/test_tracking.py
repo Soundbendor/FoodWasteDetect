@@ -332,6 +332,9 @@ class Experiment:
     build_vector_database = generate_descriptions
     run = generate_descriptions
 
+    def close(self):
+        pass
+
     def evaluate(self):
         tracker = self.tracker
         with tqdm(total=1, desc="synthetic-evaluation") as bar:

@@ -491,6 +491,7 @@ class ExperimentTests(unittest.TestCase):
                 return np.array([[1., 0.] if 'Apple' in x else [0., 1.] for x in texts])
             def encode_images(self, images):
                 return np.array([[1., 0.] if image.getpixel((0, 0))[0] == 0 else [0., 1.] for image in images])
+            def close(self): pass
         from classification.llm.generate_descriptors import DescriberLLM
         class Describer:
             generate_descriptions = DescriberLLM.generate_descriptions
@@ -853,7 +854,12 @@ class ExperimentTests(unittest.TestCase):
         self.session_constructor.side_effect = Session
         self.embedder_constructor.side_effect = Embedder
         exp.run()
+        with patch.object(exp.embedder, 'close') as close:
+            exp.close()
+        close.assert_called_once_with()
         exp = self.experiment(name='disabled')
+        exp.close()  # No constructed embedder to close.
+        self.assertIsNone(exp._embedder)
         self.describer_constructor.side_effect = AssertionError('Disabled backend constructed')
         exp.generate_descriptions()
         self.assertIsNone(exp._embedder)
