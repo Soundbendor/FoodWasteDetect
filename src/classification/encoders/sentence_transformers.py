@@ -17,6 +17,8 @@ class _ModelSpec(TypedDict):
     encode: NotRequired[dict[str, Any]]
     text: NotRequired[dict[str, Any]]
     image_dict: NotRequired[bool]
+    native_bf16: NotRequired[bool]
+    patch_modalities: NotRequired[bool]
 
 
 # Keep model-specific behavior here; batching remains owned by Sentence Transformers.
@@ -28,6 +30,7 @@ _MODEL_SPECS: dict[str, _ModelSpec] = {
             "model_kwargs": {"torch_dtype": torch.float32},
             "config_kwargs": {"use_text_flash_attn": False, "use_vision_xformers": False},
         },
+        "patch_modalities": True,
     },
     "jinaai/jina-embeddings-v4": {
         "dimension": 2048,
@@ -37,12 +40,14 @@ _MODEL_SPECS: dict[str, _ModelSpec] = {
         },
         "encode": {"task": "retrieval"},
         "text": {"prompt_name": "passage"},
+        "patch_modalities": True,
     },
     "google/embeddinggemma-2": {
         "dimension": 768,
         "load": {"config_kwargs": {"audio_config": None}},
         "text": {"prompt_name": "Document"},
         "image_dict": True,
+        "native_bf16": True,
     },
     "openai/clip-vit-base-patch32": {
         "dimension": 512,
@@ -66,8 +71,9 @@ def _load_backend(model_id: str, device: str) -> SentenceTransformer:
         from sentence_transformers.util import get_device_name
 
         device = get_device_name()
-    options = dict(_MODEL_SPECS[model_id]["load"])
-    if model_id == "google/embeddinggemma-2":
+    spec = _MODEL_SPECS[model_id]
+    options = dict(spec["load"])
+    if spec.get("native_bf16"):
         # Check native support on the selected GPU, not the default CUDA device.
         dtype = torch.float32
         if torch.device(device).type == "cuda":
@@ -76,7 +82,7 @@ def _load_backend(model_id: str, device: str) -> SentenceTransformer:
                     dtype = torch.bfloat16
         options["model_kwargs"] = {"torch_dtype": dtype}
     backend = SentenceTransformer(model_id, device=device, truncate_dim=None, **options)
-    if model_id.startswith("jinaai/"):
+    if spec.get("patch_modalities"):
         # Custom Jina modules may lack Sentence Transformers modality metadata.
         module: Any = backend[0]
         if not hasattr(module, "modalities"):

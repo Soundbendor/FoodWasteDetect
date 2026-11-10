@@ -14,6 +14,14 @@ from classification.experiments.config import ExperimentConfig, OllamaConfig
 from classification.experiments.matroyshka import run_sweep
 from classification.tracking import Tracker
 
+# Method names, not bound methods, so tests that replace cli.Experiment keep working.
+STAGES = {
+    "describe": "generate_descriptions",
+    "index": "build_vector_database",
+    "evaluate": "evaluate",
+    "run": "run",
+}
+
 
 def download_model(model_name: str) -> None:
     """Pull a model using the working directory's legacy Ollama configuration.
@@ -76,7 +84,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     experiment.add_argument(
         "stage",
-        choices=("describe", "index", "evaluate", "run", "matroyshka-sweep"),
+        choices=(*STAGES, "matroyshka-sweep"),
         help="Run a specific stage of the food image classification experiment.",
     )
     experiment.add_argument("--config_file", required=True, help="Path to experiment config YAML")
@@ -111,13 +119,7 @@ def _run_experiment(config: ExperimentConfig, stage: str) -> None:
 
     def execute(effective: ExperimentConfig, tracker: Tracker) -> Any:
         with contextlib.closing(Experiment(effective, tracker=tracker)) as experiment:
-            stages = {
-                "describe": experiment.generate_descriptions,
-                "index": experiment.build_vector_database,
-                "evaluate": experiment.evaluate,
-                "run": experiment.run,
-            }
-            return stages[stage]()
+            return getattr(experiment, STAGES[stage])()
 
     _tracked_run(config, stage, execute)
 
