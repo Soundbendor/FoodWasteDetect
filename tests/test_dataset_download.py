@@ -11,16 +11,13 @@ import pytest
 import yaml
 
 from classification.cli import main
-from classification.datasets.image_dataset import (
-    Food101ImageDataset,
-    FoodImageDataset,
-    FoodX251ImageDataset,
-    ISIAFood500ImageDataset,
-    UECFood256ImageDataset,
-    VegFruImageDataset,
-    _extract,
-    _fetch_archive,
-)
+from classification.datasets.archives import extract, fetch_archive
+from classification.datasets.base import FoodImageDataset
+from classification.datasets.food101 import Food101ImageDataset
+from classification.datasets.foodx251 import FoodX251ImageDataset
+from classification.datasets.isia500 import ISIAFood500ImageDataset
+from classification.datasets.uecfood256 import UECFood256ImageDataset
+from classification.datasets.vegfru import VegFruImageDataset
 
 FOODX251_FILES = {
     "annot": {"class_list.txt": "0 apple_pie\n1 pear\n", "train_info.csv": "a.png,0\nb.png,1\n", "val_info.csv": "c.png,1\n"},
@@ -291,8 +288,8 @@ def test_isia500_download_fetches_parts_runs_7z_and_is_idempotent(tmp_path):
     requests: list[str] = []
     client = _isia_client(requests)
     with (
-        patch("classification.datasets.image_dataset.shutil.which", return_value="/bin/7z"),
-        patch("classification.datasets.image_dataset.subprocess.run", side_effect=_fake_7z) as run,
+        patch("classification.datasets.isia500.shutil.which", return_value="/bin/7z"),
+        patch("classification.datasets.isia500.subprocess.run", side_effect=_fake_7z) as run,
     ):
         ISIAFood500ImageDataset.download(tmp_path, client=client)
         ISIAFood500ImageDataset.download(tmp_path, client=client)
@@ -315,8 +312,8 @@ def test_isia500_download_rejects_truncated_part(tmp_path):
     short = httpx.Response(200, headers={"Content-Length": "999"}, content=b"short")
     client = _isia_client(requests, **{"ISIA_Food500.z03": short})
     with (
-        patch("classification.datasets.image_dataset.shutil.which", return_value="/bin/7z"),
-        patch("classification.datasets.image_dataset.subprocess.run") as run,
+        patch("classification.datasets.isia500.shutil.which", return_value="/bin/7z"),
+        patch("classification.datasets.isia500.subprocess.run") as run,
         pytest.raises(ValueError, match="Content-Length 999"),
     ):
         ISIAFood500ImageDataset.download(tmp_path, client=client)
@@ -328,7 +325,7 @@ def test_isia500_download_rejects_truncated_part(tmp_path):
 def test_isia500_download_requires_7z(tmp_path):
     requests: list[str] = []
     with (
-        patch("classification.datasets.image_dataset.shutil.which", return_value=None),
+        patch("classification.datasets.isia500.shutil.which", return_value=None),
         pytest.raises(RuntimeError, match="Pixi environment"),
     ):
         ISIAFood500ImageDataset.download(tmp_path, client=_isia_client(requests))
@@ -337,15 +334,15 @@ def test_isia500_download_requires_7z(tmp_path):
 
 def test_fetch_failure_leaves_no_archive(tmp_path):
     with pytest.raises(httpx.HTTPStatusError):
-        _fetch_archive("https://host/missing.tar", tmp_path, _client({}, []))
+        fetch_archive("https://host/missing.tar", tmp_path, _client({}, []))
     assert not (tmp_path / ".downloads/missing.tar").exists()
 
 
 def test_completed_archive_is_reused(tmp_path):
     requests: list[str] = []
     client = _client({"a.tar": b"data"}, requests)
-    first = _fetch_archive("https://host/a.tar", tmp_path, client)
-    assert _fetch_archive("https://host/a.tar", tmp_path, client) == first
+    first = fetch_archive("https://host/a.tar", tmp_path, client)
+    assert fetch_archive("https://host/a.tar", tmp_path, client) == first
     assert first.read_bytes() == b"data" and len(requests) == 1
 
 
@@ -353,13 +350,13 @@ def test_extract_zip_and_reject_tar_escape(tmp_path):
     archive = tmp_path / "a.zip"
     with zipfile.ZipFile(archive, "w") as bundle:
         bundle.writestr("dir/x.txt", "x")
-    _extract(archive, tmp_path / "out")
+    extract(archive, tmp_path / "out")
     assert (tmp_path / "out/dir/x.txt").read_text() == "x"
 
     escape = tmp_path / "bad.tar"
     escape.write_bytes(_tar({"../escaped.txt": "x"}))
     with pytest.raises(tarfile.FilterError):
-        _extract(escape, tmp_path / "bad")
+        extract(escape, tmp_path / "bad")
     assert not (tmp_path / "escaped.txt").exists()
 
 
@@ -375,7 +372,7 @@ def test_cli_downloads_configured_dataset(tmp_path):
     config = tmp_path / "config.yml"
     config.write_text(yaml.safe_dump({"dataset": {"name": "foodx251", "root": "data/x"}, "unrelated": None}))
     with (
-        patch.dict("classification.datasets.image_dataset.DATASETS", {"foodx251": Fake}),
+        patch.dict("classification.datasets.registry.DATASETS", {"foodx251": Fake}),
         patch("classification.tracking.wandb.init") as initialize,
     ):
         main(["download_dataset", "--config_file", str(config)])

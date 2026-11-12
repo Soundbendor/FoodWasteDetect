@@ -7,9 +7,10 @@ persistence is specified in [experiments](experiments.md), and vector storage in
 
 ## Dataset loading and image batches
 
-[`datasets/image_dataset.py`](../../src/classification/datasets/image_dataset.py)
-defines the abstract `FoodImageDataset`. A subclass sets `name` and supplies
-`_read_classes()` (unique canonical labels in taxonomy order) and `_read_split()`
+[`datasets/base.py`](../../src/classification/datasets/base.py)
+defines the abstract `FoodImageDataset`. Each dataset has its own loader module
+under `datasets/`, and `datasets/registry.py` registers them. A subclass sets
+`name` and supplies `_read_classes()` (unique canonical labels in taxonomy order) and `_read_split()`
 for `train` and `validation`, returning its own source split name, an image
 directory, and an ordered `fname`/`class` table. The base class exposes a typed
 Hugging Face `DatasetDict` with `fname`, `class`, `source_id`, `source_split`, and
@@ -87,7 +88,7 @@ authorized download and adjust `LIST_DIR` or the parser.
 taxonomy, and `train_finetune.txt` / `test_finetune.txt` hold `<class>/<file> <id>`
 lines for training references and validation. Labels come from the ID; an ID
 missing from the class file is rejected. Names only have underscores replaced by
-spaces (`_spaced`), keeping case, parentheses, and non-ASCII text. Images resolve
+spaces (`spaced`), keeping case, parentheses, and non-ASCII text. Images resolve
 under `images/` (`IMAGE_DIR`); identities are `isia500:<train|test>:<class>/<file>`.
 The label and list formats come from the metadata zip; the metadata zip's nesting
 and URL and the image directory produced by `7z` are unverified, so check them on
@@ -97,12 +98,12 @@ the first authorized download. `cfg/classification_isia500.yml` has its own
 ### Downloads
 
 `download(root, client=None)` fetches and unpacks a dataset; the base class
-raises `NotImplementedError`. Module helpers serve every subclass:
-`_fetch_archive(url, root, client)` streams to `root/.downloads/<name>.part` and
+raises `NotImplementedError`. Helpers in `datasets/archives.py` serve every subclass:
+`fetch_archive(url, root, client)` streams to `root/.downloads/<name>.part` and
 renames on completion, reusing a completed archive without a request, and
 discards an unencoded body whose size differs from `Content-Length`
 (`require_length=True` also rejects a missing header);
-`_extract(archive, destination)` unpacks `.zip` files or tars with the `data`
+`extract(archive, destination)` unpacks `.zip` files or tars with the `data`
 filter, which rejects members escaping `destination`. `client` is an optional
 `httpx.Client` for tests; the default follows redirects with a 60 s timeout.
 
@@ -114,7 +115,7 @@ the loader expects `annot/`, `train/train_set/`, and `val/val_set/`.
 
 `Food101ImageDataset.download()` returns early when `meta/classes.txt` exists.
 Otherwise it fetches `https://data.vision.ee.ethz.ch/cvl/food-101.tar.gz` and
-calls `_install_archive(archive, root, inner, last)`, which extracts to
+calls `install_archive(archive, root, inner, last)`, which extracts to
 `root/.downloads/<archive>.staging`, moves the `inner` entries (`food-101/`) into
 `root` with `last` (`meta/`) moved last as the completion marker, and deletes the
 staging directory and archive.
@@ -122,13 +123,13 @@ staging directory and archive.
 `UECFood256ImageDataset.download()` returns early when `category.txt` exists.
 Otherwise it fetches
 `https://huggingface.co/datasets/kng-research/uecfood256/resolve/main/dataset256.zip`
-(4.2 GB, ungated) through `_fetch_archive`, so tests mock it with `client`, and
+(4.2 GB, ungated) through `fetch_archive`, so tests mock it with `client`, and
 installs the `UECFOOD256/` entries with `category.txt` last.
 
 `VegFruImageDataset.download()` returns early when `classid_classname.csv`
 exists. Otherwise it fetches
 `https://huggingface.co/datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz`
-through `_fetch_archive` and calls `_install_archive(..., "vegfru",
+through `fetch_archive` and calls `install_archive(..., "vegfru",
 "classid_classname.csv", nested="archive.zip")`: the nested zip is unpacked into
 the staged `vegfru/` and deleted before the entries move, so the CSV still marks
 a complete install. Peak disk use is roughly 70 GB (archive, staged tar, unpacked zip).

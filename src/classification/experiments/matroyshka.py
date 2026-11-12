@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from classification.datasets.image_dataset import FoodImageDataset, load_dataset
+from classification.datasets.base import FoodImageDataset
+from classification.datasets.registry import load_dataset
 from classification.experiments.artifacts import write_json
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig

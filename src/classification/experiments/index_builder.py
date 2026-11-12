@@ -9,7 +9,7 @@ from pathlib import Path
 from datasets import Dataset
 from tqdm import tqdm
 
-from classification.datasets.image_dataset import FoodImageDataset
+from classification.datasets.base import FoodImageDataset
 from classification.encoders.base import Embedder
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions, text_references

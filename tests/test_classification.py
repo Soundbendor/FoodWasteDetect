@@ -24,7 +24,7 @@ class DatasetTests(unittest.TestCase):
     def test_native_dataset_contract(self):
         from datasets import DatasetDict, Image as HFImage
         from PIL import Image
-        from classification.datasets.image_dataset import FoodX251ImageDataset
+        from classification.datasets.foodx251 import FoodX251ImageDataset
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -66,13 +66,13 @@ class DatasetTests(unittest.TestCase):
 
     def test_registry_matches_config_names(self):
         from typing import get_args
-        from classification.datasets.image_dataset import DATASETS
+        from classification.datasets.registry import DATASETS
         from classification.experiments.config import DatasetName
         self.assertEqual(set(get_args(DatasetName)), set(DATASETS))
         self.assertTrue(all(cls.name == name for name, cls in DATASETS.items()))
 
     def test_base_download_raises(self):
-        from classification.datasets.image_dataset import FoodImageDataset
+        from classification.datasets.base import FoodImageDataset
         class Stub(FoodImageDataset):
             name = 'stub'
             def _read_classes(self): return []
@@ -82,7 +82,7 @@ class DatasetTests(unittest.TestCase):
 
     def test_dataset_and_leakage(self):
         from PIL import Image
-        from classification.datasets.image_dataset import FoodX251ImageDataset
+        from classification.datasets.foodx251 import FoodX251ImageDataset
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'annot').mkdir()
@@ -486,7 +486,7 @@ class ExperimentTests(unittest.TestCase):
     def setUp(self):
         import numpy as np
         from datasets import Dataset, DatasetDict, Image as HFImage
-        from classification.datasets.image_dataset import FoodX251ImageDataset
+        from classification.datasets.foodx251 import FoodX251ImageDataset
         from PIL import Image
         import lancedb
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)

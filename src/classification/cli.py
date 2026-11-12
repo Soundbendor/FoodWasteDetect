@@ -38,7 +38,7 @@ def download_model(model_name: str) -> None:
 
 def download_dataset(config_file: str) -> None:
     """Download the dataset named by the config's ``dataset`` section into its root."""
-    from classification.datasets.image_dataset import DATASETS
+    from classification.datasets.registry import DATASETS
 
     with open(config_file, encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)

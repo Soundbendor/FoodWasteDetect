@@ -9,7 +9,8 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from classification.datasets.image_dataset import FoodImageDataset, load_dataset
+from classification.datasets.base import FoodImageDataset
+from classification.datasets.registry import load_dataset
 from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
