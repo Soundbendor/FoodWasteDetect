@@ -14,9 +14,9 @@ from classification.experiments.report_types import IndexSummary
 
 def test_defaults_spelling_and_mutable_nested_attributes():
     config = ExperimentConfig.model_validate(
-        config_data(dataset={"name": "FoodX251", "root": "/raw"})
+        config_data(dataset={"name": "foodx251", "root": "/raw"})
     )
-    assert config.dataset.name == "FoodX251"
+    assert config.dataset.name == "foodx251"
     assert config.embedding.batch_size == 32
     assert config.embedding.device == "auto"
     assert config.embedding.truncate_dim is None

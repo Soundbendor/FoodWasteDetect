@@ -1,7 +1,7 @@
 """Mutable configuration validated at initialization for whole-image experiments."""
 
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -16,18 +16,15 @@ class ConfigModel(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", validate_default=True)
 
 
+# Registered dataset names; must equal the keys of datasets.image_dataset.DATASETS.
+DatasetName = Literal["foodx251"]
+
+
 class DatasetConfig(ConfigModel):
-    """Local FoodX251 annotation location."""
+    """Registered dataset name and local root directory."""
 
-    name: NonemptyString
+    name: DatasetName
     root: NonemptyString
-
-    @field_validator("name")
-    @classmethod
-    def supported_dataset(cls, value: str) -> str:
-        if value.lower() != "foodx251":
-            raise ValueError("Only foodx251 is supported")
-        return value
 
 
 class VertexConfig(ConfigModel):

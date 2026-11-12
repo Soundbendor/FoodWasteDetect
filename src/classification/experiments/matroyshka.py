@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from classification.datasets.image_dataset import FoodX251ImageDataset, load_dataset
+from classification.datasets.image_dataset import FoodImageDataset, load_dataset
 from classification.experiments.artifacts import write_json
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
@@ -38,7 +38,7 @@ def validate_config(config: ExperimentConfig, dimensions: list[int], source_widt
 
 
 def _evaluate_cached(
-    dataset: FoodX251ImageDataset,
+    dataset: FoodImageDataset,
 ) -> Callable[[ExperimentConfig, Tracker], EvaluationReport]:
     """Evaluate one effective configuration against the shared dataset."""
 

@@ -1,15 +1,25 @@
-"""Local FoodX251 annotations and Hugging Face image datasets."""
+"""Local food image datasets as typed Hugging Face image datasets."""
 
+from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
+from typing import ClassVar
 
 import pandas as pd
 from datasets import Dataset, DatasetDict, Features, Image, NamedSplit, Value
 
 from classification.experiments.config import DatasetConfig
 
-SPLIT_NAMES = {"train": "train", "val": "validation"}
+FEATURES = Features(
+    {
+        "fname": Value("string"),
+        "class": Value("string"),
+        "source_id": Value("string"),
+        "source_split": Value("string"),
+        "image": Image(decode=False),
+    }
+)
 
 
 def _read_class_map(path: Path) -> dict[int, str]:
@@ -29,63 +39,66 @@ def _read_class_map(path: Path) -> dict[int, str]:
     return labels.to_dict()
 
 
-class FoodX251ImageDataset:
-    """Load local FoodX251 metadata, deferring image decoding to batch iteration."""
+class FoodImageDataset(ABC):
+    """Load local metadata for a labeled image dataset, deferring image decoding.
+
+    Subclasses supply the class list and, per split, the source split name, image
+    directory, and a ``fname``/``class`` table of relative paths and labels.
+    """
+
+    name: ClassVar[str]
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
-        self.class_map = _read_class_map(self.root / "annot/class_list.txt")
-        # The experiment evaluates validation data, not the unlabeled test split.
+        self.classes = self._read_classes()
         self.splits = DatasetDict(
-            {
-                "train": self._load_split("train", self.root / "train/train_set"),
-                "validation": self._load_split("val", self.root / "val/val_set"),
-            }
+            {s: self._build_split(s, *self._read_split(s)) for s in ("train", "validation")}
         )
 
-    def _load_split(self, split: str, directory: Path) -> Dataset:
-        features = Features(
-            {
-                "fname": Value("string"),
-                "class": Value("string"),
-                "source_id": Value("string"),
-                "source_split": Value("string"),
-                "image": Image(decode=False),
-            }
-        )
-        table = pd.read_csv(
-            self.root / f"annot/{split}_info.csv",
-            names=["fname", "class_id"],
-            dtype={"fname": str, "class_id": "int64"},
-            keep_default_na=False,
-        )
-        # convert numerical class IDs to label names.
-        table["class"] = table.pop("class_id").map(self.class_map.__getitem__)
-        base = directory.resolve()
+    @abstractmethod
+    def _read_classes(self) -> list[str]:
+        """Return unique canonical labels in taxonomy order."""
+
+    @abstractmethod
+    def _read_split(self, split: str) -> tuple[str, Path, pd.DataFrame]:
+        """Return (source_split, image_dir, table[fname, class]) for train/validation."""
+
+    @classmethod
+    def download(cls, root: str | Path) -> None:
+        """Fetch and unpack the dataset under ``root``."""
+        raise NotImplementedError(f"{cls.name} has no public download host")
+
+    def _build_split(
+        self, split: str, source_split: str, image_dir: Path, table: pd.DataFrame
+    ) -> Dataset:
+        table = table[["fname", "class"]].copy()
+        base = image_dir.resolve()
         paths = [(base / filename).resolve() for filename in table["fname"]]
-        table["source_id"] = [f"foodx251:{split}:{path.relative_to(base)}" for path in paths]
+        table["source_id"] = [
+            f"{self.name}:{source_split}:{path.relative_to(base)}" for path in paths
+        ]
         if table["source_id"].duplicated().any():
             raise ValueError("Duplicate source identities")
         table["fname"] = pd.Series([str(path) for path in paths], dtype="string")
-        table["source_split"] = split
+        table["source_split"] = source_split
         table["image"] = table["fname"]
         return Dataset.from_pandas(
             table,
-            features=features,
+            features=FEATURES,
             preserve_index=False,
-            split=NamedSplit(SPLIT_NAMES[split]),
+            split=NamedSplit(split),
         )
 
     def get_class_list(self) -> list[str]:
         """Return canonical labels in taxonomy-file order."""
-        return list(self.class_map.values())
+        return list(self.classes)
 
     def train_set(self) -> Dataset:
         """Return training references with undecoded image paths."""
         return self.splits["train"]
 
     def validation_set(self) -> Dataset:
-        """Return the official labeled validation split used for evaluation."""
+        """Return the labeled evaluation split; ``source_split`` keeps its own name."""
         return self.splits["validation"]
 
     @staticmethod
@@ -133,6 +146,30 @@ class FoodX251ImageDataset:
         return dataset.iter(batch_size=batch_size, drop_last_batch=False)
 
 
-def load_dataset(config: DatasetConfig) -> FoodX251ImageDataset:
-    """Load metadata from ``config.root``; the config admits only ``foodx251``."""
-    return FoodX251ImageDataset(config.root)
+class FoodX251ImageDataset(FoodImageDataset):
+    """FoodX251 train references and labeled validation; the test split is unlabeled."""
+
+    name = "foodx251"
+
+    def _read_classes(self) -> list[str]:
+        self.class_map = _read_class_map(self.root / "annot/class_list.txt")
+        return list(self.class_map.values())
+
+    def _read_split(self, split: str) -> tuple[str, Path, pd.DataFrame]:
+        source = {"train": "train", "validation": "val"}[split]
+        table = pd.read_csv(
+            self.root / f"annot/{source}_info.csv",
+            names=["fname", "class_id"],
+            dtype={"fname": str, "class_id": "int64"},
+            keep_default_na=False,
+        )
+        table["class"] = table.pop("class_id").map(self.class_map.__getitem__)
+        return source, self.root / f"{source}/{source}_set", table
+
+
+DATASETS: dict[str, type[FoodImageDataset]] = {c.name: c for c in (FoodX251ImageDataset,)}
+
+
+def load_dataset(config: DatasetConfig) -> FoodImageDataset:
+    """Load metadata for the configured dataset from ``config.root``."""
+    return DATASETS[config.name](config.root)

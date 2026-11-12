@@ -1,27 +1,37 @@
 # Datasets, records, and descriptions
 
-Read this document when changing FoodX251 loading, reference selection, shared
+Read this document when changing dataset loading, reference selection, shared
 records, visual-description generation, or Ollama ownership. Reference/cache
 persistence is specified in [experiments](experiments.md), and vector storage in
 [retrieval](retrieval.md).
 
-## FoodX251 metadata and image batches
+## Dataset loading and image batches
 
-[`datasets/image_dataset.py`](../../src/classification/datasets/image_dataset.py) reads local class and CSV
-annotation files through pandas, independently of `data_wrappers.foodx251`.
-`FoodX251ImageDataset` exposes a typed Hugging Face `DatasetDict`: `train` holds
-training references and `validation` holds labeled validation images.
-`train_set()` returns the former; `validation_set()` returns the latter.
-Official test files are not read, and resulting accuracy is validation accuracy.
+[`datasets/image_dataset.py`](../../src/classification/datasets/image_dataset.py)
+defines the abstract `FoodImageDataset`. A subclass sets `name` and supplies
+`_read_classes()` (unique canonical labels in taxonomy order) and `_read_split()`
+for `train` and `validation`, returning its own source split name, an image
+directory, and an ordered `fname`/`class` table. The base class exposes a typed
+Hugging Face `DatasetDict` with `fname`, `class`, `source_id`, `source_split`, and
+an undecoded `image` column. `train_set()` returns training references;
+`validation_set()` returns the labeled evaluation split, whatever the dataset calls
+it. Paths resolve within the image directory; identities use
+`<name>:<source_split>:<relative path>`, and duplicates within a split are
+rejected. Loading metadata does not decode images or compare contents or paths
+across splits. The base `download()` raises `NotImplementedError`.
 
-Class IDs map through `annot/class_list.txt`; names are capitalized with underscores
-replaced by spaces. Duplicate IDs, empty taxonomy, and duplicate canonical labels
-are rejected. Split CSVs preserve annotation order and produce `fname`, `class`,
-`source_id`, `source_split`, and an undecoded `image` column. Paths resolve within
-their split directory; identities use `foodx251:<train|val>:<relative path>`.
-Duplicate identities within a split are rejected. `source_split` remains `val` for
-validation records. Loading metadata does not decode images or compare contents or
-paths across splits.
+`DATASETS` maps each registered name to its class, and `load_dataset()` builds the
+configured one. `experiments.config.DatasetName` lists the same names (lowercase
+only); a test keeps the two equal.
+
+`FoodX251ImageDataset` (`foodx251`) reads pandas tables independently of
+`data_wrappers.foodx251`. Class IDs map through `annot/class_list.txt`; names are
+capitalized with underscores replaced by spaces. Duplicate IDs, empty taxonomy,
+and duplicate canonical labels are rejected. `annot/{train,val}_info.csv` index
+`train/train_set` and `val/val_set`; identities are
+`foodx251:<train|val>:<relative path>`, and `source_split` stays `val` for
+validation records. The unlabeled test split is not read, so accuracy is
+validation accuracy.
 
 `select_images()` applies the optional per-class cap before saved-identity
 exclusions, leaving the input dataset unchanged. This order makes resumed builds
@@ -41,8 +51,6 @@ supports complete-cache evaluation without reading image files. Batches remain
 column-oriented and ordered. Image-loading failures propagate. Experiment loops
 leave decoded PIL images to garbage collection; encoder ownership of caller images
 and path-opened images is defined in [encoders](encoders.md).
-
-`load_dataset()` accepts a validated `DatasetConfig` with string name/root fields.
 
 ## Shared records
 
