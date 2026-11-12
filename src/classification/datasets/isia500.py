@@ -8,8 +8,8 @@ from typing import ClassVar
 import httpx
 import pandas as pd
 
-from classification.datasets.archives import extract, fetch_archive
 from classification.datasets.base import FoodImageDataset, spaced
+from classification.datasets.util import extract, fetch_archive
 
 
 class ISIAFood500ImageDataset(FoodImageDataset):

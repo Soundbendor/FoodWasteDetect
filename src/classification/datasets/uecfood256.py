@@ -9,8 +9,8 @@ from typing import ClassVar
 import httpx
 import pandas as pd
 
-from classification.datasets.archives import fetch_archive, install_archive
 from classification.datasets.base import FoodImageDataset, canonical
+from classification.datasets.util import fetch_archive, install_archive
 
 
 class UECFood256ImageDataset(FoodImageDataset):

@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from classification.cli import main
-from classification.datasets.archives import extract, fetch_archive
+from classification.datasets.util import extract, fetch_archive
 from classification.datasets.base import FoodImageDataset
 from classification.datasets.food101 import Food101ImageDataset
 from classification.datasets.foodx251 import FoodX251ImageDataset

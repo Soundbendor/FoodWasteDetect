@@ -5,8 +5,8 @@ from pathlib import Path
 import httpx
 import pandas as pd
 
-from classification.datasets.archives import extract, fetch_archive
 from classification.datasets.base import FoodImageDataset, canonical
+from classification.datasets.util import extract, fetch_archive
 
 
 def _read_class_map(path: Path) -> dict[int, str]:

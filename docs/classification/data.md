@@ -98,7 +98,7 @@ the first authorized download. `cfg/classification_isia500.yml` has its own
 ### Downloads
 
 `download(root, client=None)` fetches and unpacks a dataset; the base class
-raises `NotImplementedError`. Helpers in `datasets/archives.py` serve every subclass:
+raises `NotImplementedError`. Helpers in `datasets/util.py` serve every subclass:
 `fetch_archive(url, root, client)` streams to `root/.downloads/<name>.part` and
 renames on completion, reusing a completed archive without a request, and
 discards an unencoded body whose size differs from `Content-Length`
