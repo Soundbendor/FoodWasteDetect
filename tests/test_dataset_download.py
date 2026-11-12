@@ -15,6 +15,7 @@ from classification.datasets.image_dataset import (
     FoodImageDataset,
     FoodX251ImageDataset,
     UECFood256ImageDataset,
+    VegFruImageDataset,
     _extract,
     _fetch_archive,
 )
@@ -49,6 +50,26 @@ UECFOOD256_FILES = {
     "3/30.jpg": "x",
     "3/99.jpg": "x",
 }
+
+
+# Mirrors vegfru.tar.gz: vegfru/{classid_classname.csv,veg200_images/,archive.zip}, where
+# archive.zip holds fru92_images/ (verified from the archive head). The list directory
+# and its "<path> <label id>" lines follow the published layout and are unverified.
+VEGFRU_CSV = "class_id,class_name\n0,Chinese_artichoke\n1,shepherd's_purse\n2,apple\n"
+VEGFRU_LISTS = {
+    "vegfru_list/vegfru_train.txt": (
+        "veg200_images/Chinese_artichoke/v_01_01_0001.jpg 0\n"
+        "veg200_images/shepherd's_purse/v_02_01_0001.jpg 1\n"
+        "fru92_images/apple/f_01_01_0001.jpg 2\n"
+    ),
+    "vegfru_list/vegfru_val.txt": "not a list\n",
+    "vegfru_list/vegfru_test.txt": "fru92_images/apple/f_01_01_0002.jpg 2\n",
+}
+VEGFRU_VEG = {
+    "veg200_images/Chinese_artichoke/v_01_01_0001.jpg": "x",
+    "veg200_images/shepherd's_purse/v_02_01_0001.jpg": "x",
+}
+VEGFRU_FRU = {"fru92_images/apple/f_01_01_0001.jpg": "x", "fru92_images/apple/f_01_01_0002.jpg": "x"}
 
 
 def _tar(files: dict[str, str], mode: str = "w") -> bytes:
@@ -158,6 +179,52 @@ def test_uecfood256_download_flattens_and_is_idempotent(tmp_path):
     assert len(dataset.train_set()) + len(dataset.validation_set()) == 12
 
     UECFood256ImageDataset.download(tmp_path, client=client)
+    assert len(requests) == 1
+
+
+def test_vegfru_loads_official_train_and_test_lists(tmp_path):
+    files = {"classid_classname.csv": VEGFRU_CSV, **VEGFRU_LISTS, **VEGFRU_VEG, **VEGFRU_FRU}
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    dataset = VegFruImageDataset(tmp_path)
+    assert dataset.get_class_list() == ["Chinese artichoke", "Shepherd's purse", "Apple"]
+    train = dataset.train_set()
+    assert train["class"] == ["Chinese artichoke", "Shepherd's purse", "Apple"]
+    assert train["source_id"][2] == "vegfru:train:fru92_images/apple/f_01_01_0001.jpg"
+    assert train["fname"][0] == str(tmp_path.resolve() / "veg200_images/Chinese_artichoke/v_01_01_0001.jpg")
+    validation = dataset.validation_set()
+    assert validation["source_id"] == ["vegfru:test:fru92_images/apple/f_01_01_0002.jpg"]
+    assert validation["source_split"] == ["test"]
+
+    (tmp_path / "vegfru_list/vegfru_test.txt").write_text("fru92_images/pear/f_02_01_0001.jpg 3\n")
+    with pytest.raises(ValueError, match="missing from classid"):
+        VegFruImageDataset(tmp_path)
+
+
+def test_vegfru_download_unpacks_nested_zip_and_is_idempotent(tmp_path):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        for name, text in {**VEGFRU_FRU, **VEGFRU_LISTS}.items():
+            bundle.writestr(name, text)
+    members = {f"vegfru/{n}": t for n, t in {"classid_classname.csv": VEGFRU_CSV, **VEGFRU_VEG}.items()}
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode="w:gz") as bundle:
+        for name, data in [*((n, t.encode()) for n, t in members.items()), ("vegfru/archive.zip", buffer.getvalue())]:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            bundle.addfile(info, io.BytesIO(data))
+    requests: list[str] = []
+    client = _client({"datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz": tar_buffer.getvalue()}, requests)
+    VegFruImageDataset.download(tmp_path, client=client)
+    assert requests == ["https://huggingface.co/datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz"]
+    assert not list((tmp_path / ".downloads").iterdir())
+    assert not (tmp_path / "vegfru").exists() and not (tmp_path / "archive.zip").exists()
+
+    dataset = VegFruImageDataset(tmp_path)
+    assert len(dataset.train_set()) == 3 and dataset.validation_set()["class"] == ["Apple"]
+
+    VegFruImageDataset.download(tmp_path, client=client)
     assert len(requests) == 1
 
 

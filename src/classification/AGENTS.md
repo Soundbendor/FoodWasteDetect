@@ -1,6 +1,6 @@
 # Whole-image classification package
 
-`classification` classifies food images (FoodX251, Food-101, or UEC-Food256) through multimodal embeddings and LanceDB
+`classification` classifies food images (FoodX251, Food-101, UEC-Food256, or VegFru) through multimodal embeddings and LanceDB
 retrieval. Reference inputs are class names, visual descriptions, training images,
 or a configured combination. The pipeline embeds whole images directly. Ollama
 generates class descriptions separately.
@@ -24,7 +24,7 @@ JSON writing belongs in `experiments.artifacts.write_json`.
 | --- | --- |
 | `cli.py`, `__main__.py` | Parse once, resolve YAML overrides, validate shared settings, and dispatch stages through `tracking.tracked_run()` or `run_sweep()`. Read [CLI](../../docs/classification/cli.md) when changing commands, configuration, or dispatch. |
 | `tracking.py` | Own W&B run lifetime (`tracked_run()`) and publish resolved configuration, reference counts, and completed evaluation results. Read [tracking](../../docs/classification/tracking.md) when changing W&B lifecycle, artifacts, summaries, or progress. |
-| `datasets/image_dataset.py` | `FoodImageDataset` base class, `DATASETS` registry, and the FoodX251, Food-101, and UEC-Food256 loaders; select/decode ordered batches. Add a dataset by subclassing and registering it alongside its `DatasetName` entry. Read [data](../../docs/classification/data.md) when changing splits, identities, image caps, or image ownership. |
+| `datasets/image_dataset.py` | `FoodImageDataset` base class, `DATASETS` registry, and the FoodX251, Food-101, UEC-Food256, and VegFru loaders; select/decode ordered batches. Add a dataset by subclassing and registering it alongside its `DatasetName` entry. Read [data](../../docs/classification/data.md) when changing splits, identities, image caps, or image ownership. |
 | `schemas.py` | Shared reference, neighbor, prediction, and retrieval-metric records. Read [data](../../docs/classification/data.md#shared-records) when changing fields or record/vector associations. |
 | `__init__.py` | Package description; no backend imports. |
 | `pyproject.toml`, `pixi.lock`, `.python-version`, `MANIFEST.in` | Standalone packaging, environment selection, tasks, and source-distribution inputs. Read [development](../../docs/development.md) before environment or packaging changes. |

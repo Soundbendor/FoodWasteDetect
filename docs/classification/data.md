@@ -62,6 +62,26 @@ published UEC-Food256 numbers, which use the official 5-fold protocol.
 `cfg/classification_uecfood256.yml` mirrors the Food-101 config with its own
 `output_dir`, table, and null `descriptions_file`.
 
+`VegFruImageDataset` (`vegfru`) reads `classid_classname.csv` (a
+`class_id,class_name` header, then IDs 0-199 for vegetables and 200-291 for
+fruits) for the taxonomy, canonicalized as above; the 292 canonical names are
+unique, so no IDs merge. Training references come from
+`vegfru_list/vegfru_train.txt` and validation from `vegfru_list/vegfru_test.txt`
+(`LIST_DIR` class constant); `vegfru_val.txt` is not read. Each line is
+`<relative path> <label id>` under `root`; the label is the path's class
+directory, the ID is ignored, and a class missing from the CSV is rejected.
+Identities are `vegfru:<train|test>:<veg200_images|fru92_images>/<class>/<file>`.
+Verified from the head of Hugging Face `xedwin23x/VegFru` `vegfru.tar.gz`
+(27.9 GB, ungated; first 5 MB streamed on 2026-11-12): top-level `vegfru/` with
+`veg200_images/`, `classid_classname.csv`, and a 14 GB nested `archive.zip`
+whose first member is `fru92_images/Chinese_chestnut/f_07_03_0001.jpg`.
+Unverified, from the published VegFru layout: the list directory name, list
+filenames and line format, and where the lists and `veg200_images/` contents sit
+(after the nested zip in the tar, or inside it). Check them on the first
+authorized download and adjust `LIST_DIR` or the parser.
+`cfg/classification_vegfru.yml` mirrors the other configs with its own
+`output_dir`, table, and null `descriptions_file`.
+
 ### Downloads
 
 `download(root, client=None)` fetches and unpacks a dataset; the base class
@@ -90,6 +110,14 @@ Otherwise it fetches
 `https://huggingface.co/datasets/kng-research/uecfood256/resolve/main/dataset256.zip`
 (4.2 GB, ungated) through `_fetch_archive`, so tests mock it with `client`, and
 installs the `UECFOOD256/` entries with `category.txt` last.
+
+`VegFruImageDataset.download()` returns early when `classid_classname.csv`
+exists. Otherwise it fetches
+`https://huggingface.co/datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz`
+through `_fetch_archive` and calls `_install_archive(..., "vegfru",
+"classid_classname.csv", nested="archive.zip")`: the nested zip is unpacked into
+the staged `vegfru/` and deleted before the entries move, so the CSV still marks
+a complete install. Peak disk use is roughly 70 GB (archive, staged tar, unpacked zip).
 
 ### Reference selection
 

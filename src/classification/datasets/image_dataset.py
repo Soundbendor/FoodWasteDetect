@@ -85,9 +85,12 @@ def _extract(archive: Path, destination: Path) -> None:
             bundle.extractall(destination, filter="data")
 
 
-def _install_archive(archive: Path, root: Path, inner: str, last: str) -> None:
+def _install_archive(
+    archive: Path, root: Path, inner: str, last: str, nested: str | None = None
+) -> None:
     """Extract ``archive`` to a staging directory and move its ``inner`` entries into ``root``.
 
+    A ``nested`` archive inside ``inner`` is unpacked in place and deleted before moving.
     The ``last`` entry moves after all others, so its presence marks a complete install.
     Existing entries of the same name are replaced; the staging directory and archive
     are deleted afterwards.
@@ -95,6 +98,9 @@ def _install_archive(archive: Path, root: Path, inner: str, last: str) -> None:
     staging = archive.with_name(archive.name + ".staging")
     shutil.rmtree(staging, ignore_errors=True)
     _extract(archive, staging)
+    if nested is not None:
+        _extract(staging / inner / nested, staging / inner)
+        (staging / inner / nested).unlink()
     for entry in sorted((staging / inner).iterdir(), key=lambda p: p.name == last):
         target = root / entry.name
         if target.is_dir():
@@ -340,8 +346,69 @@ class UECFood256ImageDataset(FoodImageDataset):
         _install_archive(_fetch_archive(url, root, client), root, "UECFOOD256", "category.txt")
 
 
+class VegFruImageDataset(FoodImageDataset):
+    """VegFru (200 vegetable + 92 fruit classes): official train references, test evaluation.
+
+    ``classid_classname.csv`` holds the taxonomy. ``LIST_DIR/vegfru_{train,test}.txt``
+    hold ``<relative path> <label id>`` lines; labels come from the path's class
+    directory, and the label ID is not read. The official val list is not read.
+    """
+
+    name = "vegfru"
+    LIST_DIR: ClassVar[str] = "vegfru_list"
+
+    def _read_classes(self) -> list[str]:
+        table = pd.read_csv(
+            self.root / "classid_classname.csv",
+            dtype={"class_id": "int64", "class_name": str},
+            keep_default_na=False,
+        )
+        labels = table["class_name"].map(_canonical)
+        if table.empty or table["class_id"].duplicated().any() or labels.duplicated().any():
+            raise ValueError("classid_classname.csv must list unique IDs and canonical labels")
+        return list(labels)
+
+    def _read_split(self, split: str) -> tuple[str, Path, pd.DataFrame]:
+        source = {"train": "train", "validation": "test"}[split]
+        lines = (self.root / self.LIST_DIR / f"vegfru_{source}.txt").read_text().splitlines()
+        paths = [line.rsplit(maxsplit=1)[0] for line in lines if line.strip()]
+        table = pd.DataFrame(
+            {"fname": paths, "class": [_canonical(Path(p).parent.name) for p in paths]}
+        )
+        if not set(table["class"]) <= set(self.classes):
+            raise ValueError(
+                f"vegfru_{source}.txt names a class missing from classid_classname.csv"
+            )
+        return source, self.root, table
+
+    @classmethod
+    def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
+        """Fetch ``vegfru.tar.gz`` from Hugging Face and move its ``vegfru/`` contents into ``root``.
+
+        The nested ``archive.zip`` is unpacked before moving; ``classid_classname.csv``
+        moves last and marks a complete download.
+        """
+        root = Path(root).expanduser().resolve()
+        if (root / "classid_classname.csv").exists():
+            return
+        url = "https://huggingface.co/datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz"
+        _install_archive(
+            _fetch_archive(url, root, client),
+            root,
+            "vegfru",
+            "classid_classname.csv",
+            nested="archive.zip",
+        )
+
+
 DATASETS: dict[str, type[FoodImageDataset]] = {
-    c.name: c for c in (FoodX251ImageDataset, Food101ImageDataset, UECFood256ImageDataset)
+    c.name: c
+    for c in (
+        FoodX251ImageDataset,
+        Food101ImageDataset,
+        UECFood256ImageDataset,
+        VegFruImageDataset,
+    )
 }
 
 
