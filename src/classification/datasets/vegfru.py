@@ -1,13 +1,14 @@
 """VegFru loader and Hugging Face download."""
 
 from pathlib import Path
-from typing import ClassVar
 
 import httpx
 import pandas as pd
 
 from classification.datasets.base import FoodImageDataset, canonical
 from classification.datasets.util import fetch_archive, install_archive
+
+LIST_DIR = "vegfru_list"
 
 
 class VegFruImageDataset(FoodImageDataset):
@@ -19,7 +20,6 @@ class VegFruImageDataset(FoodImageDataset):
     """
 
     name = "vegfru"
-    LIST_DIR: ClassVar[str] = "vegfru_list"
 
     def _read_classes(self) -> list[str]:
         table = pd.read_csv(
@@ -34,7 +34,7 @@ class VegFruImageDataset(FoodImageDataset):
 
     def _read_split(self, split: str) -> tuple[str, Path, pd.DataFrame]:
         source = {"train": "train", "validation": "test"}[split]
-        lines = (self.root / self.LIST_DIR / f"vegfru_{source}.txt").read_text().splitlines()
+        lines = (self.root / LIST_DIR / f"vegfru_{source}.txt").read_text().splitlines()
         paths = [line.rsplit(maxsplit=1)[0] for line in lines if line.strip()]
         table = pd.DataFrame(
             {"fname": paths, "class": [canonical(Path(p).parent.name) for p in paths]}

@@ -15,6 +15,7 @@ from classification.datasets.util import extract, fetch_archive
 from classification.datasets.base import FoodImageDataset
 from classification.datasets.food101 import Food101ImageDataset
 from classification.datasets.foodx251 import FoodX251ImageDataset
+from classification.datasets import isia500
 from classification.datasets.isia500 import ISIAFood500ImageDataset
 from classification.datasets.uecfood256 import UECFood256ImageDataset
 from classification.datasets.vegfru import VegFruImageDataset
@@ -267,7 +268,7 @@ def _isia_client(requests: list[str], **overrides: httpx.Response) -> httpx.Clie
         for name, text in ISIA_META.items():
             bundle.writestr(f"metadata_ISIAFood_500/{name}", text)
     bodies = {"metadata_ISIAFood_500.zip": buffer.getvalue()}
-    bodies |= {part: part.encode() for part in ISIAFood500ImageDataset.PARTS}
+    bodies |= {part: part.encode() for part in isia500.PARTS}
 
     def handle(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))

@@ -53,7 +53,7 @@ distinct images). Names are canonicalized as above; IDs 40 and 67 are both
 `omelet`, so they share one label and the taxonomy has 255 entries. The dataset
 has no official split. Per class ID, the loader sorts the `.jpg` names,
 shuffles them with `random.Random(f"{SEED}:{class_id}")`, and holds out
-`round(n * VALIDATION_RATIO)` (class constants `0` and `0.2`) as validation; the
+`round(n * VALIDATION_RATIO)` (module constants `0` and `0.2`) as validation; the
 split is not written to disk. Images listed under several class directories show
 several foods and are dropped from both splits (27,043 remain upstream; the
 smallest classes keep 19). `bb_info.txt` is not read. Identities are
@@ -68,7 +68,7 @@ published UEC-Food256 numbers, which use the official 5-fold protocol.
 fruits) for the taxonomy, canonicalized as above; the 292 canonical names are
 unique, so no IDs merge. Training references come from
 `vegfru_list/vegfru_train.txt` and validation from `vegfru_list/vegfru_test.txt`
-(`LIST_DIR` class constant); `vegfru_val.txt` is not read. Each line is
+(`LIST_DIR` module constant); `vegfru_val.txt` is not read. Each line is
 `<relative path> <label id>` under `root`; the label is the path's class
 directory, the ID is ignored, and a class missing from the CSV is rejected.
 Identities are `vegfru:<train|test>:<veg200_images|fru92_images>/<class>/<file>`.

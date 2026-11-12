@@ -4,13 +4,15 @@ import random
 from collections import Counter
 from functools import cached_property
 from pathlib import Path
-from typing import ClassVar
 
 import httpx
 import pandas as pd
 
 from classification.datasets.base import FoodImageDataset, canonical
 from classification.datasets.util import fetch_archive, install_archive
+
+SEED = 0
+VALIDATION_RATIO = 0.2
 
 
 class UECFood256ImageDataset(FoodImageDataset):
@@ -24,8 +26,6 @@ class UECFood256ImageDataset(FoodImageDataset):
     """
 
     name = "uecfood256"
-    SEED: ClassVar[int] = 0
-    VALIDATION_RATIO: ClassVar[float] = 0.2
 
     def _read_classes(self) -> list[str]:
         table = pd.read_csv(
@@ -48,8 +48,8 @@ class UECFood256ImageDataset(FoodImageDataset):
         rows: dict[str, list[tuple[str, str]]] = {"train": [], "validation": []}
         for class_id, names in listed.items():
             names = [n for n in names if counts[n] == 1]
-            random.Random(f"{self.SEED}:{class_id}").shuffle(names)
-            held_out = round(len(names) * self.VALIDATION_RATIO)
+            random.Random(f"{SEED}:{class_id}").shuffle(names)
+            held_out = round(len(names) * VALIDATION_RATIO)
             label = self.class_map[class_id]
             rows["validation"] += [(f"{class_id}/{n}", label) for n in names[:held_out]]
             rows["train"] += [(f"{class_id}/{n}", label) for n in names[held_out:]]
