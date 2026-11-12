@@ -11,6 +11,7 @@ import yaml
 
 from classification.cli import main
 from classification.datasets.image_dataset import (
+    Food101ImageDataset,
     FoodImageDataset,
     FoodX251ImageDataset,
     _extract,
@@ -24,9 +25,19 @@ FOODX251_FILES = {
 }
 
 
-def _tar(files: dict[str, str]) -> bytes:
+FOOD101_FILES = {
+    "meta/classes.txt": "apple_pie\nbeef_tartare\n",
+    "meta/train.txt": "apple_pie/1\nbeef_tartare/2\n",
+    "meta/test.txt": "beef_tartare/3\n",
+    "images/apple_pie/1.jpg": "x",
+    "images/beef_tartare/2.jpg": "x",
+    "images/beef_tartare/3.jpg": "x",
+}
+
+
+def _tar(files: dict[str, str], mode: str = "w") -> bytes:
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w") as bundle:
+    with tarfile.open(fileobj=buffer, mode=mode) as bundle:
         for name, text in files.items():
             data = text.encode()
             info = tarfile.TarInfo(name)
@@ -58,6 +69,41 @@ def test_foodx251_download_loads_and_is_idempotent(tmp_path):
 
     FoodX251ImageDataset.download(tmp_path, client=client)
     assert len(requests) == 3
+
+
+def test_food101_loads_miniature_tree(tmp_path):
+    for name, text in FOOD101_FILES.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    dataset = Food101ImageDataset(tmp_path)
+    assert dataset.get_class_list() == ["Apple pie", "Beef tartare"]
+    train = dataset.train_set()
+    assert train["source_id"] == ["food101:train:apple_pie/1.jpg", "food101:train:beef_tartare/2.jpg"]
+    assert train["class"] == ["Apple pie", "Beef tartare"]
+    assert train["fname"][0] == str(tmp_path.resolve() / "images/apple_pie/1.jpg")
+    validation = dataset.validation_set()
+    assert validation["source_id"] == ["food101:test:beef_tartare/3.jpg"]
+    assert validation["source_split"] == ["test"]
+
+    (tmp_path / "meta/test.txt").write_text("pear/4\n")
+    with pytest.raises(ValueError, match="missing from classes"):
+        Food101ImageDataset(tmp_path)
+
+
+def test_food101_download_flattens_and_is_idempotent(tmp_path):
+    requests: list[str] = []
+    body = _tar({f"food-101/{name}": text for name, text in FOOD101_FILES.items()}, mode="w:gz")
+    client = _client({"cvl/food-101.tar.gz": body}, requests)
+    Food101ImageDataset.download(tmp_path, client=client)
+    assert requests == ["https://data.vision.ee.ethz.ch/cvl/food-101.tar.gz"]
+    assert not list((tmp_path / ".downloads").iterdir())
+    assert not (tmp_path / "food-101").exists()
+
+    dataset = Food101ImageDataset(tmp_path)
+    assert len(dataset.train_set()) == 2 and dataset.validation_set()["class"] == ["Beef tartare"]
+
+    Food101ImageDataset.download(tmp_path, client=client)
+    assert len(requests) == 1
 
 
 def test_fetch_failure_leaves_no_archive(tmp_path):

@@ -33,6 +33,16 @@ and duplicate canonical labels are rejected. `annot/{train,val}_info.csv` index
 validation records. The unlabeled test split is not read, so accuracy is
 validation accuracy.
 
+`Food101ImageDataset` (`food101`) reads `meta/classes.txt` for the taxonomy and
+`meta/{train,test}.txt` for `<class>/<stem>` entries under `images/`, appending
+`.jpg`. Labels use the same canonicalization as FoodX-251; a split entry whose
+class is missing from `classes.txt` is rejected. Validation is the official
+`test` split, so identities are `food101:<train|test>:<class>/<stem>.jpg`.
+`cfg/classification_food101.yml` uses its own `output_dir`
+(`assets/classification/food101`) and LanceDB table, and leaves
+`descriptions_file` null, because no Food-101 vocabulary exists yet;
+descriptions generate into `output_dir/descriptions.json`.
+
 ### Downloads
 
 `download(root, client=None)` fetches and unpacks a dataset; the base class
@@ -48,6 +58,12 @@ exists. Otherwise it fetches `https://food-x.s3.amazonaws.com/{train,val,annot}.
 extracts each into `root/<part>`, and deletes the archive. `annot` goes last so
 its class list marks a complete download. The real tar layout is unverified;
 the loader expects `annot/`, `train/train_set/`, and `val/val_set/`.
+
+`Food101ImageDataset.download()` returns early when `meta/classes.txt` exists.
+Otherwise it fetches `https://data.vision.ee.ethz.ch/cvl/food-101.tar.gz`,
+extracts it under `root/.downloads/food101`, moves the inner `food-101/`
+entries into `root` (`meta/` last, as the completion marker), and deletes the
+staging directory and archive.
 
 ### Reference selection
 

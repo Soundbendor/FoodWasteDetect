@@ -1,6 +1,7 @@
 """Local food image datasets as typed Hugging Face image datasets."""
 
 import contextlib
+import shutil
 import tarfile
 import zipfile
 from abc import ABC, abstractmethod
@@ -27,6 +28,11 @@ FEATURES = Features(
 )
 
 
+def _canonical(name: str) -> str:
+    """Capitalize a taxonomy name and replace underscores with spaces."""
+    return name.capitalize().replace("_", " ")
+
+
 def _read_class_map(path: Path) -> dict[int, str]:
     table = pd.read_csv(
         path,
@@ -38,7 +44,7 @@ def _read_class_map(path: Path) -> dict[int, str]:
     )
     if table.index.has_duplicates:
         raise ValueError("Duplicate class ID")
-    labels = table["name"].str.capitalize().str.replace("_", " ", regex=False)
+    labels = table["name"].map(_canonical)
     if labels.empty or labels.duplicated().any():
         raise ValueError("Taxonomy must contain unique canonical labels")
     return labels.to_dict()
@@ -216,7 +222,58 @@ class FoodX251ImageDataset(FoodImageDataset):
             archive.unlink()
 
 
-DATASETS: dict[str, type[FoodImageDataset]] = {c.name: c for c in (FoodX251ImageDataset,)}
+class Food101ImageDataset(FoodImageDataset):
+    """Food-101 official train references and labeled test split."""
+
+    name = "food101"
+
+    def _read_classes(self) -> list[str]:
+        labels = [_canonical(n) for n in (self.root / "meta/classes.txt").read_text().split()]
+        if not labels or len(set(labels)) != len(labels):
+            raise ValueError("Taxonomy must contain unique canonical labels")
+        return labels
+
+    def _read_split(self, split: str) -> tuple[str, Path, pd.DataFrame]:
+        source = {"train": "train", "validation": "test"}[split]
+        stems = (self.root / f"meta/{source}.txt").read_text().split()
+        table = pd.DataFrame(
+            {
+                "fname": [f"{s}.jpg" for s in stems],
+                "class": [_canonical(s.split("/")[0]) for s in stems],
+            }
+        )
+        if not set(table["class"]) <= set(self.classes):
+            raise ValueError(f"{source}.txt names a class missing from classes.txt")
+        return source, self.root / "images", table
+
+    @classmethod
+    def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
+        """Fetch the ETHZ tarball and move its ``food-101/`` contents into ``root``.
+
+        ``meta/`` moves last, so ``meta/classes.txt`` marks a complete download.
+        """
+        root = Path(root).expanduser().resolve()
+        if (root / "meta/classes.txt").exists():
+            return
+        archive = _fetch_archive("https://data.vision.ee.ethz.ch/cvl/food-101.tar.gz", root, client)
+        staging = root / ".downloads/food101"
+        shutil.rmtree(staging, ignore_errors=True)
+        _extract(archive, staging)
+        inner = staging / "food-101"
+        for entry in sorted(inner.iterdir(), key=lambda p: p.name == "meta"):
+            target = root / entry.name
+            if target.is_dir():
+                shutil.rmtree(target)
+            elif target.exists():
+                target.unlink()
+            entry.replace(target)
+        shutil.rmtree(staging)
+        archive.unlink()
+
+
+DATASETS: dict[str, type[FoodImageDataset]] = {
+    c.name: c for c in (FoodX251ImageDataset, Food101ImageDataset)
+}
 
 
 def load_dataset(config: DatasetConfig) -> FoodImageDataset:

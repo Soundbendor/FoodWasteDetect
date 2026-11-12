@@ -17,7 +17,7 @@ class ConfigModel(BaseModel):
 
 
 # Registered dataset names; must equal the keys of datasets.image_dataset.DATASETS.
-DatasetName = Literal["foodx251"]
+DatasetName = Literal["foodx251", "food101"]
 
 
 class DatasetConfig(ConfigModel):
