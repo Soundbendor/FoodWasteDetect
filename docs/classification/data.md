@@ -18,7 +18,7 @@ an undecoded `image` column. `train_set()` returns training references;
 it. Paths resolve within the image directory; identities use
 `<name>:<source_split>:<relative path>`, and duplicates within a split are
 rejected. Loading metadata does not decode images or compare contents or paths
-across splits. The base `download()` raises `NotImplementedError`.
+across splits.
 
 `DATASETS` maps each registered name to its class, and `load_dataset()` builds the
 configured one. `experiments.config.DatasetName` lists the same names (lowercase
@@ -32,6 +32,24 @@ and duplicate canonical labels are rejected. `annot/{train,val}_info.csv` index
 `foodx251:<train|val>:<relative path>`, and `source_split` stays `val` for
 validation records. The unlabeled test split is not read, so accuracy is
 validation accuracy.
+
+### Downloads
+
+`download(root, client=None)` fetches and unpacks a dataset; the base class
+raises `NotImplementedError`. Module helpers serve every subclass:
+`_fetch_archive(url, root, client)` streams to `root/.downloads/<name>.part` and
+renames on completion, reusing a completed archive without a request;
+`_extract(archive, destination)` unpacks `.zip` files or tars with the `data`
+filter, which rejects members escaping `destination`. `client` is an optional
+`httpx.Client` for tests; the default follows redirects with a 60 s timeout.
+
+`FoodX251ImageDataset.download()` returns early when `annot/class_list.txt`
+exists. Otherwise it fetches `https://food-x.s3.amazonaws.com/{train,val,annot}.tar`,
+extracts each into `root/<part>`, and deletes the archive. `annot` goes last so
+its class list marks a complete download. The real tar layout is unverified;
+the loader expects `annot/`, `train/train_set/`, and `val/val_set/`.
+
+### Reference selection
 
 `select_images()` applies the optional per-class cap before saved-identity
 exclusions, leaving the input dataset unchanged. This order makes resumed builds
@@ -121,6 +139,10 @@ context before loading the embedder. Downloads use the same lifecycle via
 [`tests/test_classification.py`](../../tests/test_classification.py) covers miniature
 local datasets, metadata-only access, identity/path validation, deterministic caps,
 partial batches, cache ordering, and vocabulary handling.
+[`tests/test_dataset_download.py`](../../tests/test_dataset_download.py) serves
+synthetic tars through `httpx.MockTransport` to cover download, loading,
+idempotence, archive reuse, failed fetches, zip extraction, tar escapes, and CLI
+dispatch.
 [`tests/test_descriptor_lifecycle.py`](../../tests/test_descriptor_lifecycle.py)
 uses fake HTTP/process backends to cover owned-server startup, cleanup, downloads,
 and description errors. Routine checks never start a real service.

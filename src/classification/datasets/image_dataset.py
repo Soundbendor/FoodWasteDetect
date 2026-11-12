@@ -1,11 +1,16 @@
 """Local food image datasets as typed Hugging Face image datasets."""
 
+import contextlib
+import tarfile
+import zipfile
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlparse
 
+import httpx
 import pandas as pd
 from datasets import Dataset, DatasetDict, Features, Image, NamedSplit, Value
 
@@ -39,6 +44,39 @@ def _read_class_map(path: Path) -> dict[int, str]:
     return labels.to_dict()
 
 
+def _fetch_archive(url: str, root: Path, client: httpx.Client | None = None) -> Path:
+    """Stream ``url`` to ``root/.downloads/<name>`` through a ``.part`` file.
+
+    An archive completed by an earlier call is returned without a request.
+    """
+    target = root / ".downloads" / Path(urlparse(url).path).name
+    if target.exists():
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_name(target.name + ".part")
+    with contextlib.ExitStack() as stack:
+        if client is None:
+            client = stack.enter_context(httpx.Client(follow_redirects=True, timeout=60))
+        response = stack.enter_context(client.stream("GET", url))
+        response.raise_for_status()
+        with partial.open("wb") as stream:
+            for chunk in response.iter_bytes(1 << 20):
+                stream.write(chunk)
+    partial.replace(target)
+    return target
+
+
+def _extract(archive: Path, destination: Path) -> None:
+    """Unpack a tar (``data`` filter) or zip archive into ``destination``."""
+    destination.mkdir(parents=True, exist_ok=True)
+    if archive.suffix == ".zip":
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(destination)
+    else:
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(destination, filter="data")
+
+
 class FoodImageDataset(ABC):
     """Load local metadata for a labeled image dataset, deferring image decoding.
 
@@ -64,8 +102,8 @@ class FoodImageDataset(ABC):
         """Return (source_split, image_dir, table[fname, class]) for train/validation."""
 
     @classmethod
-    def download(cls, root: str | Path) -> None:
-        """Fetch and unpack the dataset under ``root``."""
+    def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
+        """Fetch and unpack the dataset under ``root``; ``client`` overrides HTTP transport."""
         raise NotImplementedError(f"{cls.name} has no public download host")
 
     def _build_split(
@@ -165,6 +203,17 @@ class FoodX251ImageDataset(FoodImageDataset):
         )
         table["class"] = table.pop("class_id").map(self.class_map.__getitem__)
         return source, self.root / f"{source}/{source}_set", table
+
+    @classmethod
+    def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
+        """Fetch the public S3 tars; ``annot`` unpacks last and marks completion."""
+        root = Path(root).expanduser().resolve()
+        if (root / "annot/class_list.txt").exists():
+            return
+        for part in ("train", "val", "annot"):
+            archive = _fetch_archive(f"https://food-x.s3.amazonaws.com/{part}.tar", root, client)
+            _extract(archive, root / part)
+            archive.unlink()
 
 
 DATASETS: dict[str, type[FoodImageDataset]] = {c.name: c for c in (FoodX251ImageDataset,)}
