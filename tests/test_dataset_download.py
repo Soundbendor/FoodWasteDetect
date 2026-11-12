@@ -3,6 +3,7 @@
 import io
 import tarfile
 import zipfile
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -14,6 +15,7 @@ from classification.datasets.image_dataset import (
     Food101ImageDataset,
     FoodImageDataset,
     FoodX251ImageDataset,
+    ISIAFood500ImageDataset,
     UECFood256ImageDataset,
     VegFruImageDataset,
     _extract,
@@ -70,6 +72,21 @@ VEGFRU_VEG = {
     "veg200_images/shepherd's_purse/v_02_01_0001.jpg": "x",
 }
 VEGFRU_FRU = {"fru92_images/apple/f_01_01_0001.jpg": "x", "fru92_images/apple/f_01_01_0002.jpg": "x"}
+
+
+# Mirrors metadata_ISIAFood_500.zip: tab-separated name/id labels and "<class>/<file> <id>"
+# split lists. Names keep case, parentheses, and non-ASCII text.
+ISIA_META = {
+    "ISIAFood500_classLabel.txt": "Apple_pie\t1\nCrème_brûlée_(Burnt_cream)\t2\n",
+    "train_finetune.txt": "Apple_pie/Apple_pie_0001.jpg 1\nCrème_brûlée_(Burnt_cream)/Crème_brûlée_(Burnt_cream)_0001.jpg 2\n",
+    "test_finetune.txt": "Crème_brûlée_(Burnt_cream)/Crème_brûlée_(Burnt_cream)_0002.jpg 2\n",
+}
+ISIA_IMAGES = [
+    "Apple_pie/Apple_pie_0001.jpg",
+    "Crème_brûlée_(Burnt_cream)/Crème_brûlée_(Burnt_cream)_0001.jpg",
+    "Crème_brûlée_(Burnt_cream)/Crème_brûlée_(Burnt_cream)_0002.jpg",
+]
+ISIA_URL = "http://123.57.42.89/Dataset_ict/ISIA_Food500_Dir/dataset/"
 
 
 def _tar(files: dict[str, str], mode: str = "w") -> bytes:
@@ -226,6 +243,96 @@ def test_vegfru_download_unpacks_nested_zip_and_is_idempotent(tmp_path):
 
     VegFruImageDataset.download(tmp_path, client=client)
     assert len(requests) == 1
+
+
+def test_isia500_loads_tab_separated_labels_and_finetune_lists(tmp_path):
+    for name, text in ISIA_META.items():
+        (tmp_path / "metadata_ISIAFood_500").mkdir(exist_ok=True)
+        (tmp_path / "metadata_ISIAFood_500" / name).write_text(text)
+    dataset = ISIAFood500ImageDataset(tmp_path)
+    assert dataset.get_class_list() == ["Apple pie", "Crème brûlée (Burnt cream)"]
+    train = dataset.train_set()
+    assert train["class"] == ["Apple pie", "Crème brûlée (Burnt cream)"]
+    assert train["source_id"][0] == "isia500:train:Apple_pie/Apple_pie_0001.jpg"
+    assert train["fname"][1] == str(tmp_path.resolve() / "images" / ISIA_IMAGES[1])
+    validation = dataset.validation_set()
+    assert validation["source_id"] == [f"isia500:test:{ISIA_IMAGES[2]}"]
+    assert validation["source_split"] == ["test"]
+
+    (tmp_path / "metadata_ISIAFood_500/test_finetune.txt").write_text("Pear/Pear_0001.jpg 3\n")
+    with pytest.raises(ValueError, match="missing from ISIAFood500"):
+        ISIAFood500ImageDataset(tmp_path)
+
+
+def _isia_client(requests: list[str], **overrides: httpx.Response) -> httpx.Client:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        for name, text in ISIA_META.items():
+            bundle.writestr(f"metadata_ISIAFood_500/{name}", text)
+    bodies = {"metadata_ISIAFood_500.zip": buffer.getvalue()}
+    bodies |= {part: part.encode() for part in ISIAFood500ImageDataset.PARTS}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        name = request.url.path.rsplit("/", 1)[1]
+        return overrides.get(name) or httpx.Response(200, content=bodies[name])
+
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+def _fake_7z(command, check):
+    output = Path(command[3].removeprefix("-o"))
+    for name in ISIA_IMAGES:
+        (output / "images" / name).parent.mkdir(parents=True, exist_ok=True)
+        (output / "images" / name).write_text("x")
+
+
+def test_isia500_download_fetches_parts_runs_7z_and_is_idempotent(tmp_path):
+    requests: list[str] = []
+    client = _isia_client(requests)
+    with (
+        patch("classification.datasets.image_dataset.shutil.which", return_value="/bin/7z"),
+        patch("classification.datasets.image_dataset.subprocess.run", side_effect=_fake_7z) as run,
+    ):
+        ISIAFood500ImageDataset.download(tmp_path, client=client)
+        ISIAFood500ImageDataset.download(tmp_path, client=client)
+    parts = [f"ISIA_Food500.z{i:02d}" for i in range(1, 11)] + ["ISIA_Food500.zip"]
+    assert requests == [ISIA_URL + n for n in ["metadata_ISIAFood_500.zip", *parts]]
+    root = tmp_path.resolve()
+    run.assert_called_once_with(
+        ["/bin/7z", "x", "-y", f"-o{root}", str(root / ".downloads/ISIA_Food500.zip")], check=True
+    )
+    assert not list((tmp_path / ".downloads").iterdir())
+
+    dataset = ISIAFood500ImageDataset(tmp_path)
+    assert len(dataset.train_set()) == 2 and dataset.validation_set()["fname"] == [
+        str(root / "images" / ISIA_IMAGES[2])
+    ]
+
+
+def test_isia500_download_rejects_truncated_part(tmp_path):
+    requests: list[str] = []
+    short = httpx.Response(200, headers={"Content-Length": "999"}, content=b"short")
+    client = _isia_client(requests, **{"ISIA_Food500.z03": short})
+    with (
+        patch("classification.datasets.image_dataset.shutil.which", return_value="/bin/7z"),
+        patch("classification.datasets.image_dataset.subprocess.run") as run,
+        pytest.raises(ValueError, match="Content-Length 999"),
+    ):
+        ISIAFood500ImageDataset.download(tmp_path, client=client)
+    run.assert_not_called()
+    downloads = {p.name for p in (tmp_path / ".downloads").iterdir()}
+    assert downloads == {"metadata_ISIAFood_500.zip", "ISIA_Food500.z01", "ISIA_Food500.z02"}
+
+
+def test_isia500_download_requires_7z(tmp_path):
+    requests: list[str] = []
+    with (
+        patch("classification.datasets.image_dataset.shutil.which", return_value=None),
+        pytest.raises(RuntimeError, match="Pixi environment"),
+    ):
+        ISIAFood500ImageDataset.download(tmp_path, client=_isia_client(requests))
+    assert requests == []
 
 
 def test_fetch_failure_leaves_no_archive(tmp_path):

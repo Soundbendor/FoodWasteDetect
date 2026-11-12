@@ -3,6 +3,7 @@
 import contextlib
 import random
 import shutil
+import subprocess
 import tarfile
 import zipfile
 from abc import ABC, abstractmethod
@@ -35,6 +36,11 @@ def _canonical(name: str) -> str:
     return name.capitalize().replace("_", " ")
 
 
+def _spaced(name: str) -> str:
+    """Replace underscores with spaces, keeping case, parentheses, and non-ASCII text."""
+    return name.replace("_", " ")
+
+
 def _read_class_map(path: Path) -> dict[int, str]:
     table = pd.read_csv(
         path,
@@ -52,10 +58,14 @@ def _read_class_map(path: Path) -> dict[int, str]:
     return labels.to_dict()
 
 
-def _fetch_archive(url: str, root: Path, client: httpx.Client | None = None) -> Path:
+def _fetch_archive(
+    url: str, root: Path, client: httpx.Client | None = None, *, require_length: bool = False
+) -> Path:
     """Stream ``url`` to ``root/.downloads/<name>`` through a ``.part`` file.
 
-    An archive completed by an earlier call is returned without a request.
+    An archive completed by an earlier call is returned without a request. An unencoded
+    body whose size differs from ``Content-Length`` is discarded with ``ValueError``;
+    ``require_length`` also rejects responses without that header.
     """
     target = root / ".downloads" / Path(urlparse(url).path).name
     if target.exists():
@@ -67,9 +77,18 @@ def _fetch_archive(url: str, root: Path, client: httpx.Client | None = None) -> 
             client = stack.enter_context(httpx.Client(follow_redirects=True, timeout=60))
         response = stack.enter_context(client.stream("GET", url))
         response.raise_for_status()
+        expected = response.headers.get("Content-Length")
+        if expected is None and require_length:
+            raise ValueError(f"{url} sent no Content-Length")
+        received = 0
         with partial.open("wb") as stream:
             for chunk in response.iter_bytes(1 << 20):
-                stream.write(chunk)
+                received += stream.write(chunk)
+        # Content-Length counts encoded bytes, so only identity bodies are comparable.
+        encoded = response.headers.get("Content-Encoding", "identity") != "identity"
+        if expected is not None and not encoded and received != int(expected):
+            partial.unlink()
+            raise ValueError(f"{url}: received {received} bytes, Content-Length {expected}")
     partial.replace(target)
     return target
 
@@ -401,6 +420,89 @@ class VegFruImageDataset(FoodImageDataset):
         )
 
 
+class ISIAFood500ImageDataset(FoodImageDataset):
+    """ISIA Food-500: official ``train_finetune`` references, ``test_finetune`` evaluation.
+
+    ``META_DIR/ISIAFood500_classLabel.txt`` holds ``name<TAB>id`` lines. The split lists
+    hold ``<class>/<file> <id>`` lines relative to ``IMAGE_DIR``; labels come from the ID.
+    Names only have underscores replaced, keeping case, parentheses, and non-ASCII text.
+    """
+
+    name = "isia500"
+    BASE_URL: ClassVar[str] = "http://123.57.42.89/Dataset_ict/ISIA_Food500_Dir/dataset/"
+    # Location assumed next to the image parts; unverified.
+    METADATA_URL: ClassVar[str] = BASE_URL + "metadata_ISIAFood_500.zip"
+    PARTS: ClassVar[tuple[str, ...]] = (
+        *(f"ISIA_Food500.z{i:02d}" for i in range(1, 11)),
+        "ISIA_Food500.zip",
+    )
+    META_DIR: ClassVar[str] = "metadata_ISIAFood_500"
+    IMAGE_DIR: ClassVar[str] = "images"
+    CLASS_FILE: ClassVar[str] = "ISIAFood500_classLabel.txt"
+
+    def _read_classes(self) -> list[str]:
+        table = pd.read_csv(
+            self.root / self.META_DIR / self.CLASS_FILE,
+            sep="\t",
+            names=["name", "id"],
+            dtype={"name": str, "id": "int64"},
+            keep_default_na=False,
+        )
+        labels = table["name"].map(_spaced)
+        if table.empty or table["id"].duplicated().any() or labels.duplicated().any():
+            raise ValueError(f"{self.CLASS_FILE} must list unique IDs and canonical labels")
+        self.class_map = dict(zip(table["id"], labels, strict=True))
+        return list(labels)
+
+    def _read_split(self, split: str) -> tuple[str, Path, pd.DataFrame]:
+        source = {"train": "train", "validation": "test"}[split]
+        lines = (self.root / self.META_DIR / f"{source}_finetune.txt").read_text().splitlines()
+        rows = [line.rsplit(maxsplit=1) for line in lines if line.strip()]
+        ids = [int(class_id) for _, class_id in rows]
+        if not set(ids) <= self.class_map.keys():
+            raise ValueError(
+                f"{source}_finetune.txt names a class ID missing from {self.CLASS_FILE}"
+            )
+        table = pd.DataFrame(
+            {"fname": [path for path, _ in rows], "class": [self.class_map[i] for i in ids]}
+        )
+        return source, self.root / self.IMAGE_DIR, table
+
+    @classmethod
+    def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
+        """Fetch the metadata zip and eleven split-zip parts, then unpack them under ``root``.
+
+        Each part must match its ``Content-Length``. ``7z x`` unpacks the images into
+        ``root``; the metadata moves into ``META_DIR`` last, so the class-label file marks
+        a complete download. Archives are deleted afterwards.
+        """
+        root = Path(root).expanduser().resolve()
+        if (root / cls.META_DIR / cls.CLASS_FILE).exists():
+            return
+        sevenzip = shutil.which("7z")
+        if sevenzip is None:
+            raise RuntimeError(
+                "7z is not on PATH; run within the Pixi environment, which provides p7zip"
+            )
+        archives = [
+            _fetch_archive(url, root, client, require_length=True)
+            for url in (cls.METADATA_URL, *(cls.BASE_URL + part for part in cls.PARTS))
+        ]
+        metadata, *parts = archives
+        subprocess.run([sevenzip, "x", "-y", f"-o{root}", str(parts[-1])], check=True)
+        staging = metadata.with_name(metadata.name + ".staging")
+        shutil.rmtree(staging, ignore_errors=True)
+        _extract(metadata, staging)
+        (label_file,) = staging.rglob(cls.CLASS_FILE)
+        destination = root / cls.META_DIR
+        destination.mkdir(exist_ok=True)
+        for entry in sorted(label_file.parent.iterdir(), key=lambda p: p.name == cls.CLASS_FILE):
+            entry.replace(destination / entry.name)
+        shutil.rmtree(staging)
+        for archive in archives:
+            archive.unlink()
+
+
 DATASETS: dict[str, type[FoodImageDataset]] = {
     c.name: c
     for c in (
@@ -408,6 +510,7 @@ DATASETS: dict[str, type[FoodImageDataset]] = {
         Food101ImageDataset,
         UECFood256ImageDataset,
         VegFruImageDataset,
+        ISIAFood500ImageDataset,
     )
 }
 

@@ -82,12 +82,26 @@ authorized download and adjust `LIST_DIR` or the parser.
 `cfg/classification_vegfru.yml` mirrors the other configs with its own
 `output_dir`, table, and null `descriptions_file`.
 
+`ISIAFood500ImageDataset` (`isia500`) reads `metadata_ISIAFood_500/` (`META_DIR`):
+`ISIAFood500_classLabel.txt` holds headerless `name<TAB>id` lines for the
+taxonomy, and `train_finetune.txt` / `test_finetune.txt` hold `<class>/<file> <id>`
+lines for training references and validation. Labels come from the ID; an ID
+missing from the class file is rejected. Names only have underscores replaced by
+spaces (`_spaced`), keeping case, parentheses, and non-ASCII text. Images resolve
+under `images/` (`IMAGE_DIR`); identities are `isia500:<train|test>:<class>/<file>`.
+The label and list formats come from the metadata zip; the metadata zip's nesting
+and URL and the image directory produced by `7z` are unverified, so check them on
+the first authorized download. `cfg/classification_isia500.yml` has its own
+`output_dir`, table, and null `descriptions_file`.
+
 ### Downloads
 
 `download(root, client=None)` fetches and unpacks a dataset; the base class
 raises `NotImplementedError`. Module helpers serve every subclass:
 `_fetch_archive(url, root, client)` streams to `root/.downloads/<name>.part` and
-renames on completion, reusing a completed archive without a request;
+renames on completion, reusing a completed archive without a request, and
+discards an unencoded body whose size differs from `Content-Length`
+(`require_length=True` also rejects a missing header);
 `_extract(archive, destination)` unpacks `.zip` files or tars with the `data`
 filter, which rejects members escaping `destination`. `client` is an optional
 `httpx.Client` for tests; the default follows redirects with a 60 s timeout.
@@ -118,6 +132,19 @@ through `_fetch_archive` and calls `_install_archive(..., "vegfru",
 "classid_classname.csv", nested="archive.zip")`: the nested zip is unpacked into
 the staged `vegfru/` and deleted before the entries move, so the CSV still marks
 a complete install. Peak disk use is roughly 70 GB (archive, staged tar, unpacked zip).
+
+`ISIAFood500ImageDataset.download()` returns early when
+`metadata_ISIAFood_500/ISIAFood500_classLabel.txt` exists. It requires `7z` on
+PATH (conda-forge `p7zip`, in every Pixi environment) and fails before any request
+otherwise. From `BASE_URL`
+(`http://123.57.42.89/Dataset_ict/ISIA_Food500_Dir/dataset/`, plain HTTP, no
+checksums) it fetches `METADATA_URL` (`metadata_ISIAFood_500.zip`, assumed to sit
+next to the parts) and the split zip `ISIA_Food500.z01`-`.z10` plus
+`ISIA_Food500.zip`, each with `require_length=True`. It runs
+`7z x -y -o<root> ISIA_Food500.zip`, then moves the directory holding the class
+file out of the extracted metadata zip into `META_DIR`, class file last, and
+deletes all archives. A failed `7z` run keeps the parts for a retry. Expect about
+90 GB peak disk use (43.6 GB of parts plus unpacked images).
 
 ### Reference selection
 
