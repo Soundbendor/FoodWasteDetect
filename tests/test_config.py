@@ -165,7 +165,7 @@ def test_output_and_cache_constraints(tmp_path):
             ExperimentConfig.model_validate(data)
 
 
-@pytest.mark.parametrize("filename", ["cfg/classification.yml", "cfg/classification_food101.yml", "cfg/ge_v2.yml"])
+@pytest.mark.parametrize("filename", ["cfg/classification.yml", "cfg/classification_food101.yml", "cfg/classification_uecfood256.yml", "cfg/ge_v2.yml"])
 def test_shipped_configs_validate(filename):
     root = Path(__file__).resolve().parents[1]
     data = yaml.safe_load((root / filename).read_text(encoding="utf-8"))

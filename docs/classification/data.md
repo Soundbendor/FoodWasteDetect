@@ -43,6 +43,25 @@ class is missing from `classes.txt` is rejected. Validation is the official
 `descriptions_file` null, because no Food-101 vocabulary exists yet;
 descriptions generate into `output_dir/descriptions.json`.
 
+`UECFood256ImageDataset` (`uecfood256`) reads the layout verified from the
+central directory of Hugging Face `kng-research/uecfood256` `dataset256.zip`
+(2026-11-12): one `UECFOOD256/` folder holding `README.txt`, a tab-separated
+`category.txt` with an `id`/`name` header for 256 IDs, and `<id>/` directories of
+`<number>.jpg` files with a `bb_info.txt` box table (31,395 listings of 28,897
+distinct images). Names are canonicalized as above; IDs 40 and 67 are both
+`omelet`, so they share one label and the taxonomy has 255 entries. The dataset
+has no official split. Per class ID, the loader sorts the `.jpg` names,
+shuffles them with `random.Random(f"{SEED}:{class_id}")`, and holds out
+`round(n * VALIDATION_RATIO)` (class constants `0` and `0.2`) as validation; the
+split is not written to disk. Images listed under several class directories show
+several foods and are dropped from both splits (27,043 remain upstream; the
+smallest classes keep 19). `bb_info.txt` is not read. Identities are
+`uecfood256:<train|validation>:<id>/<number>.jpg`; changing the seed or ratio
+reassigns them and needs fresh reference storage. Results are not comparable with
+published UEC-Food256 numbers, which use the official 5-fold protocol.
+`cfg/classification_uecfood256.yml` mirrors the Food-101 config with its own
+`output_dir`, table, and null `descriptions_file`.
+
 ### Downloads
 
 `download(root, client=None)` fetches and unpacks a dataset; the base class
@@ -60,10 +79,17 @@ its class list marks a complete download. The real tar layout is unverified;
 the loader expects `annot/`, `train/train_set/`, and `val/val_set/`.
 
 `Food101ImageDataset.download()` returns early when `meta/classes.txt` exists.
-Otherwise it fetches `https://data.vision.ee.ethz.ch/cvl/food-101.tar.gz`,
-extracts it under `root/.downloads/food101`, moves the inner `food-101/`
-entries into `root` (`meta/` last, as the completion marker), and deletes the
+Otherwise it fetches `https://data.vision.ee.ethz.ch/cvl/food-101.tar.gz` and
+calls `_install_archive(archive, root, inner, last)`, which extracts to
+`root/.downloads/<archive>.staging`, moves the `inner` entries (`food-101/`) into
+`root` with `last` (`meta/`) moved last as the completion marker, and deletes the
 staging directory and archive.
+
+`UECFood256ImageDataset.download()` returns early when `category.txt` exists.
+Otherwise it fetches
+`https://huggingface.co/datasets/kng-research/uecfood256/resolve/main/dataset256.zip`
+(4.2 GB, ungated) through `_fetch_archive`, so tests mock it with `client`, and
+installs the `UECFOOD256/` entries with `category.txt` last.
 
 ### Reference selection
 

@@ -14,6 +14,7 @@ from classification.datasets.image_dataset import (
     Food101ImageDataset,
     FoodImageDataset,
     FoodX251ImageDataset,
+    UECFood256ImageDataset,
     _extract,
     _fetch_archive,
 )
@@ -32,6 +33,21 @@ FOOD101_FILES = {
     "images/apple_pie/1.jpg": "x",
     "images/beef_tartare/2.jpg": "x",
     "images/beef_tartare/3.jpg": "x",
+}
+
+
+# Mirrors dataset256.zip: UECFOOD256/{README.txt,category.txt,<id>/{bb_info.txt,*.jpg}}.
+# IDs 2 and 3 share a canonical name, as 40 and 67 ("omelet") do upstream; 99.jpg is
+# listed under classes 1 and 3.
+UECFOOD256_FILES = {
+    "README.txt": "readme",
+    "category.txt": "id\tname\n1\trice\n2\tomelet\n3\tOmelet\n",
+    **{f"1/{n}.jpg": "x" for n in range(10, 20)},
+    "1/99.jpg": "x",
+    "1/bb_info.txt": "img x1 y1 x2 y2\n10 0 0 1 1\n",
+    "2/20.jpg": "x",
+    "3/30.jpg": "x",
+    "3/99.jpg": "x",
 }
 
 
@@ -103,6 +119,45 @@ def test_food101_download_flattens_and_is_idempotent(tmp_path):
     assert len(dataset.train_set()) == 2 and dataset.validation_set()["class"] == ["Beef tartare"]
 
     Food101ImageDataset.download(tmp_path, client=client)
+    assert len(requests) == 1
+
+
+def test_uecfood256_seeded_split_drops_multi_listed_images(tmp_path):
+    for name, text in UECFOOD256_FILES.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    dataset = UECFood256ImageDataset(tmp_path)
+    assert dataset.get_class_list() == ["Rice", "Omelet"]
+    train, validation = dataset.train_set(), dataset.validation_set()
+    rice = lambda split: {i for i, c in zip(split["source_id"], split["class"], strict=True) if c == "Rice"}
+    assert len(rice(validation)) == 2 and len(rice(train)) == 8
+    assert {i.split(":")[2] for i in rice(train) | rice(validation)} == {f"1/{n}.jpg" for n in range(10, 20)}
+    assert train["source_id"][-2:] == ["uecfood256:train:2/20.jpg", "uecfood256:train:3/30.jpg"]
+    assert set(validation["source_split"]) == {"validation"}
+    assert train["fname"][-1] == str(tmp_path.resolve() / "3/30.jpg")
+    assert UECFood256ImageDataset(tmp_path).validation_set()["source_id"] == validation["source_id"]
+
+    (tmp_path / "category.txt").write_text("id\tname\n1\trice\n1\tbread\n")
+    with pytest.raises(ValueError, match="unique class IDs"):
+        UECFood256ImageDataset(tmp_path)
+
+
+def test_uecfood256_download_flattens_and_is_idempotent(tmp_path):
+    requests: list[str] = []
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        for name, text in UECFOOD256_FILES.items():
+            bundle.writestr(f"UECFOOD256/{name}", text)
+    client = _client({"datasets/kng-research/uecfood256/resolve/main/dataset256.zip": buffer.getvalue()}, requests)
+    UECFood256ImageDataset.download(tmp_path, client=client)
+    assert requests == ["https://huggingface.co/datasets/kng-research/uecfood256/resolve/main/dataset256.zip"]
+    assert not list((tmp_path / ".downloads").iterdir())
+    assert not (tmp_path / "UECFOOD256").exists()
+
+    dataset = UECFood256ImageDataset(tmp_path)
+    assert len(dataset.train_set()) + len(dataset.validation_set()) == 12
+
+    UECFood256ImageDataset.download(tmp_path, client=client)
     assert len(requests) == 1
 
 

@@ -1,12 +1,14 @@
 """Local food image datasets as typed Hugging Face image datasets."""
 
 import contextlib
+import random
 import shutil
 import tarfile
 import zipfile
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterator
+from functools import cached_property
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlparse
@@ -81,6 +83,27 @@ def _extract(archive: Path, destination: Path) -> None:
     else:
         with tarfile.open(archive) as bundle:
             bundle.extractall(destination, filter="data")
+
+
+def _install_archive(archive: Path, root: Path, inner: str, last: str) -> None:
+    """Extract ``archive`` to a staging directory and move its ``inner`` entries into ``root``.
+
+    The ``last`` entry moves after all others, so its presence marks a complete install.
+    Existing entries of the same name are replaced; the staging directory and archive
+    are deleted afterwards.
+    """
+    staging = archive.with_name(archive.name + ".staging")
+    shutil.rmtree(staging, ignore_errors=True)
+    _extract(archive, staging)
+    for entry in sorted((staging / inner).iterdir(), key=lambda p: p.name == last):
+        target = root / entry.name
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        entry.replace(target)
+    shutil.rmtree(staging)
+    archive.unlink()
 
 
 class FoodImageDataset(ABC):
@@ -256,23 +279,69 @@ class Food101ImageDataset(FoodImageDataset):
         if (root / "meta/classes.txt").exists():
             return
         archive = _fetch_archive("https://data.vision.ee.ethz.ch/cvl/food-101.tar.gz", root, client)
-        staging = root / ".downloads/food101"
-        shutil.rmtree(staging, ignore_errors=True)
-        _extract(archive, staging)
-        inner = staging / "food-101"
-        for entry in sorted(inner.iterdir(), key=lambda p: p.name == "meta"):
-            target = root / entry.name
-            if target.is_dir():
-                shutil.rmtree(target)
-            elif target.exists():
-                target.unlink()
-            entry.replace(target)
-        shutil.rmtree(staging)
-        archive.unlink()
+        _install_archive(archive, root, "food-101", "meta")
+
+
+class UECFood256ImageDataset(FoodImageDataset):
+    """UEC-Food256 with a seeded per-class train/validation split; no official split exists.
+
+    Each ``<class id>/`` directory under ``root`` holds that class's ``.jpg`` files.
+    Files are sorted, shuffled with a per-class seed, and the first ``VALIDATION_RATIO``
+    (rounded) are held out. Images listed under several class directories show several
+    foods and are dropped from both splits. Class IDs sharing a canonical name
+    (``40`` and ``67`` are both ``omelet``) map to one label.
+    """
+
+    name = "uecfood256"
+    SEED: ClassVar[int] = 0
+    VALIDATION_RATIO: ClassVar[float] = 0.2
+
+    def _read_classes(self) -> list[str]:
+        table = pd.read_csv(
+            self.root / "category.txt",
+            sep="\t",
+            dtype={"id": "int64", "name": str},
+            keep_default_na=False,
+        )
+        if table.empty or table["id"].duplicated().any():
+            raise ValueError("category.txt must list unique class IDs")
+        self.class_map = dict(zip(table["id"], table["name"].map(_canonical), strict=True))
+        return list(dict.fromkeys(self.class_map.values()))
+
+    @cached_property
+    def _partition(self) -> dict[str, pd.DataFrame]:
+        listed = {
+            i: sorted(p.name for p in (self.root / str(i)).glob("*.jpg")) for i in self.class_map
+        }
+        counts = Counter(name for names in listed.values() for name in names)
+        rows: dict[str, list[tuple[str, str]]] = {"train": [], "validation": []}
+        for class_id, names in listed.items():
+            names = [n for n in names if counts[n] == 1]
+            random.Random(f"{self.SEED}:{class_id}").shuffle(names)
+            held_out = round(len(names) * self.VALIDATION_RATIO)
+            label = self.class_map[class_id]
+            rows["validation"] += [(f"{class_id}/{n}", label) for n in names[:held_out]]
+            rows["train"] += [(f"{class_id}/{n}", label) for n in names[held_out:]]
+        return {s: pd.DataFrame(r, columns=["fname", "class"]) for s, r in rows.items()}
+
+    def _read_split(self, split: str) -> tuple[str, Path, pd.DataFrame]:
+        return split, self.root, self._partition[split]
+
+    @classmethod
+    def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
+        """Fetch ``dataset256.zip`` from Hugging Face and move its ``UECFOOD256/`` contents into ``root``.
+
+        ``category.txt`` moves last and marks a complete download.
+        """
+        root = Path(root).expanduser().resolve()
+        if (root / "category.txt").exists():
+            return
+        url = "https://huggingface.co/datasets/kng-research/uecfood256/resolve/main/dataset256.zip"
+        _install_archive(_fetch_archive(url, root, client), root, "UECFOOD256", "category.txt")
 
 
 DATASETS: dict[str, type[FoodImageDataset]] = {
-    c.name: c for c in (FoodX251ImageDataset, Food101ImageDataset)
+    c.name: c for c in (FoodX251ImageDataset, Food101ImageDataset, UECFood256ImageDataset)
 }
 
 
