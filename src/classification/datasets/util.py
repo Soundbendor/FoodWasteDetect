@@ -5,6 +5,7 @@ import shutil
 import tarfile
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -98,18 +99,27 @@ def extract(archive: Path, destination: Path) -> None:
 
 
 def install_archive(
-    archive: Path, root: Path, inner: str, last: str, nested: str | None = None
+    archive: Path,
+    root: Path,
+    inner: str,
+    last: str,
+    nested: str | None = None,
+    *,
+    prepare: Callable[[Path], None] | None = None,
 ) -> None:
     """Extract ``archive`` to a staging directory and move its ``inner`` entries into ``root``.
 
     A ``nested`` archive inside ``inner`` is unpacked in place and deleted before moving.
     The ``last`` entry moves after all others, so its presence marks a complete install.
     Existing entries of the same name are replaced; the staging directory and archive
-    are deleted afterwards.
+    are deleted afterwards. ``prepare`` validates or normalizes the staged inner
+    directory before any installed entries (including the completion marker) move.
     """
     staging = archive.with_name(archive.name + ".staging")
     shutil.rmtree(staging, ignore_errors=True)
     extract(archive, staging)
+    if prepare is not None:
+        prepare(staging / inner)
     if nested is not None:
         extract(staging / inner / nested, staging / inner)
         (staging / inner / nested).unlink()

@@ -11,6 +11,45 @@ from classification.datasets.util import fetch_archive, install_archive
 LIST_DIR = "vegfru_list"
 
 
+def _prepare_images(root: Path) -> None:
+    """Normalize the outer archive's complete image tree to official list paths."""
+    destinations: dict[str, str] = {}
+    for split in ("train", "val", "test"):
+        for line in (root / LIST_DIR / f"vegfru_{split}.txt").read_text().splitlines():
+            if not line.strip():
+                continue
+            relative, _ = line.rsplit(maxsplit=1)
+            parts = Path(relative).parts
+            if (
+                len(parts) != 3
+                or parts[0] not in {"veg200_images", "fru92_images"}
+                or any(p in {".", ".."} for p in parts)
+            ):
+                raise ValueError(f"Invalid VegFru image path: {relative}")
+            prefix, label, filename = parts
+            previous = destinations.setdefault(label, prefix)
+            if previous != prefix:
+                raise ValueError(f"VegFru class occurs in both image groups: {label}")
+            source = root / "images" / label / filename
+            if not source.is_file():
+                raise FileNotFoundError(f"Missing VegFru image: {source}")
+    if not destinations:
+        raise ValueError("VegFru split lists contain no images")
+    # Validate the entire mapping before moving anything. Preserve official paths
+    # so the loader's path-derived source identities remain unchanged.
+    for label, prefix in destinations.items():
+        target = root / prefix / label
+        if target.exists():
+            raise ValueError(f"Conflicting VegFru class directory: {target}")
+    for label, prefix in destinations.items():
+        target = root / prefix / label
+        target.parent.mkdir(exist_ok=True)
+        (root / "images" / label).replace(target)
+    (root / "images").rmdir()
+    # This redundant ZIP has a reproducible CRC error in the published archive.
+    (root / "archive.zip").unlink(missing_ok=True)
+
+
 class VegFruImageDataset(FoodImageDataset):
     """VegFru (200 vegetable + 92 fruit classes): official train references, test evaluation.
 
@@ -49,8 +88,8 @@ class VegFruImageDataset(FoodImageDataset):
     def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
         """Fetch ``vegfru.tar.gz`` from Hugging Face and move its ``vegfru/`` contents into ``root``.
 
-        The nested ``archive.zip`` is unpacked before moving; ``classid_classname.csv``
-        moves last and marks a complete download.
+        Normalize ``images/`` to the official split paths without opening the
+        redundant, corrupt nested ZIP. The class CSV moves last as completion marker.
         """
         root = Path(root).expanduser().resolve()
         if (root / "classid_classname.csv").exists():
@@ -61,5 +100,5 @@ class VegFruImageDataset(FoodImageDataset):
             root,
             "vegfru",
             "classid_classname.csv",
-            nested="archive.zip",
+            prepare=_prepare_images,
         )

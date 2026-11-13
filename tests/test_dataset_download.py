@@ -52,9 +52,7 @@ UECFOOD256_FILES = {
 }
 
 
-# Mirrors vegfru.tar.gz: vegfru/{classid_classname.csv,veg200_images/,archive.zip}, where
-# archive.zip holds fru92_images/ (verified from the archive head). The list directory
-# and its "<path> <label id>" lines follow the published layout and are unverified.
+# The outer archive contains the complete images/ tree and official split lists.
 VEGFRU_CSV = "class_id,class_name\n0,Chinese_artichoke\n1,shepherd's_purse\n2,apple\n"
 VEGFRU_LISTS = {
     "vegfru_list/vegfru_train.txt": (
@@ -217,30 +215,51 @@ def test_vegfru_loads_official_train_and_test_lists(tmp_path):
         VegFruImageDataset(tmp_path)
 
 
-def test_vegfru_download_unpacks_nested_zip_and_is_idempotent(tmp_path):
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as bundle:
-        for name, text in {**VEGFRU_FRU, **VEGFRU_LISTS}.items():
-            bundle.writestr(name, text)
-    members = {f"vegfru/{n}": t for n, t in {"classid_classname.csv": VEGFRU_CSV, **VEGFRU_VEG}.items()}
-    tar_buffer = io.BytesIO()
-    with tarfile.open(fileobj=tar_buffer, mode="w:gz") as bundle:
-        for name, data in [*((n, t.encode()) for n, t in members.items()), ("vegfru/archive.zip", buffer.getvalue())]:
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            bundle.addfile(info, io.BytesIO(data))
+def _vegfru_outer_files():
+    files = {"classid_classname.csv": VEGFRU_CSV, **VEGFRU_LISTS}
+    files["vegfru_list/vegfru_val.txt"] = "fru92_images/apple/f_val.jpg 2\n"
+    files["images/apple/f_val.jpg"] = "validation only"
+    for name, contents in {**VEGFRU_VEG, **VEGFRU_FRU}.items():
+        files["images/" + name.split("/", 1)[1]] = contents
+    files["archive.zip"] = "deliberately invalid ZIP: must never be opened"
+    return {f"vegfru/{name}": contents for name, contents in files.items()}
+
+
+def test_vegfru_download_normalizes_outer_images_and_is_idempotent(tmp_path):
     requests: list[str] = []
-    client = _client({"datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz": tar_buffer.getvalue()}, requests)
-    VegFruImageDataset.download(tmp_path, client=client)
-    assert requests == ["https://huggingface.co/datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz"]
-    assert not list((tmp_path / ".downloads").iterdir())
-    assert not (tmp_path / "vegfru").exists() and not (tmp_path / "archive.zip").exists()
-
-    dataset = VegFruImageDataset(tmp_path)
-    assert len(dataset.train_set()) == 3 and dataset.validation_set()["class"] == ["Apple"]
-
+    client = _client({"datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz": _tar(_vegfru_outer_files(), "w:gz")}, requests)
+    # A retry clears partial extraction left by the old nested-ZIP implementation.
+    stale = tmp_path / ".downloads/vegfru.tar.gz.staging/vegfru/fru92_images/apple/stale.jpg"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("partial")
     VegFruImageDataset.download(tmp_path, client=client)
     assert len(requests) == 1
+    assert not list((tmp_path / ".downloads").iterdir())
+    assert not (tmp_path / "images").exists()
+    assert not (tmp_path / "archive.zip").exists()
+    assert (tmp_path / "fru92_images/apple/f_val.jpg").is_file()
+    dataset = VegFruImageDataset(tmp_path)
+    assert len(dataset.train_set()) == 3
+    assert dataset.validation_set()["source_id"] == ["vegfru:test:fru92_images/apple/f_01_01_0002.jpg"]
+    VegFruImageDataset.download(tmp_path, client=client)
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("fault", ["missing", "traversal", "collision"])
+def test_vegfru_invalid_outer_images_never_mark_complete(tmp_path, fault):
+    files = _vegfru_outer_files()
+    if fault == "missing":
+        del files["vegfru/images/apple/f_val.jpg"]
+    elif fault == "traversal":
+        files["vegfru/vegfru_list/vegfru_val.txt"] = "fru92_images/../outside.jpg 2\n"
+    else:
+        files["vegfru/vegfru_list/vegfru_val.txt"] = "veg200_images/apple/f_val.jpg 2\n"
+    requests = []
+    client = _client({"datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz": _tar(files, "w:gz")}, requests)
+    with pytest.raises((FileNotFoundError, ValueError)):
+        VegFruImageDataset.download(tmp_path, client=client)
+    assert not (tmp_path / "classid_classname.csv").exists()
+    assert (tmp_path / ".downloads/vegfru.tar.gz").exists()
 
 
 def test_isia500_loads_tab_separated_labels_and_finetune_lists(tmp_path):
