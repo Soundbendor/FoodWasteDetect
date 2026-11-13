@@ -9,7 +9,7 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from classification.datasets.image_dataset import FoodX251ImageDataset, load_dataset
+from classification.datasets.base import FoodImageDataset
 from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
@@ -28,6 +28,7 @@ from classification.retrieval.lancedb import LanceDBIndex
 from classification.retrieval.metrics import metrics
 from classification.schemas import EmbeddingBatch
 from classification.tracking import Tracker
+from classification.util import load_dataset
 
 
 class Experiment:
@@ -45,7 +46,7 @@ class Experiment:
         config: ExperimentConfig,
         *,
         tracker: Tracker | None = None,
-        dataset: FoodX251ImageDataset | None = None,
+        dataset: FoodImageDataset | None = None,
     ) -> None:
         self.tracker = tracker
         # Load dataset metadata and settings

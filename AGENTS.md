@@ -85,4 +85,6 @@ state.
 | Operations: change smoke helpers or Slurm/service scripts                          | [Script operations](docs/classification/scripts.md)                          |
 | Verification: inspect environment checks, hardware notes, or acceptance procedures | [Experiment verification notes](docs/experiments.md)                         |
 | Proposed comparison: consider direct Ollama image classification                   | [Ollama classification plan](docs/plans/ollama_image_classification.md)      |
+| Proposed datasets: add Food-101, UEC-Food256, VegFru, ISIA Food-500, or Food2K     | [Dataset plan](docs/plans/add_classification_datasets.md)                    |
+| Future tasks: consider caption prediction or other unscheduled experiments         | [To investigate](docs/TO_INVESTIGATE.md)                                     |
 | Legacy text: interpret retired caption/retrieval code or artifacts                 | [Retired InternVL workflow](docs/history/internvl-text.md)                   |

@@ -24,7 +24,7 @@ class DatasetTests(unittest.TestCase):
     def test_native_dataset_contract(self):
         from datasets import DatasetDict, Image as HFImage
         from PIL import Image
-        from classification.datasets.image_dataset import FoodX251ImageDataset
+        from classification.datasets.foodx251 import FoodX251ImageDataset
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -51,6 +51,8 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(ds.train_set().features['image'], HFImage(decode=False))
             batch = next(ds.iter_dataset_batches(ds.validation_set(), 2))
             self.assertEqual(batch['source_split'], ['val'])
+            self.assertEqual(batch['source_id'], ['foodx251:val:pie.png'])
+            self.assertEqual(list(ds.train_set()['source_id']), ['foodx251:train:pear,one.png', 'foodx251:train:pie.png'])
             self.assertEqual(batch['image'][0].getpixel((0, 0)), (0, 0, 255))
             batch['image'][0].close()
             (root / 'annot/val_info.csv').write_text('')
@@ -62,9 +64,25 @@ class DatasetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Duplicate source'):
                 FoodX251ImageDataset(root)
 
+    def test_registry_matches_config_names(self):
+        from typing import get_args
+        from classification.util import DATASETS
+        from classification.experiments.config import DatasetName
+        self.assertEqual(set(get_args(DatasetName)), set(DATASETS))
+        self.assertTrue(all(cls.name == name for name, cls in DATASETS.items()))
+
+    def test_base_download_raises(self):
+        from classification.datasets.base import FoodImageDataset
+        class Stub(FoodImageDataset):
+            name = 'stub'
+            def _read_classes(self): return []
+            def _read_split(self, split): raise NotImplementedError
+        with self.assertRaisesRegex(NotImplementedError, 'stub has no public download host'):
+            Stub.download('/unused')
+
     def test_dataset_and_leakage(self):
         from PIL import Image
-        from classification.datasets.image_dataset import FoodX251ImageDataset
+        from classification.datasets.foodx251 import FoodX251ImageDataset
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'annot').mkdir()
@@ -468,7 +486,7 @@ class ExperimentTests(unittest.TestCase):
     def setUp(self):
         import numpy as np
         from datasets import Dataset, DatasetDict, Image as HFImage
-        from classification.datasets.image_dataset import FoodX251ImageDataset
+        from classification.datasets.foodx251 import FoodX251ImageDataset
         from PIL import Image
         import lancedb
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
@@ -481,7 +499,7 @@ class ExperimentTests(unittest.TestCase):
             rows.append(dict(fname=str(path), source_id=str(i), source_split='train', **{'class': label}))
         self.rows = rows
         self.dataset = FoodX251ImageDataset.__new__(FoodX251ImageDataset)
-        self.dataset.class_map = {0: 'Apple', 1: 'Pear'}
+        self.dataset.classes = ['Apple', 'Pear']
         split = Dataset.from_list([dict(row, image=row['fname']) for row in rows]).cast_column('image', HFImage(decode=False))
         self.dataset.splits = DatasetDict(train=split, validation=split)
         class Embedder:

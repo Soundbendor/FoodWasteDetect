@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from classification.experiments.classification import Experiment
-from classification.experiments.config import ExperimentConfig, OllamaConfig
+from classification.experiments.config import DatasetConfig, ExperimentConfig, OllamaConfig
 from classification.experiments.matroyshka import run_sweep
 from classification.tracking import Tracker, tracked_run
 
@@ -34,6 +34,16 @@ def download_model(model_name: str) -> None:
     settings = OllamaConfig.model_validate(cfg["ollama"])
     with OllamaSession(settings) as session:
         session.download_model(model_name)
+
+
+def download_dataset(config_file: str) -> None:
+    """Download the dataset named by the config's ``dataset`` section into its root."""
+    from classification.util import DATASETS
+
+    with open(config_file, encoding="utf-8") as stream:
+        cfg = yaml.safe_load(stream)
+    settings = DatasetConfig.model_validate(cfg["dataset"])
+    DATASETS[settings.name].download(settings.root)
 
 
 def _parse_override(assignment: str) -> dict[str, Any]:
@@ -100,6 +110,12 @@ def _build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     download.add_argument("model_name", help="Ollama model name to download")
+    dataset = commands.add_parser(
+        "download_dataset",
+        help="Download and unpack the configured dataset into dataset.root.",
+        allow_abbrev=False,
+    )
+    dataset.add_argument("--config_file", required=True, help="Path to experiment config YAML")
     return parser
 
 
@@ -116,7 +132,7 @@ def _run_experiment(config: ExperimentConfig, stage: str) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Parse Ollama download or whole-image experiment commands and dispatch them."""
+    """Parse download or whole-image experiment commands and dispatch them."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "experiment":
@@ -127,3 +143,5 @@ def main(argv: Sequence[str] | None = None) -> None:
         _run_experiment(config, args.stage)
     elif args.command == "download_model":
         download_model(args.model_name)
+    elif args.command == "download_dataset":
+        download_dataset(args.config_file)
