@@ -16,7 +16,7 @@ class ConfigModel(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", validate_default=True)
 
 
-# Registered dataset names; must equal the keys of datasets.registry.DATASETS.
+# Registered dataset names; must equal the keys of classification.util.DATASETS.
 DatasetName = Literal["foodx251", "food101", "uecfood256", "vegfru", "isia500"]
 
 

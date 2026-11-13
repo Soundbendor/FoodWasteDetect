@@ -9,10 +9,11 @@ persistence is specified in [experiments](experiments.md), and vector storage in
 
 [`datasets/base.py`](../../src/classification/datasets/base.py)
 defines the abstract `FoodImageDataset`. Each dataset has its own loader module
-under `datasets/`, and `datasets/registry.py` registers them. A subclass sets
-`name` and supplies `_read_classes()` (unique canonical labels in taxonomy order) and `_read_split()`
-for `train` and `validation`, returning its own source split name, an image
-directory, and an ordered `fname`/`class` table. The base class exposes a typed
+under `datasets/`, and the package-level
+[`util.py`](../../src/classification/util.py) registers them. A subclass sets
+`name` and supplies `_read_classes()` (unique canonical labels in taxonomy
+order) and `_read_split()` for `train` and `validation`, returning its own
+source split name, an image directory, and an ordered `fname`/`class` table. The base class exposes a typed
 Hugging Face `DatasetDict` with `fname`, `class`, `source_id`, `source_split`, and
 an undecoded `image` column. `train_set()` returns training references;
 `validation_set()` returns the labeled evaluation split, whatever the dataset calls

@@ -66,7 +66,7 @@ class DatasetTests(unittest.TestCase):
 
     def test_registry_matches_config_names(self):
         from typing import get_args
-        from classification.datasets.registry import DATASETS
+        from classification.util import DATASETS
         from classification.experiments.config import DatasetName
         self.assertEqual(set(get_args(DatasetName)), set(DATASETS))
         self.assertTrue(all(cls.name == name for name, cls in DATASETS.items()))

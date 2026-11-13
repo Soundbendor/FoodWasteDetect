@@ -1,4 +1,4 @@
-"""Registered dataset loaders by configuration name."""
+"""Shared package utilities: the dataset registry by configuration name."""
 
 from classification.datasets.base import FoodImageDataset
 from classification.datasets.food101 import Food101ImageDataset

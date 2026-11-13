@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from classification.datasets.base import FoodImageDataset
-from classification.datasets.registry import load_dataset
 from classification.experiments.artifacts import write_json
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.report_types import EvaluationReport
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.tracking import Tracker, tracked_run
+from classification.util import load_dataset
 
 
 def table_names(config: ExperimentConfig, dimension: int, source_width: int) -> tuple[str, str]:

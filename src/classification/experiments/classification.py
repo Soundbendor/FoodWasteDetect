@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from classification.datasets.base import FoodImageDataset
-from classification.datasets.registry import load_dataset
 from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
@@ -29,6 +28,7 @@ from classification.retrieval.lancedb import LanceDBIndex
 from classification.retrieval.metrics import metrics
 from classification.schemas import EmbeddingBatch
 from classification.tracking import Tracker
+from classification.util import load_dataset
 
 
 class Experiment:

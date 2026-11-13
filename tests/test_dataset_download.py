@@ -373,7 +373,7 @@ def test_cli_downloads_configured_dataset(tmp_path):
     config = tmp_path / "config.yml"
     config.write_text(yaml.safe_dump({"dataset": {"name": "foodx251", "root": "data/x"}, "unrelated": None}))
     with (
-        patch.dict("classification.datasets.registry.DATASETS", {"foodx251": Fake}),
+        patch.dict("classification.util.DATASETS", {"foodx251": Fake}),
         patch("classification.tracking.wandb.init") as initialize,
     ):
         main(["download_dataset", "--config_file", str(config)])
