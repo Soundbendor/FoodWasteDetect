@@ -20,6 +20,8 @@ PARTS = (
 META_DIR = "metadata_ISIAFood_500"
 IMAGE_DIR = "images"
 CLASS_FILE = "ISIAFood500_classLabel.txt"
+# The server is slow (~700 KB/s total), so each part survives dropped connections.
+RETRIES = 5
 
 
 class ISIAFood500ImageDataset(FoodImageDataset):
@@ -62,7 +64,8 @@ class ISIAFood500ImageDataset(FoodImageDataset):
     def download(cls, root: str | Path, client: httpx.Client | None = None) -> None:
         """Fetch the metadata zip and eleven split-zip parts, then unpack them under ``root``.
 
-        Each part must match its ``Content-Length``. ``7z x`` unpacks the images into
+        Each part must match its ``Content-Length``. A dropped connection resumes the part
+        up to ``RETRIES`` times; later calls also resume leftover ``.part`` files. ``7z x`` unpacks the images into
         ``root``; the metadata moves into ``META_DIR`` last, so the class-label file marks
         a complete download. Archives are deleted afterwards.
         """
@@ -75,7 +78,7 @@ class ISIAFood500ImageDataset(FoodImageDataset):
                 "7z is not on PATH; run within the Pixi environment, which provides p7zip"
             )
         archives = [
-            fetch_archive(url, root, client, require_length=True)
+            fetch_archive(url, root, client, require_length=True, retries=RETRIES)
             for url in (METADATA_URL, *(BASE_URL + part for part in PARTS))
         ]
         metadata, *parts = archives

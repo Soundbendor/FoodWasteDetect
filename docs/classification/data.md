@@ -101,9 +101,12 @@ the first authorized download. `cfg/classification_isia500.yml` has its own
 `download(root, client=None)` fetches and unpacks a dataset; the base class
 raises `NotImplementedError`. Helpers in `datasets/util.py` serve every subclass:
 `fetch_archive(url, root, client)` streams to `root/.downloads/<name>.part` and
-renames on completion, reusing a completed archive without a request, and
-discards an unencoded body whose size differs from `Content-Length`
-(`require_length=True` also rejects a missing header);
+renames on completion, reusing a completed archive without a request. A
+leftover `.part` file is resumed with `Range`: 206 appends, 200 restarts, and 416
+discards the file and restarts. An unencoded body whose size differs from
+`Content-Length` is discarded (`require_length=True` also rejects a missing
+header). `retries=N` repeats the request after an `httpx.TransportError`,
+resuming the `.part` file after `RETRY_DELAY` (10 s);
 `extract(archive, destination)` unpacks `.zip` files or tars with the `data`
 filter, which rejects members escaping `destination`. `client` is an optional
 `httpx.Client` for tests; the default follows redirects with a 60 s timeout.
@@ -142,7 +145,9 @@ otherwise. From `BASE_URL`
 (`http://123.57.42.89/Dataset_ict/ISIA_Food500_Dir/dataset/`, plain HTTP, no
 checksums) it fetches `METADATA_URL` (`metadata_ISIAFood_500.zip`, assumed to sit
 next to the parts) and the split zip `ISIA_Food500.z01`-`.z10` plus
-`ISIA_Food500.zip`, each with `require_length=True`. It runs
+`ISIA_Food500.zip`, each with `require_length=True` and `retries=RETRIES` (5);
+the server sustains only about 700 KB/s in total, so a full download takes
+roughly 18 hours. It runs
 `7z x -y -o<root> ISIA_Food500.zip`, then moves the directory holding the class
 file out of the extracted metadata zip into `META_DIR`, class file last, and
 deletes all archives. A failed `7z` run keeps the parts for a retry. Expect about

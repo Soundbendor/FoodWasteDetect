@@ -347,6 +347,83 @@ def test_completed_archive_is_reused(tmp_path):
     assert first.read_bytes() == b"data" and len(requests) == 1
 
 
+def _range_client(body: bytes, ranges: list[str | None], drop_after: int | None = None):
+    """Serve ``body`` with Range support; the first response stops after ``drop_after`` bytes."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        header = request.headers.get("Range")
+        ranges.append(header)
+        start = int(header.removeprefix("bytes=").rstrip("-")) if header else 0
+        if start >= len(body):
+            return httpx.Response(416)
+        rest = body[start:]
+        headers = {"Content-Length": str(len(rest))}
+        if header:
+            headers["Content-Range"] = f"bytes {start}-{len(body) - 1}/{len(body)}"
+        if drop_after is not None and len(ranges) == 1:
+
+            def dropped():
+                yield rest[:drop_after]
+                raise httpx.RemoteProtocolError("connection lost")
+
+            return httpx.Response(206 if header else 200, headers=headers, stream=_Stream(dropped))
+        return httpx.Response(206 if header else 200, headers=headers, content=rest)
+
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+class _Stream(httpx.SyncByteStream):
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    def __iter__(self):
+        yield from self.chunks()
+
+
+def test_fetch_resumes_existing_part(tmp_path):
+    (tmp_path / ".downloads").mkdir()
+    (tmp_path / ".downloads/a.zip.part").write_bytes(b"0123")
+    ranges: list[str | None] = []
+    archive = fetch_archive("https://host/a.zip", tmp_path, _range_client(b"0123456789", ranges))
+    assert archive.read_bytes() == b"0123456789" and ranges == ["bytes=4-"]
+
+
+def test_fetch_restarts_part_on_416(tmp_path):
+    (tmp_path / ".downloads").mkdir()
+    (tmp_path / ".downloads/a.zip.part").write_bytes(b"stale-and-too-long")
+    ranges: list[str | None] = []
+    archive = fetch_archive("https://host/a.zip", tmp_path, _range_client(b"0123", ranges))
+    assert archive.read_bytes() == b"0123" and ranges == ["bytes=18-", None]
+
+
+def test_fetch_retries_dropped_connection_by_resuming(tmp_path):
+    ranges: list[str | None] = []
+    client = _range_client(b"0123456789", ranges, drop_after=3)
+    with patch("classification.datasets.util.time.sleep") as sleep:
+        archive = fetch_archive("https://host/a.zip", tmp_path, client, retries=1)
+    assert archive.read_bytes() == b"0123456789" and ranges == [None, "bytes=3-"]
+    sleep.assert_called_once()
+
+
+def test_fetch_without_retries_keeps_part_for_next_call(tmp_path):
+    ranges: list[str | None] = []
+    client = _range_client(b"0123456789", ranges, drop_after=3)
+    with pytest.raises(httpx.RemoteProtocolError):
+        fetch_archive("https://host/a.zip", tmp_path, client)
+    assert (tmp_path / ".downloads/a.zip.part").read_bytes() == b"012"
+    assert fetch_archive("https://host/a.zip", tmp_path, client).read_bytes() == b"0123456789"
+
+
+def test_isia500_download_passes_retries(tmp_path):
+    with (
+        patch("classification.datasets.isia500.shutil.which", return_value="/bin/7z"),
+        patch("classification.datasets.isia500.subprocess.run", side_effect=_fake_7z),
+        patch("classification.datasets.isia500.fetch_archive", wraps=fetch_archive) as fetch,
+    ):
+        ISIAFood500ImageDataset.download(tmp_path, client=_isia_client([]))
+    assert {call.kwargs["retries"] for call in fetch.call_args_list} == {isia500.RETRIES}
+
+
 def test_extract_zip_and_reject_tar_escape(tmp_path):
     archive = tmp_path / "a.zip"
     with zipfile.ZipFile(archive, "w") as bundle:
