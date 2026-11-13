@@ -2,6 +2,7 @@ deps/
 assets/
 /db/
 *__pycache__*
+logs/
 
 .venv*/
 build/
