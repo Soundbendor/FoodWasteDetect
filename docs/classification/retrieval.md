@@ -32,7 +32,13 @@ configuration. `IndexBuilder` sets `vector_dimension` and passes the
 float32, and adds one Arrow table with the stored schema; an empty batch writes
 nothing. The backend rejects NaN vectors (`on_bad_vectors="error"`); infinite
 values are not rejected here, so encoders own finiteness checks. It adds completed batches without application write
-retries. Compatibility checks and transaction/rollback guarantees are outside the
+retries. Each append is one Lance commit (data file, manifest, transaction file).
+
+`append_batches(batches, rows)` re-chunks an iterable of `(records, vectors)` pairs
+into appends of exactly `rows` rows, then appends any remainder once the iterable is
+exhausted. Builders pass `lancedb.write_batch_rows` (default 256) to keep
+fragment and version counts low. If the iterable raises, rows buffered since the
+last chunk are dropped and must be re-embedded on resume. Compatibility checks and transaction/rollback guarantees are outside the
 current scope; follow [experiment persistence](experiments.md#reference-builds-and-resumption).
 
 | Operation | Contract |
@@ -50,10 +56,17 @@ matching both kind and identity, without a row limit. Empty input returns shape
 duplicate-row or compatibility validation; identity resumption is not content
 verification.
 
-`optimize()` delegates to LanceDB defaults. Reference build finalization owns its
-invocation; ordinary evaluation never calls it. LanceDB 0.40.0 compacts files and
-retains seven days of historical versions with `delete_unverified=False`; the
-application supplies no custom policy.
+`optimize()` compacts fragments, then calls LanceDB cleanup with
+`cleanup_older_than=0` and `delete_unverified=True`. Only the latest version
+survives, and files left by failed commits are deleted. Older versions cannot be
+checked out afterwards, and readers holding an older version fail. Reference build
+finalization and validation-cache preparation invoke it; evaluation never does.
+Tagged old versions make cleanup raise, so do not tag these tables.
+
+Prefix tables are shallow clones that share their source's data files. Appending to
+and re-optimizing a source table after a sweep can delete files its prefix tables
+still reference; delete and rebuild those prefix tables in that case. They need no
+embedding calls.
 
 Use one completed writer/build before concurrent readers, with a filesystem
 visible to every node. Concurrent writes to the same table are unsupported.

@@ -273,9 +273,50 @@ def test_optimize_preserves_rows_and_reduces_fragments(tmp_path):
     neighbors = query(index, np.asarray([1.0, 1.0]), 5)
     index.optimize()
     assert index.table.stats()['fragment_stats']['num_fragments'] < fragments
+    assert len(index.table.list_versions()) == 1
     assert sorted(index.table.to_arrow().to_pylist(), key=lambda r: r['id']) == sorted(
         before, key=lambda r: r['id'])
     assert query(index, np.asarray([1.0, 1.0]), 5) == neighbors
+
+
+def _numbered(n):
+    records = [PointRecord('A', 'class_name', str(i), str(i)) for i in range(n)]
+    return records, np.arange(2 * n, dtype=np.float32).reshape(n, 2)
+
+
+def test_append_batches_writes_exact_chunks_in_order(tmp_path):
+    index = LanceDBIndex.create(tmp_path / 'db', 'buffered', 2, metadata={'custom.key': 'kept'})
+    records, vectors = _numbered(11)
+    versions = len(index.table.list_versions())
+    sizes = []
+    append = index.append
+    index.append = lambda r, v: (sizes.append(len(r)), append(r, v))
+    index.append_batches(
+        ((records[i:i + 3], vectors[i:i + 3]) for i in range(0, 11, 3)), rows=4
+    )
+    assert sizes == [4, 4, 3]
+    assert len(index.table.list_versions()) == versions + 3
+    identities = [r.source_identity for r in records]
+    assert [i for _, i in index.get_record_ids()] == identities
+    np.testing.assert_array_equal(index.fetch_vectors([('class_name', i) for i in identities]), vectors)
+    index.optimize()
+    assert len(index.table.list_versions()) == 1
+    assert index.table.schema.metadata[b'custom.key'] == b'kept'
+    assert len(index.get_record_ids()) == 11
+
+
+def test_append_batches_failure_keeps_only_written_chunks(tmp_path):
+    index = LanceDBIndex.create(tmp_path / 'db', 'failing', 2)
+    records, vectors = _numbered(7)
+
+    def batches():
+        yield records[:3], vectors[:3]
+        yield records[3:6], vectors[3:6]
+        raise RuntimeError('encoder failed')
+
+    with pytest.raises(RuntimeError, match='encoder failed'):
+        index.append_batches(batches(), rows=4)
+    assert [i for _, i in index.get_record_ids()] == ['0', '1', '2', '3']
 
 
 def test_dimension_and_prefix_table_derivation(tmp_path):

@@ -2,11 +2,13 @@
 
 import logging
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
 from itertools import batched
 from pathlib import Path
 
+import numpy as np
 from datasets import Dataset
+from numpy.typing import NDArray
 from tqdm import tqdm
 
 from classification.datasets.image_dataset import FoodX251ImageDataset
@@ -20,8 +22,9 @@ from classification.schemas import PointRecord
 class IndexBuilder:
     """Resume reference and validation tables by saved source identity.
 
-    Request the encoder only for missing records. Persist each completed batch
-    before advancing progress; propagate failures without rollback.
+    Request the encoder only for missing records. Buffer encoded batches into
+    ``lancedb.write_batch_rows`` appends; a failure drops unwritten buffered rows
+    and propagates without rollback.
     """
 
     def __init__(
@@ -39,6 +42,7 @@ class IndexBuilder:
         self.uri = config.lancedb.uri
         self.table = config.lancedb.table
         self.batch_size = config.embedding.batch_size
+        self.write_batch_rows = config.lancedb.write_batch_rows
         self.classes = dataset.get_class_list()
 
     @property
@@ -75,10 +79,13 @@ class IndexBuilder:
         with tqdm(
             total=len(records), desc="Text references", unit="record", mininterval=5
         ) as progress:
-            for batch in batched(records, self.batch_size, strict=False):
-                vectors = self.embedder.encode_text([record.value for record in batch])
-                index.append(batch, vectors)
-                progress.update(len(batch))
+
+            def encoded() -> Iterator[tuple[Sequence[PointRecord], NDArray[np.float32]]]:
+                for batch in batched(records, self.batch_size, strict=False):
+                    yield batch, self.embedder.encode_text([record.value for record in batch])
+                    progress.update(len(batch))
+
+            index.append_batches(encoded(), self.write_batch_rows)
 
     def _insert_image_records(
         self,
@@ -88,18 +95,21 @@ class IndexBuilder:
         kind: str,
         description: str,
     ) -> None:
-        """Decode and persist the prepared image dataset in batches."""
+        """Decode, embed, and persist the prepared image dataset in buffered chunks."""
         with tqdm(desc=description, unit="image", mininterval=5) as progress:
-            for batch in self.dataset.iter_dataset_batches(dataset, self.batch_size):
-                records = [
-                    PointRecord(label, kind, source_id, fname)
-                    for label, source_id, fname in zip(
-                        batch["class"], batch["source_id"], batch["fname"], strict=True
-                    )
-                ]
-                vectors = self.embedder.encode_images(batch["image"])
-                index.append(records, vectors)
-                progress.update(len(records))
+
+            def encoded() -> Iterator[tuple[Sequence[PointRecord], NDArray[np.float32]]]:
+                for batch in self.dataset.iter_dataset_batches(dataset, self.batch_size):
+                    records = [
+                        PointRecord(label, kind, source_id, fname)
+                        for label, source_id, fname in zip(
+                            batch["class"], batch["source_id"], batch["fname"], strict=True
+                        )
+                    ]
+                    yield records, self.embedder.encode_images(batch["image"])
+                    progress.update(len(records))
+
+            index.append_batches(encoded(), self.write_batch_rows)
 
     def _prepare_reference_inputs(self) -> tuple[Dataset | None, list[PointRecord]]:
         images = None
@@ -141,7 +151,7 @@ class IndexBuilder:
         return index, counts
 
     def build_validation_table(self, table_name: str) -> LanceDBIndex:
-        """Complete missing validation embeddings and return the unoptimized cache."""
+        """Complete missing validation embeddings, optimize, and return the cache."""
         if LanceDBIndex.exists(self.uri, table_name):
             cache = LanceDBIndex.open(self.uri, table_name)
         else:
@@ -155,4 +165,5 @@ class IndexBuilder:
         self._insert_image_records(
             cache, images, kind="validation_image", description="Validation embeddings"
         )
+        cache.optimize()
         return cache

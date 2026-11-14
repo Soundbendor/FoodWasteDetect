@@ -99,6 +99,7 @@ class ExperimentTests(unittest.TestCase):
             with self.subTest(stage=stage):
                 exp = self.experiment(name=f'snapshot-{stage}')
                 exp.config = updated(exp.config, 'embedding.batch_size', 1)
+                exp.config = updated(exp.config, 'lancedb.write_batch_rows', 1)
                 if stage == 'validation':
                     exp.build_vector_database()
                     exp.config = updated(exp.config, 'lancedb.validation_table', 'cache')
@@ -139,6 +140,7 @@ class ExperimentTests(unittest.TestCase):
         exp.config = updated(exp.config, 'cache_validation_embeddings', True)
         exp.build_vector_database()
         exp.evaluate()
+        self.assertEqual(len(self.client.open_table('cache').list_versions()), 1)
         exp.config = updated(exp.config, 'cache_validation_embeddings', False)
         before = exp.config.model_dump()
         self.embedder_constructor.reset_mock()
@@ -293,6 +295,7 @@ class ExperimentTests(unittest.TestCase):
 
         exp = self.experiment((True, False, False))
         exp.config = updated(exp.config, 'embedding.batch_size', 1)
+        exp.config = updated(exp.config, 'lancedb.write_batch_rows', 1)
         exp.build_vector_database()
         previous = (exp.output / 'index.json').read_bytes()
 

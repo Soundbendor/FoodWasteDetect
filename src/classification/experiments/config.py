@@ -57,6 +57,7 @@ class LanceDBConfig(ConfigModel):
     uri: NonemptyString
     table: NonemptyString
     validation_table: str | None = None
+    write_batch_rows: PositiveInt = 256
 
     def require_validation_table(self) -> str:
         """Return a nonempty validation table name distinct from the reference table."""

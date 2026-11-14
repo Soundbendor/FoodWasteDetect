@@ -496,6 +496,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
 
     config = resume_config
     config["embedding"]["batch_size"] = batch_size
+    config["lancedb"]["write_batch_rows"] = batch_size
     transport(lambda request: response())
     experiment = Experiment(ExperimentConfig.model_validate(config))
     if stage == "validation":

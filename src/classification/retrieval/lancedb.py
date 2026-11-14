@@ -3,8 +3,10 @@
 import functools
 import json
 import operator
+import warnings
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Self
 
@@ -135,9 +137,35 @@ class LanceDBIndex:
         )
         self.table.add(pa.table(columns, schema=self.table.schema), on_bad_vectors="error")
 
+    def append_batches(
+        self,
+        batches: Iterable[tuple[Sequence[PointRecord], NDArray[np.floating]]],
+        rows: int,
+    ) -> None:
+        """Append encoded batches in exact ``rows`` chunks; the remainder goes last.
+
+        Each chunk is one commit. An exception raised by ``batches`` drops rows
+        buffered since the last chunk.
+        """
+        records: list[PointRecord] = []
+        vectors = np.empty((0, self.dimension), dtype=np.float32)
+        for batch_records, batch_vectors in batches:
+            records.extend(batch_records)
+            vectors = np.concatenate([vectors, np.asarray(batch_vectors, dtype=np.float32)])
+            while len(records) >= rows:
+                self.append(records[:rows], vectors[:rows])
+                records, vectors = records[rows:], vectors[rows:]
+        if records:
+            self.append(records, vectors)
+
     def optimize(self) -> None:
-        """Compact sharded LanceDB table files into larger chunks for optimized queries."""
-        self.table.optimize()
+        """Compact fragments, then delete every older version and orphaned file.
+
+        Requires a single writer and no readers of older versions.
+        """
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=r"optimize\(cleanup_older_than=0\)")
+            self.table.optimize(cleanup_older_than=timedelta(0), delete_unverified=True)
 
     def class_counts(self) -> Counter[str]:
         """Return count of items in table by class."""

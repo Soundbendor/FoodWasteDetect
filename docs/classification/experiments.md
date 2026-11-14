@@ -76,8 +76,9 @@ loading the encoder. Existing builds follow this sequence:
    and use the identity set to exclude saved inputs.
 3. Batch and decode only remaining images, preserving the original dataset
    splits and order. Caps apply before saved-identity exclusion.
-4. Encode each text/image batch and append its strictly paired records/vectors
-   once. Advance progress only after successful append.
+4. Encode each text/image batch, advance progress, and buffer its strictly paired
+   records/vectors. Append in exact `lancedb.write_batch_rows` chunks, plus the
+   final remainder. Progress therefore counts encoded rows, not persisted ones.
 5. Rescan the table to count every stored row by source kind, including
    duplicates and extra rows. Optimize the reference table, including a no-work
    resume, then return the index and counts to `Experiment` for summary
@@ -89,8 +90,8 @@ ordered metadata dictionary and vector matrix; row conversion belongs to
 evaluation and reporting. Keep final partial batches. The dataset and encoder
 [image ownership rules](data.md) apply.
 
-Successful batches survive later failures; failed encoding batches save no
-vectors. Storage failures propagate without write retries or rollback. Existing
+Written chunks survive later failures. A failure drops up to
+`write_batch_rows - 1` buffered rows plus the failed batch; resume re-embeds them. Storage failures propagate without write retries or rollback. Existing
 rows and UUIDs remain intact. Optimization failure preserves the previous
 summary; a rerun retries finalization without re-encoding saved inputs. Use one
 writer and finish building/optimization before concurrent readers. Shared jobs
@@ -115,11 +116,12 @@ Evaluation opens references first, creates or opens the cache, scans saved
 identities, and completes missing validation batches. It then fetches vectors in
 metadata order through `Experiment`. Complete caches need neither image
 decoding nor a model/client. Disabled caching recomputes validation embeddings.
-Validation-cache preparation does not optimize tables; evaluation does not
-optimize or insert into reference tables.
+Validation-cache preparation optimizes the cache after completing it, including a
+no-work resume, so sweeps clone a compacted table. Evaluation does not optimize or
+insert into reference tables.
 
-Cache persistence uses the same completed-batch boundary as reference insertion.
-For paid backends, restarting can repeat requests from the unfinished batch;
+Cache persistence uses the same buffered chunk boundary as reference insertion.
+For paid backends, restarting can repeat requests for unwritten buffered rows;
 [encoder retry behavior](encoders.md) does not make storage transactional.
 
 ## Artifact and failure contract

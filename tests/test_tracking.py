@@ -472,6 +472,7 @@ def test_capped_reference_bars_match_inserted_records(
 def test_failed_reference_batch_does_not_advance(experiment_case, sdk, progress_bars, images, failure):
     exp = experiment_case.experiment((images, not images, False))
     exp.config = updated(exp.config, "embedding.batch_size", 1)
+    exp.config = updated(exp.config, "lancedb.write_batch_rows", 1)
     exp.tracker = Tracker(sdk)
     with (
         patch("classification.experiments.classification.LanceDBIndex.append", side_effect=[None, failure]),
