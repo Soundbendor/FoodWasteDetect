@@ -19,6 +19,7 @@ class _ModelSpec(TypedDict):
     image_dict: NotRequired[bool]
     native_bf16: NotRequired[bool]
     patch_modalities: NotRequired[bool]
+    lowercase_text: NotRequired[bool]
 
 
 # Keep model-specific behavior here; batching remains owned by Sentence Transformers.
@@ -49,12 +50,19 @@ _MODEL_SPECS: dict[str, _ModelSpec] = {
         "image_dict": True,
         "native_bf16": True,
     },
-    "openai/clip-vit-base-patch32": {
-        "dimension": 512,
+    "openai/clip-vit-large-patch14": {
+        "dimension": 768,
         "load": {
             "model_kwargs": {"torch_dtype": torch.float32},
             "processor_kwargs": {"model_max_length": 77},
         },
+    },
+    "google/siglip2-so400m-patch14-384": {
+        "dimension": 1152,
+        "load": {"model_kwargs": {"torch_dtype": torch.float32}},
+        # SigLIP trained on fixed-width, lowercased text; ST pads to the longest by default.
+        "text": {"processing_kwargs": {"text": {"padding": "max_length", "max_length": 64}}},
+        "lowercase_text": True,
     },
     "Qwen/Qwen3-VL-Embedding-8B": {
         "dimension": 4096,
@@ -142,8 +150,9 @@ class EmbeddingModel(Embedder):
 
     def encode_text(self, texts: Iterable[str]) -> NDArray[np.float32]:
         """Generate embedding vectors from text inputs."""
-        options = _MODEL_SPECS[self.model_id].get("text", {})
-        return self._encode(list(texts), **options)
+        spec = _MODEL_SPECS[self.model_id]
+        texts = [text.lower() for text in texts] if spec.get("lowercase_text") else list(texts)
+        return self._encode(texts, **spec.get("text", {}))
 
     def encode_images(self, images: Iterable[ImageInput]) -> NDArray[np.float32]:
         """Load images into memory and convert to embedding vectors."""

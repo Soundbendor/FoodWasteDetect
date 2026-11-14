@@ -41,8 +41,14 @@ MODEL_SPECS = [
         dict(ENCODE_OPTIONS, prompt_name="Document"),
         ENCODE_OPTIONS,
     ),
-    ("openai/clip-vit-base-patch32", 512, ENCODE_OPTIONS, ENCODE_OPTIONS),
+    ("openai/clip-vit-large-patch14", 768, ENCODE_OPTIONS, ENCODE_OPTIONS),
     ("Qwen/Qwen3-VL-Embedding-8B", 4096, ENCODE_OPTIONS, ENCODE_OPTIONS),
+    (
+        "google/siglip2-so400m-patch14-384",
+        1152,
+        dict(ENCODE_OPTIONS, processing_kwargs={"text": {"padding": "max_length", "max_length": 64}}),
+        ENCODE_OPTIONS,
+    ),
 ]
 
 
@@ -257,8 +263,8 @@ class BackendLoadingTests(unittest.TestCase):
                 ),
             ),
             (
-                "openai/clip-vit-base-patch32",
-                512,
+                "openai/clip-vit-large-patch14",
+                768,
                 False,
                 dict(
                     model_kwargs={"torch_dtype": torch.float32},
@@ -272,6 +278,12 @@ class BackendLoadingTests(unittest.TestCase):
                 dict(
                     model_kwargs={"torch_dtype": "auto", "attn_implementation": "sdpa"},
                 ),
+            ),
+            (
+                "google/siglip2-so400m-patch14-384",
+                1152,
+                False,
+                dict(model_kwargs={"torch_dtype": torch.float32}),
             ),
         ]
         for model_id, dimension, sets_modalities, expected_kwargs in cases:
@@ -367,7 +379,7 @@ class ProjectedCLIPIntegrationTests(unittest.TestCase):
 
         # Local random weights and a tiny vocabulary: no checkpoint downloads.
         config = CLIPConfig(
-            projection_dim=512,
+            projection_dim=768,
             text_config=dict(
                 vocab_size=4,
                 hidden_size=16,
@@ -402,31 +414,113 @@ class ProjectedCLIPIntegrationTests(unittest.TestCase):
             ).save_pretrained(directory)
 
             def local_backend(model_id, **kwargs):
-                self.assertEqual(model_id, "openai/clip-vit-base-patch32")
+                self.assertEqual(model_id, "openai/clip-vit-large-patch14")
                 return SentenceTransformer(directory, **kwargs)
 
             with patch(
                 "classification.encoders.sentence_transformers.SentenceTransformer",
                 side_effect=local_backend,
             ):
-                backend = _load_backend("openai/clip-vit-base-patch32", "cpu")
+                backend = _load_backend("openai/clip-vit-large-patch14", "cpu")
             with patch(
                 "classification.encoders.sentence_transformers._load_backend",
                 return_value=backend,
             ):
-                model = EmbeddingModel("openai/clip-vit-base-patch32", 2, device="cpu")
+                model = EmbeddingModel("openai/clip-vit-large-patch14", 2, device="cpu")
             long_text = "a " * 120
             short_text = "a " * 75
             vectors = model.encode_text([long_text, short_text, "b"])
-            self.assertEqual(vectors.shape, (3, 512))
+            self.assertEqual(vectors.shape, (3, 768))
             np.testing.assert_allclose(vectors[0], vectors[1], atol=1e-6)
             self.assertFalse(np.allclose(vectors[0], vectors[2]))
             with Image.new("RGB", (20, 30), (40, 80, 120)) as image:
                 images = model.encode_images([image])
-                self.assertEqual(images.shape, (1, 512))
+                self.assertEqual(images.shape, (1, 768))
                 self.assertEqual(images.dtype, np.float32)
                 self.assertTrue(np.isfinite(images).all())
                 # Compare against the actual projected model output, not hidden states.
+                module = backend[0]
+                features = module.preprocess([image])
+                with torch.no_grad():
+                    expected = module.auto_model.get_image_features(
+                        pixel_values=features["pixel_values"]
+                    ).pooler_output
+                np.testing.assert_allclose(images, expected.numpy(), atol=1e-6)
+
+
+@unittest.skipUnless(version("transformers").startswith("5."), "modern stack only")
+class ProjectedSigLIPIntegrationTests(unittest.TestCase):
+    model_id = "google/siglip2-so400m-patch14-384"
+
+    def test_real_siglip_pads_fixed_width_lowercases_and_projects_images(self):
+        from transformers import (
+            GemmaTokenizer,
+            SiglipConfig,
+            SiglipImageProcessor,
+            SiglipModel,
+            SiglipProcessor,
+        )
+
+        from classification.encoders.sentence_transformers import _load_backend
+
+        # The checkpoint is SiglipModel with a Gemma tokenizer; random tiny weights here.
+        config = SiglipConfig(
+            text_config=dict(
+                vocab_size=16,
+                hidden_size=16,
+                intermediate_size=32,
+                num_hidden_layers=1,
+                num_attention_heads=2,
+                max_position_embeddings=64,
+                projection_size=1152,
+                pad_token_id=0,
+                bos_token_id=2,
+                eos_token_id=1,
+            ),
+            vision_config=dict(
+                hidden_size=1152,
+                intermediate_size=32,
+                num_hidden_layers=1,
+                num_attention_heads=2,
+                image_size=16,
+                patch_size=8,
+            ),
+        )
+        # Character vocabulary without uppercase: "A" maps to <unk> unless lowercased.
+        specials = ["<pad>", "<eos>", "<bos>", "<unk>", "<mask>"]
+        vocab = {token: i for i, token in enumerate([*specials, *"▁abcdeilpr"])}
+        with tempfile.TemporaryDirectory() as directory:
+            SiglipModel(config).save_pretrained(directory)
+            SiglipProcessor(
+                image_processor=SiglipImageProcessor(size={"height": 16, "width": 16}),
+                tokenizer=GemmaTokenizer(vocab=vocab, merges=[]),
+            ).save_pretrained(directory)
+
+            def local_backend(model_id, **kwargs):
+                self.assertEqual(model_id, self.model_id)
+                return SentenceTransformer(directory, **kwargs)
+
+            with patch(
+                "classification.encoders.sentence_transformers.SentenceTransformer",
+                side_effect=local_backend,
+            ):
+                backend = _load_backend(self.model_id, "cpu")
+            with patch(
+                "classification.encoders.sentence_transformers._load_backend",
+                return_value=backend,
+            ):
+                model = EmbeddingModel(self.model_id, 2, device="cpu")
+            alone = model.encode_text(["apple pie"])
+            batched = model.encode_text(["Apple pie", "apple pie rice rice rice"])
+            self.assertEqual(batched.shape, (2, 1152))
+            np.testing.assert_allclose(alone[0], batched[0], atol=1e-5)
+            self.assertFalse(np.allclose(batched[0], batched[1]))
+            # Longest-padding would change the short text's embedding.
+            longest = backend.encode(["apple pie", "apple pie rice rice rice"])
+            self.assertFalse(np.allclose(alone[0], longest[0], atol=1e-3))
+            with Image.new("RGB", (20, 30), (40, 80, 120)) as image:
+                images = model.encode_images([image])
+                self.assertEqual(images.shape, (1, 1152))
                 module = backend[0]
                 features = module.preprocess([image])
                 with torch.no_grad():
@@ -441,8 +535,9 @@ class TruncationTests(unittest.TestCase):
         ("jinaai/jina-clip-v2", 1024, ""),
         ("jinaai/jina-embeddings-v4", 2048, "Passage: "),
         ("google/embeddinggemma-2", 768, "Document: "),
-        ("openai/clip-vit-base-patch32", 512, ""),
+        ("openai/clip-vit-large-patch14", 768, ""),
         ("Qwen/Qwen3-VL-Embedding-8B", 4096, ""),
+        ("google/siglip2-so400m-patch14-384", 1152, ""),
     ]
 
     def test_dimensions_with_real_library_for_text_and_images(self):

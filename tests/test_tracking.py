@@ -304,7 +304,7 @@ report = {"metrics": {"evaluated": 1, "majority_vote_accuracy": 1.,
 path = Path("report.json")
 path.write_text(json.dumps(report))
 config = {"k": 1, "embed_images": False, "embed_class_labels": True,
-          "embed_descriptions": False, "embedding": {"model_id": "openai/clip-vit-base-patch32"}}
+          "embed_descriptions": False, "embedding": {"model_id": "openai/clip-vit-large-patch14"}}
 config.update(dataset=dict(name="foodx251", root="/raw"), lancedb=dict(uri="/db", table="references"), output_dir="/output")
 config = ExperimentConfig.model_validate(config)
 report = EvaluationReport(config=config, table="references", reference_source_counts=None, predictions=[], metrics=dict(metrics([], ["A", "B"]), **report["metrics"]))

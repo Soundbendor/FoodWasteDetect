@@ -41,8 +41,9 @@ encoder metadata dictionary or separate artifact model field.
 | `jinaai/jina-clip-v2` | 1024 | Checkpoint defaults | RGB PIL inputs |
 | `jinaai/jina-embeddings-v4` | 2048 | `task="retrieval"`, `prompt_name="passage"` | Retrieval task, RGB PIL inputs, no text prompt |
 | `google/embeddinggemma-2` | 768 | `prompt_name="Document"` | Separate `{"image": rgb_PIL}` records, no text prompt |
-| `openai/clip-vit-base-patch32` | 512 | Plain text, explicit 77-token limit | Checkpoint preprocessing; projected CLIP features |
+| `openai/clip-vit-large-patch14` | 768 | Plain text, explicit 77-token limit | Checkpoint preprocessing; projected CLIP features |
 | `Qwen/Qwen3-VL-Embedding-8B` | 4096 | Checkpoint default instruction | RGB PIL inputs |
+| `google/siglip2-so400m-patch14-384` | 1152 | Lowercased, padded to exactly 64 tokens | Checkpoint preprocessing (384px); projected SigLIP features |
 
 Loading and preprocessing contracts:
 
@@ -55,6 +56,10 @@ Loading and preprocessing contracts:
   emulation; otherwise it loads FP32. It never selects FP16.
 - OpenAI CLIP loads FP32 and returns projected vectors, rather than vision hidden
   states. Its processor receives `model_max_length=77`.
+- SigLIP 2 loads FP32 as a `SiglipModel` with a Gemma tokenizer. Text is lowercased
+  in `encode_text()` and padded to `max_length=64` through per-call
+  `processing_kwargs`, matching training; the library's default longest-padding
+  changes embeddings with batch composition.
 - Qwen uses checkpoint dtype and SDPA. Its checkpoint configuration owns
   preprocessing, default instruction, last-token pooling, and normalization; the
   application adds no overrides for these or for remote code.
@@ -76,7 +81,7 @@ fail before backend loading. `ExperimentConfig` owns type validation.
 The selected value goes to the shared Sentence Transformers `encode()` call for
 every modality and reference source. The library performs truncation; output
 validation, empty matrices, and the database schema use the selected dimension.
-Any valid dimension is accepted for all five models; quality must be measured.
+Any valid dimension is accepted for all six models; quality must be measured.
 
 Output validation rejects rows whose components are all zero after float32
 conversion. It checks components directly so tiny finite nonzero vectors are not

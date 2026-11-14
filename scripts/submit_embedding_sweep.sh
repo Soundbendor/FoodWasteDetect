@@ -20,8 +20,9 @@ models=(
   "jinaai/jina-clip-v2"
   "jinaai/jina-embeddings-v4"
   "google/embeddinggemma-2"
-  "openai/clip-vit-base-patch32"
+  "openai/clip-vit-large-patch14"
   "Qwen/Qwen3-VL-Embedding-8B"
+  "google/siglip2-so400m-patch14-384"
 )
 
 for i in "${!models[@]}"; do
