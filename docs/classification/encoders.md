@@ -44,6 +44,7 @@ encoder metadata dictionary or separate artifact model field.
 | `openai/clip-vit-large-patch14` | 768 | Plain text, explicit 77-token limit | Checkpoint preprocessing; projected CLIP features |
 | `Qwen/Qwen3-VL-Embedding-8B` | 4096 | Checkpoint default instruction | RGB PIL inputs |
 | `google/siglip2-so400m-patch14-384` | 1152 | Lowercased, padded to exactly 64 tokens | Checkpoint preprocessing (384px); projected SigLIP features |
+| `google/siglip2-giant-opt-patch16-384` | 1536 | Lowercased, padded to exactly 64 tokens | Checkpoint preprocessing (384px); pooled vision features |
 
 Loading and preprocessing contracts:
 
@@ -60,6 +61,8 @@ Loading and preprocessing contracts:
   in `encode_text()` and padded to `max_length=64` through per-call
   `processing_kwargs`, matching training; the library's default longest-padding
   changes embeddings with batch composition.
+  Both checkpoints use the modern Pixi environments (`default` or `cu126`).
+  See the [SigLIP 2 Giant checkpoint configuration](https://huggingface.co/google/siglip2-giant-opt-patch16-384/blob/main/config.json).
 - Qwen uses checkpoint dtype and SDPA. Its checkpoint configuration owns
   preprocessing, default instruction, last-token pooling, and normalization; the
   application adds no overrides for these or for remote code.
@@ -81,7 +84,7 @@ fail before backend loading. `ExperimentConfig` owns type validation.
 The selected value goes to the shared Sentence Transformers `encode()` call for
 every modality and reference source. The library performs truncation; output
 validation, empty matrices, and the database schema use the selected dimension.
-Any valid dimension is accepted for all six models; quality must be measured.
+Any valid dimension is accepted for every local model; quality must be measured.
 
 Output validation rejects rows whose components are all zero after float32
 conversion. It checks components directly so tiny finite nonzero vectors are not

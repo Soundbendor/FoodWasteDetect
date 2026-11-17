@@ -64,6 +64,12 @@ _MODEL_SPECS: dict[str, _ModelSpec] = {
         "text": {"processing_kwargs": {"text": {"padding": "max_length", "max_length": 64}}},
         "lowercase_text": True,
     },
+    "google/siglip2-giant-opt-patch16-384": {
+        "dimension": 1536,
+        "load": {"model_kwargs": {"torch_dtype": torch.float32}},
+        "text": {"processing_kwargs": {"text": {"padding": "max_length", "max_length": 64}}},
+        "lowercase_text": True,
+    },
     "Qwen/Qwen3-VL-Embedding-8B": {
         "dimension": 4096,
         "load": {
