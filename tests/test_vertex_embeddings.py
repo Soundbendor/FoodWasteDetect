@@ -328,7 +328,7 @@ def test_routing_and_local_settings(monkeypatch):
         ExperimentConfig.model_validate(
             config_data(
                 embedding={
-                    "model_id": "openai/clip-vit-base-patch32",
+                    "model_id": "openai/clip-vit-large-patch14",
                     "device": "cpu",
                     "batch_size": 2,
                 }
@@ -338,7 +338,7 @@ def test_routing_and_local_settings(monkeypatch):
     with patch("classification.experiments.classification.EmbeddingModel") as local:
         assert local_experiment.embedder is local.return_value
         local.assert_called_once_with(
-            model_id="openai/clip-vit-base-patch32",
+            model_id="openai/clip-vit-large-patch14",
             device="cpu",
             truncate_dim=None,
             batch_size=2,

@@ -670,7 +670,8 @@ class ExperimentTests(unittest.TestCase):
         from classification.encoders.sentence_transformers import EmbeddingModel
 
         for model_id, native, truncate_dim in [
-            ("openai/clip-vit-base-patch32", 512, None),
+            ("openai/clip-vit-large-patch14", 768, None),
+            ("google/siglip2-so400m-patch14-384", 1152, None),
             ("google/embeddinggemma-2", 768, None),
             ("jinaai/jina-clip-v2", 1024, None),
             ("jinaai/jina-embeddings-v4", 2048, None),
@@ -684,7 +685,7 @@ class ExperimentTests(unittest.TestCase):
                     for i, item in enumerate(inputs):
                         if isinstance(item, dict):
                             item = item['image']
-                        apple = 'Apple' in item if isinstance(item, str) else item.getpixel((0, 0))[0] == 0
+                        apple = 'apple' in item.lower() if isinstance(item, str) else item.getpixel((0, 0))[0] == 0
                         vectors[i, 0 if apple else 1] = 1
                     return vectors[:, :kwargs.get("truncate_dim", native)]
 

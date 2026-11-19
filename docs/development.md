@@ -10,8 +10,8 @@ The manifest and lockfile are authoritative for exact dependency versions.
 
 | Environment | Model family | Runtime |
 | --- | --- | --- |
-| `default` | EmbeddingGemma2, OpenAI CLIP, Qwen | CPU, modern dependencies |
-| `cu126` | EmbeddingGemma2, OpenAI CLIP, Qwen | CUDA, modern dependencies |
+| `default` | EmbeddingGemma2, OpenAI CLIP, SigLIP 2, Qwen | CPU, modern dependencies |
+| `cu126` | EmbeddingGemma2, OpenAI CLIP, SigLIP 2, Qwen | CUDA, modern dependencies |
 | `jina-cpu` | Jina CLIP v2, Jina Embeddings v4 | CPU, Jina dependencies |
 | `jina-cu126` | Jina CLIP v2, Jina Embeddings v4 | CUDA, Jina dependencies |
 
