@@ -88,6 +88,8 @@ conda-forge = {mapping-mode = "overlay", mapping = {ollama = false}}
 [tool.pixi.dependencies]
 python = {version = "==3.13.13", build = "*_cp313"}
 qdrant = {version = "==1.19.0", channel = "anaconda"}
+# Provides `7z` for ISIA Food-500 split-zip extraction.
+p7zip = "==16.02"
 
 [tool.pixi.pypi-dependencies]
 foodwaste-classification = {path = ".", editable = true}

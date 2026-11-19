@@ -21,6 +21,8 @@ explicitly. CPU and CUDA features remain separate. The current stack uses CPytho
 wheels. Its separate native Ollama package bundles CUDA 12.9. Qdrant remains
 installed for the legacy CLIP pipeline; whole-image retrieval uses embedded LanceDB.
 The Ollama Python SDK is a separate dependency from the native binary.
+Every environment includes conda-forge `p7zip` 16.02, whose `7z` unpacks the ISIA
+Food-500 split zip; run dataset downloads inside a Pixi environment.
 
 Slurm wrappers use `--as-is`, so prepare the selected environment before submission.
 Their defaults and model-family selection are described in

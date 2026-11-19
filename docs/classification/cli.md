@@ -1,7 +1,7 @@
 # CLI and configuration
 
 Read this document when changing command parsing, overrides, stage dispatch, or
-the Ollama download entry point. The implementation is
+the download entry points. The implementation is
 [`cli.py`](../../src/classification/cli.py), reached by both the `classification` console script
 and [`__main__.py`](../../src/classification/__main__.py).
 
@@ -53,6 +53,13 @@ context, and streams the requested model pull. Downloads require the connection 
 process settings; the explicit model name makes `ollama.llm` unnecessary. The YAML
 stays unchanged and no W&B run is created. Server ownership, executable validation,
 and cleanup are specified in [descriptions](data.md#class-descriptions-and-ollama).
+
+## Dataset downloads
+
+`classification download_dataset --config_file FILE` validates only the YAML
+`dataset` section as `DatasetConfig` and calls
+`DATASETS[name].download(root)`. It takes no overrides and opens no W&B run.
+Download behavior per dataset is in [data](data.md#downloads).
 
 ## Verification
 

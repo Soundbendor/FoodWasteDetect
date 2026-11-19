@@ -27,7 +27,7 @@ def config_path(tmp_path):
 
 @pytest.mark.parametrize(
     "command",
-    [[], ["experiment"], ["experiment", "matroyshka-sweep"], ["download_model"]],
+    [[], ["experiment"], ["experiment", "matroyshka-sweep"], ["download_model"], ["download_dataset"]],
 )
 def test_help_before_loading(command):
     with patch("builtins.open", side_effect=AssertionError("file load")), pytest.raises(SystemExit) as error:
@@ -144,7 +144,7 @@ def test_download_validates_only_ollama_section(failure):
         session.return_value.__exit__.assert_called_once()
 
 
-@pytest.mark.parametrize("args", [[], ["unknown"], ["evaluate"], ["experiment"], ["experiment", "unknown"], ["download_model"], ["experiment", "run"]])
+@pytest.mark.parametrize("args", [[], ["unknown"], ["evaluate"], ["experiment"], ["experiment", "unknown"], ["download_model"], ["download_dataset"], ["experiment", "run"]])
 def test_invalid_commands(args):
     with pytest.raises(SystemExit) as error:
         main(args)
