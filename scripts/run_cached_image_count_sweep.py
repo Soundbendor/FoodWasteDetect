@@ -5,19 +5,25 @@ Use a new output directory per sweep. Source databases are opened for reads only
 """
 
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
 
-import pyarrow as pa
 import pyarrow.compute as pc
 from lancedb.db import LanceDBConnection
+from lancedb.index import BTree
 
 from classification.experiments.artifacts import write_json
 from classification.experiments.classification import Experiment
 from classification.experiments.config import ExperimentConfig
+from classification.experiments.report_types import IndexSummary
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.util import load_dataset
+
+
+def load(path):
+    return json.loads(path.read_text())
 
 
 def checked_rows(table, split, kind):
@@ -44,20 +50,54 @@ def checked_rows(table, split, kind):
     return table.take(indices)
 
 
-def read_source(config, width, dataset, caps, destination):
+def validate_source(entry, config, reports, path):
+    """Return (model, caps, replay) after checking the entry against its index config."""
+    model = config.embedding.model_id
+    caps = entry["caps"]
+    if (
+        not caps
+        or any(type(cap) is not int or cap < 1 for cap in caps)
+        or len(set(caps)) != len(caps)
+    ):
+        raise ValueError(f"Expected distinct positive integer caps for {model}")
+    width = entry["width"]
+    if (
+        model != entry["model"]
+        or config.n_imgs_per_class is not None
+        or not config.embed_images
+        or config.embed_class_labels
+        or config.embed_descriptions
+        or config.embedding.truncate_dim not in (None, width)
+        or config.vector_dimension not in (None, width)
+    ):
+        raise ValueError(f"Expected uncapped full-width image references in {path}")
+    replay = entry.get("replay")
+    if replay and (replay["cap"] not in caps or (model, replay["cap"]) not in reports):
+        raise ValueError("Replay requires a selected cap and matching historical report")
+    for cap in caps:
+        if (model, cap) in reports and not (replay and cap == replay["cap"]):
+            raise ValueError(f"Duplicate evaluation for {model} cap {cap}")
+    return model, caps, replay
+
+
+def read_source(config, dataset, caps, destination):
     options = config.lancedb
+    validation_table = options.require_validation_table()
     source = LanceDBIndex.open(options.uri, options.table)
-    cache = LanceDBIndex.open(options.uri, options.require_validation_table())
-    if (source.dimension, cache.dimension) != (width, width):
+    cache = LanceDBIndex.open(options.uri, validation_table)
+    if {source.dimension, cache.dimension} != {config.vector_dimension}:
         raise ValueError("Source dimensions differ from expected full width")
     train = dataset.select_images(dataset.train_set(), n_imgs_per_class=max(caps))
     # Only read the largest needed training prefix, including on fragmented tables.
     predicate = pc.field("source_identity").isin(list(train["source_id"]))
     rows = checked_rows(source.table.to_lance().to_table(filter=predicate), train, "training_image")
-    validation = dataset.validation_set()
-    queries = checked_rows(cache.table.to_lance().to_table(), validation, "validation_image")
+    # Check validation identities without loading vectors; evaluation fetches by identity.
+    keys = cache.table.to_lance().to_table(columns=["source_identity", "class", "source_kind"])
+    checked_rows(keys, dataset.validation_set(), "validation_image")
     destination.mkdir(parents=True)
-    LanceDBConnection(destination).create_table(options.require_validation_table(), data=queries)
+    copy = LanceDBConnection(destination).clone_table(validation_table, str(cache.table.uri))
+    # Evaluation filters this table by identity once per query batch.
+    copy.create_index("source_identity", config=BTree())
     return rows
 
 
@@ -65,54 +105,45 @@ def evaluate_cap(base, dataset, rows, cap, folder):
     selected = dataset.select_images(dataset.train_set(), n_imgs_per_class=cap)
     identities = list(selected["source_id"])
     subset = checked_rows(
-        rows.filter(pc.is_in(rows["source_identity"], value_set=pa.array(identities))),
-        selected,
-        "training_image",
+        rows.filter(pc.field("source_identity").isin(identities)), selected, "training_image"
     )
-    config = base.model_copy(deep=True)
-    config.output_dir = str(folder)
-    config.n_imgs_per_class = cap
-    config.lancedb.table = f"{base.lancedb.table}_n{cap}"
-    config.lancedb.uri = str(folder.parent / "lancedb")
+    settings = base.model_dump()
+    settings.update(output_dir=str(folder), n_imgs_per_class=cap)
+    settings["lancedb"].update(
+        table=f"{base.lancedb.table}_n{cap}", uri=str(folder.parent / "lancedb")
+    )
+    config = ExperimentConfig.model_validate(settings)
     folder.mkdir(parents=True)
-    metadata = dict(subset.schema.metadata or {})
-    metadata[b"classification.build"] = config.model_dump_json().encode()
-    db = LanceDBConnection(config.lancedb.uri)
-    db.create_table(config.lancedb.table, data=subset.replace_schema_metadata(metadata))
-    write_json(
-        folder / "index.json",
-        {
-            "table": config.lancedb.table,
-            "uri": config.lancedb.uri,
-            "source_counts": {"training_image": len(subset)},
-            "config": config.model_dump(mode="json"),
-        },
+    index = LanceDBIndex.create(
+        config.lancedb.uri,
+        config.lancedb.table,
+        base.vector_dimension,
+        metadata={"classification.build": config.model_dump_json()},
     )
+    index.table.add(subset)
+    summary = IndexSummary(
+        table=config.lancedb.table,
+        uri=config.lancedb.uri,
+        source_counts={"training_image": len(subset)},
+        config=config,
+    )
+    write_json(folder / "index.json", summary.model_dump(mode="json"))
     write_json(
         folder / "selection.json",
         {"source": base.lancedb.model_dump(), "reference_ids": identities},
     )
-    experiment = Experiment(config, dataset=dataset)
-    try:
+    with contextlib.closing(Experiment(config, dataset=dataset)) as experiment:
         experiment.evaluate_cached()
-    finally:
-        experiment.close()
     (path,) = folder.glob("evaluation_*/report.json")
     return path
 
 
 def verify_replay(folder, report, historical, selection):
-    original = json.loads(selection.read_text())
-    if (
-        json.loads((folder / "selection.json").read_text())["reference_ids"]
-        != original["reference_ids"]
-    ):
+    if load(folder / "selection.json")["reference_ids"] != load(selection)["reference_ids"]:
         raise ValueError("Cache replay selected different training IDs")
 
     def predictions(path):
-        return {
-            p["source_id"]: p["prediction"] for p in json.loads(path.read_text())["predictions"]
-        }
+        return {p["source_id"]: p["prediction"] for p in load(path)["predictions"]}
 
     if predictions(report) != predictions(historical):
         raise ValueError("Cache replay disagrees with historical predictions")
@@ -123,7 +154,7 @@ def main():
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
-    manifest = json.loads(args.manifest.read_text())
+    manifest = load(args.manifest)
     directory = args.manifest.resolve().parent
     output = args.output_dir.resolve()
     reports = {}
@@ -140,36 +171,12 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     for number, entry in enumerate(sources, start=1):
         path = directory / entry["index_summary"]
-        config = ExperimentConfig.model_validate(json.loads(path.read_text())["config"])
-        model = config.embedding.model_id
-        caps = entry["caps"]
-        if (
-            not caps
-            or any(type(cap) is not int or cap < 1 for cap in caps)
-            or len(set(caps)) != len(caps)
-        ):
-            raise ValueError(f"Expected distinct positive integer caps for {model}")
-        width = entry["width"]
-        if (
-            model != entry["model"]
-            or config.n_imgs_per_class is not None
-            or not config.embed_images
-            or config.embed_class_labels
-            or config.embed_descriptions
-            or config.embedding.truncate_dim not in (None, width)
-            or config.vector_dimension not in (None, width)
-        ):
-            raise ValueError(f"Expected uncapped full-width image references in {path}")
-        replay = entry.get("replay")
-        if replay and (replay["cap"] not in caps or (model, replay["cap"]) not in reports):
-            raise ValueError("Replay requires a selected cap and matching historical report")
-        for cap in caps:
-            if (model, cap) in reports and not (replay and cap == replay["cap"]):
-                raise ValueError(f"Duplicate evaluation for {model} cap {cap}")
-        config.vector_dimension = width
+        config = ExperimentConfig.model_validate(load(path)["config"])
+        model, caps, replay = validate_source(entry, config, reports, path)
+        config.vector_dimension = entry["width"]
         dataset = load_dataset(config.dataset)
         model_dir = output / f"source_{number}"
-        rows = read_source(config, width, dataset, caps, model_dir / "lancedb")
+        rows = read_source(config, dataset, caps, model_dir / "lancedb")
         for cap in caps:
             folder = model_dir / f"n{cap}"
             report = evaluate_cap(config, dataset, rows, cap, folder)
@@ -180,11 +187,7 @@ def main():
     write_json(
         output / "manifest.json",
         [
-            {
-                "model": model,
-                "cap": cap,
-                "report": os.path.relpath(path.resolve(), output),
-            }
+            {"model": model, "cap": cap, "report": os.path.relpath(path, output)}
             for (model, cap), path in reports.items()
         ],
     )

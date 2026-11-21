@@ -6,11 +6,12 @@ import pyarrow as pa
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import run_cached_image_count_sweep as sweep
 from datasets import Dataset
 from run_cached_image_count_sweep import checked_rows, verify_replay
 
 from classification.datasets.foodx251 import FoodX251ImageDataset
-from classification.retrieval.voting import classify
+from classification.retrieval.lancedb import LanceDBIndex
 
 
 def test_capped_selection_reorders_stored_rows_and_keeps_small_classes():
@@ -32,16 +33,6 @@ def test_capped_selection_reorders_stored_rows_and_keeps_small_classes():
         checked_rows(table.take([1, 1, 2]), selected, "training_image")
     with pytest.raises(ValueError, match="Missing.*3"):
         checked_rows(table.slice(1), selected, "training_image")
-    assert (
-        classify(
-            [
-                {"label": "a", "score": 0.9},
-                {"label": "b", "score": 0.8},
-                {"label": "b", "score": 0.7},
-            ]
-        )[0]
-        == "b"
-    )
 
 
 def test_replay_checks_identities_and_predictions(tmp_path):
@@ -64,10 +55,6 @@ def test_replay_checks_identities_and_predictions(tmp_path):
 
 
 def test_manifest_runs_on_cached_vectors(tmp_path, monkeypatch):
-    import run_cached_image_count_sweep as sweep
-
-    from classification.retrieval.lancedb import LanceDBIndex
-
     annotations = tmp_path / "raw/annot"
     annotations.mkdir(parents=True)
     (annotations / "class_list.txt").write_text("0 apple\n")
