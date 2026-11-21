@@ -73,14 +73,9 @@ unique, so no IDs merge. Training references come from
 `<relative path> <label id>` under `root`; the label is the path's class
 directory, the ID is ignored, and a class missing from the CSV is rejected.
 Identities are `vegfru:<train|test>:<veg200_images|fru92_images>/<class>/<file>`.
-Verified from the head of Hugging Face `xedwin23x/VegFru` `vegfru.tar.gz`
-(27.9 GB, ungated; first 5 MB streamed on 2026-11-12): top-level `vegfru/` with
-`veg200_images/`, `classid_classname.csv`, and a 14 GB nested `archive.zip`
-whose first member is `fru92_images/Chinese_chestnut/f_07_03_0001.jpg`.
-Unverified, from the published VegFru layout: the list directory name, list
-filenames and line format, and where the lists and `veg200_images/` contents sit
-(after the nested zip in the tar, or inside it). Check them on the first
-authorized download and adjust `LIST_DIR` or the parser.
+The outer archive supplies the official split lists and an `images/` directory.
+Installation maps class directories into the official vegetable and fruit paths
+before loading the training and test splits.
 `cfg/classification_vegfru.yml` mirrors the other configs with its own
 `output_dir`, table, and null `descriptions_file`.
 
@@ -133,10 +128,10 @@ installs the `UECFOOD256/` entries with `category.txt` last.
 `VegFruImageDataset.download()` returns early when `classid_classname.csv`
 exists. Otherwise it fetches
 `https://huggingface.co/datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz`
-through `fetch_archive` and calls `install_archive(..., "vegfru",
-"classid_classname.csv", nested="archive.zip")`: the nested zip is unpacked into
-the staged `vegfru/` and deleted before the entries move, so the CSV still marks
-a complete install. Peak disk use is roughly 70 GB (archive, staged tar, unpacked zip).
+through `fetch_archive`. The installer checks the official train, validation and
+test paths against the staged image tree and moves each class directory into its
+listed group. It discards the redundant nested ZIP without unpacking it and
+installs the class CSV last as the completion marker.
 
 `ISIAFood500ImageDataset.download()` returns early when
 `metadata_ISIAFood_500/ISIAFood500_classLabel.txt` exists. It requires `7z` on
