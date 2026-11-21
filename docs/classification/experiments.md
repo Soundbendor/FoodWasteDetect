@@ -148,11 +148,19 @@ a nonempty split and exactly one prediction per image required before saving.
 This is validation accuracy, not official test accuracy. Strict metadata/vector
 pairing is retained.
 
-A successful evaluation writes only `evaluation_<UTC timestamp>/report.json`,
+A successful evaluation writes `evaluation_<UTC timestamp>/report.json`,
 containing `config`, `table`, `reference_source_counts`, `predictions`, and
 `metrics`. Predictions contain image metadata, majority-vote label, vote
 fraction, nearest label, first-k neighbors, and per-query retrieval metrics.
 [Retrieval](retrieval.md) defines the denominators and abstention behavior.
+
+When `result_file` is set, the evaluation then writes a compact record to that
+exact path: the report without `predictions` or `metrics.per_class`, plus the
+`report` path. The path has no timestamp, so a rerun replaces its record.
+Submitters point related runs at one `results/` directory, list the expected
+runs in `manifest.json`, and [collect them](scripts.md#collecting-and-plotting-results)
+into one table. The record is written after the report and before tracker
+publication.
 
 `write_json()` serializes finite JSON with a trailing newline to a sibling
 `.tmp` file and replaces the destination. Tracking uploads reports only after
@@ -206,9 +214,12 @@ by the sweep folder name and tagged `d<dimension>` ([tracking](tracking.md#run-l
 with no outer run, explicit identity settings, or resume checks. Standard reports have null reference counts unless a matching
 index summary exists in their output directory.
 
+With `result_file` set to `<dir>/<name>.json`, each dimension writes its record to
+`<dir>/<name>_d<dimension>.json`.
+
 Only complete success writes `summary.json`, with dimensions, tables, output
-directories, aggregate metrics, and returned W&B run IDs. Reports from earlier
-dimensions survive later failures. Production sweeps require separate compute
+directories, aggregate metrics, and returned W&B run IDs. Reports and result
+records from earlier dimensions survive later failures. Production sweeps require separate compute
 authorization; routine checks use synthetic CPU tables and mocked tracking.
 
 ## Verification
