@@ -126,3 +126,14 @@ reports. The plotter checks comparison settings and writes majority-vote accurac
 curves and a sibling CSV. It expects 28 points across Qwen, Jina v4, EmbeddingGemma2
 and Gemini. Use `--allow-partial` to label incomplete results. On Slurm, submit
 `sbatch sbatch/plot_matroyshka_sweep.sbatch RUN_DIR` after the evaluation jobs finish.
+
+## FoodX251 image-count comparison
+
+Run `pixi run --manifest-path scripts/plotting/pixi.toml --as-is plot-image-count --manifest POINTS.json --annotation-dir data/FoodX-251/annot --output-dir PLOTS`.
+The input is a JSON array of objects with `model`, `cap` and `report` fields.
+Report paths are relative to the manifest. Include one report for each combination
+of EmbeddingGemma2, Gemini Embedding 2 and SigLIP2-giant with per-class image caps
+1, 5, 10, 20, 50, 100 and JSON `null` (all training images). Use the model IDs
+from the saved configurations. The plotter checks full width, k=10, image-only
+reference counts and predictions against the 11,994 validation annotations,
+then writes `accuracy.csv`, `accuracy.png` and `accuracy.pdf`.
