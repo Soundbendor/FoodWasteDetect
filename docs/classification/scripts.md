@@ -34,6 +34,15 @@ writes `~/ollama.log`; its `PORT` assignment does not configure the process. It 
 no managed readiness or cleanup contract. Current description and download work
 uses [the owned CLI lifecycle](data.md#class-descriptions-and-ollama).
 
+## Full-width training and validation caches
+
+From the repository root, submit `sbatch sbatch/cache_full_width_images.sbatch MODEL`
+with a suitable GPU partition and account. Choose `qwen`, `jina_v4`, or
+`embeddinggemma2`. Prepare model weights and the CUDA Pixi environment first.
+The recipes embed all FoodX251 training images at native width, cache validation
+images and evaluate. Each model uses distinct reference and validation tables.
+Jina uses `jina-cu126`. The other two models use `cu126`.
+
 ## Slurm wrappers
 
 Submission wrappers run from `SLURM_SUBMIT_DIR`, require prepared Pixi environments,

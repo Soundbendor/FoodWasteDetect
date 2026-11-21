@@ -1,0 +1,25 @@
+dataset:
+  name: foodx251
+  root: data/FoodX-251
+embed_class_labels: false
+embed_descriptions: false
+embed_images: true
+embedding:
+  batch_size: 16
+  device: cuda
+  model_id: google/embeddinggemma-2
+  truncate_dim: null
+k: 10
+lancedb:
+  table: foodx251_embeddinggemma2_images_all_full
+  uri: assets/lancedb
+  validation_table: foodx251_embeddinggemma2_validation_all_full
+n_imgs_per_class: null
+output_dir: assets/classification/embeddinggemma2_images_all_full
+cache_validation_embeddings: true
+vector_dimension: 768
+sweep_dimensions:
+- 128
+- 256
+- 512
+- 768
