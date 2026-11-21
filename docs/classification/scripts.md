@@ -8,6 +8,13 @@ cloud requests requires authorization under the root guide.
 
 ## Package scripts
 
+From the classification Pixi environment, run
+`python -m classification.scripts.check_dataset --config-file CONFIG --report-file REPORT`
+to compare the loader's split membership, labels and referenced paths against the
+installed metadata and file inventory. The JSON report includes counts, identity
+and filename digests, and errors. Failed checks exit nonzero. Image files are
+inventoried without decoding their contents.
+
 [`src/classification/scripts/smoke_jina.py`](../../src/classification/scripts/smoke_jina.py) is an
 explicit real-checkpoint CPU check invoked as
 `python -m classification.scripts.smoke_jina`. It constructs Jina CLIP v2, encodes one
