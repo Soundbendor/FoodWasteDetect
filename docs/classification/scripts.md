@@ -117,3 +117,12 @@ Shared saved descriptions keep model comparisons on the same vocabulary; concurr
 jobs that generate descriptions need distinct Ollama endpoints. Wrapper checks in
 [`tests/test_classification_cli.py`](../../tests/test_classification_cli.py) use fake executables and do
 not submit jobs or validate HPC execution.
+
+## Plotting accuracy against dimension
+
+Run `pixi run --manifest-path scripts/plotting/pixi.toml --as-is plot RUN_DIR --output accuracy.png`
+from the repository root. Supply one or more directories with dimension-sweep
+reports. The plotter checks comparison settings and writes majority-vote accuracy
+curves and a sibling CSV. It expects 28 points across Qwen, Jina v4, EmbeddingGemma2
+and Gemini. Use `--allow-partial` to label incomplete results. On Slurm, submit
+`sbatch sbatch/plot_matroyshka_sweep.sbatch RUN_DIR` after the evaluation jobs finish.

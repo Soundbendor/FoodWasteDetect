@@ -51,6 +51,12 @@ Use the `build` task for packaging changes; it writes distributions under
 `src/classification/dist`. Run focused checks appropriate to the change and
 report failures against the unchanged baseline.
 
+## Report plotting
+
+Install the locked plotting environment with
+`pixi install --manifest-path scripts/plotting/pixi.toml --locked`.
+Run its synthetic checks with `pixi run --manifest-path scripts/plotting/pixi.toml --as-is test`.
+
 ## Evidence and acceptance
 
 [Experiment notes](experiments.md) retain environment constraints and cluster
