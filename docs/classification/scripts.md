@@ -61,6 +61,15 @@ path must be accessible from participating nodes. Use separate output directorie
 for evaluation jobs and follow the writer/reader contract in
 [experiments](experiments.md).
 
+### Dataset download acceptance
+
+From the repository root, submit `sbatch sbatch/check_datasets.sbatch REPORT_DIR`
+with the account, partition and CPU architecture appropriate to the installed Pixi
+environment. This job downloads five datasets, checks each installation, repeats
+the download and compares the two reports. Use a new report directory for each
+run. Read `summary.tsv` for per-dataset outcomes and the individual logs for
+failures. This workflow requires authorization for real downloads and storage.
+
 ## Sweep submitters
 
 [`submit_embedding_sweep.sh`](../../scripts/submit_embedding_sweep.sh) submits five
