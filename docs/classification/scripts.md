@@ -56,6 +56,21 @@ for evaluation jobs and follow the writer/reader contract in
 
 ## Sweep submitters
 
+### Cached dimension jobs
+
+Copy `cfg/matroyshka_sources.example.json` and select existing index summaries
+and validation tables. From the repository root run
+`bash scripts/submit_matroyshka_sweep.sh --dry-run SOURCES.json` to prepare the
+configs and preview the commands. Omit `--dry-run` to submit one CPU job per
+usable model. Set `SBATCH_ACCOUNT` and `SBATCH_PARTITION` as needed. Both modes
+save resolved configs and a job manifest under `assets/matroyshka`, configurable
+via `MATROYSHKA_OUTPUT_ROOT`. Submission records job IDs in `submitted.tsv`.
+Preparation checks table widths, row counts and available model/prompt metadata.
+Legacy tables rely on the supplied source selection. Avoid concurrent sweeps from
+the same tables because derived table names are shared.
+
+### Embedding and image-count submitters
+
 [`submit_embedding_sweep.sh`](../../scripts/submit_embedding_sweep.sh) submits five
 local models through `run_embedding.sbatch`. It assigns distinct reference tables
 and output directories, exports `jina-cu126` for Jina models and `cu126` for the

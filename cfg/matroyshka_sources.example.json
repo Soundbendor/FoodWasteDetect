@@ -1,0 +1,9 @@
+[
+  {
+    "name": "qwen",
+    "model_id": "Qwen/Qwen3-VL-Embedding-8B",
+    "max_dimension": 4096,
+    "index_summary": "assets/classification/qwen_images_all_full/index.json",
+    "validation_table": "foodx251_qwen_validation_all_full"
+  }
+]
