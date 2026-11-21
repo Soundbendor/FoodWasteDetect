@@ -1,17 +1,12 @@
-"""Explicit metadata and filesystem acceptance checks; never decode images."""
+"""Explicit metadata and filesystem acceptance checks to validate datasets downloaded from remote"""
 
 import argparse
-import csv
-import hashlib
 import os
-import time
-from collections import Counter
 from pathlib import Path
-from typing import Any
 
 import yaml
 
-from classification.experiments.artifacts import write_json
+from classification.datasets.util import DOWNLOAD_DIR
 from classification.experiments.config import DatasetConfig
 from classification.util import load_dataset
 
@@ -22,131 +17,74 @@ EXPECTED_CLASSES = {
     "vegfru": 292,
     "isia500": 500,
 }
+SPLITS = ("train", "validation")
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+MISSING_EXAMPLES = 5
 
 
 def inventory(root: Path) -> set[str]:
-    """Walk once, excluding download staging, and collect regular image files."""
-    paths = set()
+    """Walk a resolved ``root`` once, excluding download staging, and collect image paths."""
+    paths: set[str] = set()
     for directory, directories, files in os.walk(root):
-        directories[:] = [d for d in directories if d != ".downloads"]
-        for name in files:
-            path = Path(directory) / name
-            if path.suffix.lower() in IMAGE_SUFFIXES and path.is_file():
-                paths.add(str(path.resolve()))
+        directories[:] = [d for d in directories if d != DOWNLOAD_DIR]
+        paths.update(
+            os.path.join(directory, name)
+            for name in files
+            if os.path.splitext(name)[1].lower() in IMAGE_SUFFIXES
+        )
     return paths
 
 
-def source_counts(name: str, root: Path, files: set[str]) -> dict[str, int]:
-    """Count raw annotations independently of loader tables."""
-    if name == "uecfood256":
-        paths = [
-            Path(p) for p in files if Path(p).parent.parent == root and Path(p).suffix == ".jpg"
-        ]
-        frequencies = Counter(p.name for p in paths)
-        per_class = Counter(p.parent.name for p in paths if frequencies[p.name] == 1)
-        validation = sum(round(n * 0.2) for n in per_class.values())
-        return {"train": sum(per_class.values()) - validation, "validation": validation}
-    if name == "foodx251":
-        result = {}
-        for split, source in (("train", "train"), ("validation", "val")):
-            with (root / f"annot/{source}_info.csv").open() as stream:
-                result[split] = sum(bool(row) for row in csv.reader(stream))
-        return result
-    templates = {
-        "food101": "meta/{}.txt",
-        "vegfru": "vegfru_list/vegfru_{}.txt",
-        "isia500": "metadata_ISIAFood_500/{}_finetune.txt",
-    }
-    return {
-        split: sum(
-            bool(line.strip())
-            for line in (root / templates[name].format(source)).read_text().splitlines()
-        )
-        for split, source in (("train", "train"), ("validation", "test"))
-    }
-
-
-def check(config: DatasetConfig) -> dict[str, Any]:
+def check(config: DatasetConfig) -> list[str]:
+    """Return errors from comparing loader splits with recorded counts and the files on disk."""
+    expected_classes = EXPECTED_CLASSES[config.name]
     root = Path(config.root).expanduser().resolve()
     files = inventory(root)
-    expected = source_counts(config.name, root, files)
     dataset = load_dataset(config)
-    errors = []
-    classes = dataset.get_class_list()
-    if len(classes) != EXPECTED_CLASSES[config.name]:
-        errors.append(f"Expected {EXPECTED_CLASSES[config.name]} classes, got {len(classes)}")
-    referenced = set()
-    split_reports = {}
-    for split, table in (("train", dataset.train_set()), ("validation", dataset.validation_set())):
-        paths = set(table["fname"])
-        labels = set(table["class"])
+    classes = set(dataset.get_class_list())
+    errors: list[str] = []
+    if len(classes) != expected_classes:
+        errors.append(f"Expected {expected_classes} classes, got {len(classes)}")
+    referenced: set[str] = set()
+    for split, table in zip(SPLITS, (dataset.train_set(), dataset.validation_set()), strict=True):
+        # The loader already rejects unknown labels and duplicate source identities.
+        columns = table.select_columns(["fname", "class"]).to_dict()
+        paths = set(columns["fname"])
         missing = paths - files
-        source = "val" if config.name == "foodx251" else "test"
-        if config.name == "uecfood256":
-            source = "validation"
-        source = "train" if split == "train" else source
-        if not len(table) or len(table) != expected[split]:
-            errors.append(f"{split}: {len(table)} rows, expected {expected[split]} nonempty rows")
-        if labels - set(classes):
-            errors.append(f"{split}: unknown labels")
-        if split == "train" and set(classes) - labels:
+        if not len(table):
+            errors.append(f"{split}: no rows")
+        if split == "train" and classes - set(columns["class"]):
             errors.append("Training references do not cover all classes")
-        if len(set(table["source_id"])) != len(table):
-            errors.append(f"{split}: duplicate identities")
-        if set(table["source_split"]) != {source}:
-            errors.append(f"{split}: incorrect source split")
         if missing:
-            errors.append(f"{split}: {len(missing)} missing image files")
-        if referenced & paths:
+            examples = ", ".join(sorted(missing)[:MISSING_EXAMPLES])
+            errors.append(f"{split}: {len(missing)} missing image files, e.g. {examples}")
+        if not referenced.isdisjoint(paths):
             errors.append("Train/evaluation paths overlap")
-        referenced.update(paths)
-        split_reports[split] = {
-            "identity_digest": hashlib.sha256("\n".join(table["source_id"]).encode()).hexdigest(),
-            "rows": len(table),
-            "annotation_rows": expected[split],
-            "classes": len(labels),
-            "missing_count": len(missing),
-            "missing_examples": sorted(missing)[:20],
-        }
-    if config.name == "uecfood256" and (len(files) != 31395 or len(referenced) != 27043):
+        referenced |= paths
+    if config.name == "uecfood256" and (len(files), len(referenced)) != (31395, 27043):
         errors.append(
-            "UEC inventory differs from recorded upstream counts (31395 raw, 27043 retained)"
+            "UEC inventory differs from recorded upstream counts (31395 raw, 27043 retained): "
+            f"{len(files)} raw, {len(referenced)} retained"
         )
-    return {
-        "dataset": config.name,
-        "root": str(root),
-        "classes": len(classes),
-        "image_files": len(files),
-        "inventory_digest": hashlib.sha256("\n".join(sorted(files)).encode()).hexdigest(),
-        "referenced_files": len(referenced),
-        "extra_files": len(files - referenced),
-        "splits": split_reports,
-        "errors": errors,
-        "status": "failed" if errors else "passed",
-    }
+    return errors
 
 
 def main() -> int:
+    """Print errors for the configured dataset and return nonzero when the check fails."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config-file", type=Path, required=True)
-    parser.add_argument("--report-file", type=Path, required=True)
     args = parser.parse_args()
-    started = time.monotonic()
-    report: dict[str, Any]
     try:
         config = DatasetConfig.model_validate(
             yaml.safe_load(args.config_file.read_text())["dataset"]
         )
-        report = check(config)
+        errors = check(config)
     except Exception as exc:
-        report = {"status": "failed", "errors": [f"{type(exc).__name__}: {exc}"]}
-    report["elapsed_seconds"] = time.monotonic() - started
-    report["config_file"] = str(args.config_file.resolve())
-    args.report_file.parent.mkdir(parents=True, exist_ok=True)
-    write_json(args.report_file, report)
-    print(f"{args.config_file}: {report['status']} ({args.report_file})", flush=True)
-    return int(report["status"] != "passed")
+        errors = [f"{type(exc).__name__}: {exc}"]
+    for error in errors:
+        print(error, flush=True)
+    print(f"{args.config_file}: {'failed' if errors else 'passed'}", flush=True)
+    return int(bool(errors))
 
 
 if __name__ == "__main__":

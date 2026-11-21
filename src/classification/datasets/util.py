@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 import httpx
 
 RETRY_DELAY = 10.0
+DOWNLOAD_DIR = ".downloads"
+"""Staging directory under each dataset root for archives and partial downloads."""
 
 
 def fetch_archive(
@@ -32,7 +34,7 @@ def fetch_archive(
     request, resuming, after an ``httpx.TransportError`` such as a dropped connection,
     waiting ``RETRY_DELAY`` seconds first.
     """
-    target = root / ".downloads" / Path(urlparse(url).path).name
+    target = root / DOWNLOAD_DIR / Path(urlparse(url).path).name
     if target.exists():
         return target
     target.parent.mkdir(parents=True, exist_ok=True)

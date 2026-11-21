@@ -9,11 +9,10 @@ cloud requests requires authorization under the root guide.
 ## Package scripts
 
 From the classification Pixi environment, run
-`python -m classification.scripts.check_dataset --config-file CONFIG --report-file REPORT`
-to compare the loader's split membership, labels and referenced paths against the
-installed metadata and file inventory. The JSON report includes counts, identity
-and filename digests, and errors. Failed checks exit nonzero. Image files are
-inventoried without decoding their contents.
+`python -m classification.scripts.check_dataset --config-file CONFIG`
+to compare the loader's class count, label coverage and referenced paths against
+recorded upstream counts and the installed file inventory. It prints each error and
+exits nonzero on failure. Image files are inventoried without decoding their contents.
 
 [`src/classification/scripts/smoke_jina.py`](../../src/classification/scripts/smoke_jina.py) is an
 explicit real-checkpoint CPU check invoked as
@@ -60,6 +59,14 @@ the run/evaluation wrappers currently default to `dgx2`. The configured LanceDB
 path must be accessible from participating nodes. Use separate output directories
 for evaluation jobs and follow the writer/reader contract in
 [experiments](experiments.md).
+
+### Dataset download acceptance
+
+From the repository root, submit `sbatch sbatch/download_datasets.sbatch LOG_DIR`
+with the account, partition and CPU architecture appropriate to the installed Pixi
+environment. This job downloads five datasets and checks each installation. Use a
+new log directory for each run. Read `summary.tsv` for per-dataset outcomes and
+`<dataset>.download.log` or `<dataset>.check.log` for failures. This workflow requires authorization for real downloads and storage.
 
 ## Sweep submitters
 
