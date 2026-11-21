@@ -146,3 +146,14 @@ the dimension submitter queues it automatically.
 
 To add another sweep type, have its submitter write a manifest and pass each run
 `--set result_file=GROUP_DIR/results/<run>.json`.
+
+## FoodX251 image-count comparison
+
+Run `pixi run --manifest-path scripts/plotting/pixi.toml --as-is plot-image-count --manifest POINTS.json --annotation-dir data/FoodX-251/annot --output-dir PLOTS`.
+The input is a JSON array of objects with `model`, `cap` and `report` fields.
+Report paths are relative to the manifest. Include one report for each combination
+of EmbeddingGemma2, Gemini Embedding 2 and SigLIP2-giant with per-class image caps
+1, 5, 10, 20, 50, 100 and JSON `null` (all training images). Use the model IDs
+from the saved configurations. The plotter checks full width, k=10, image-only
+reference counts and predictions against the 11,994 validation annotations,
+then writes `accuracy.csv`, `accuracy.png` and `accuracy.pdf`.
