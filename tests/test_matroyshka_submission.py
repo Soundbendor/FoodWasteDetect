@@ -6,17 +6,29 @@ import subprocess
 from pathlib import Path
 from unittest.mock import Mock
 
-import pyarrow as pa
 import pytest
 
+from classification.retrieval.lancedb import LanceDBIndex
 from classification.scripts import prepare_matroyshka_sweep as preparation
+
+
+def write_tables(uri, width, validation_rows=2, metadata=None, prefix=""):
+    """Create reference and validation tables with constant vectors."""
+    names = {}
+    for kind, rows in [("reference", 2), ("validation", validation_rows)]:
+        name = names[kind] = f"{prefix}{kind}"
+        index = LanceDBIndex.create(uri, name, width, metadata=metadata)
+        index.table.add([
+            {"id": f"{name}-{i}", "class": "A", "source_kind": kind, "source_identity": str(i),
+             "value": "", "vector": [1.0] * width}
+            for i in range(rows)
+        ])
+    return names
 
 
 @pytest.fixture
 def source(tmp_path, monkeypatch):
     uri = tmp_path / "db"
-    for name in ["reference", "validation"]:
-        (uri / f"{name}.lance").mkdir(parents=True)
     config = dict(
         dataset=dict(name="foodx251", root=str(tmp_path / "raw")),
         embedding=dict(model_id="model"),
@@ -30,33 +42,30 @@ def source(tmp_path, monkeypatch):
     )
     index = tmp_path / "index.json"
     index.write_text(json.dumps(dict(config=config, uri=str(uri), table="reference")))
-    table = Mock()
-    table.count_rows.return_value = 2
-    connection = Mock()
-    connection.open_table.return_value = table
-    monkeypatch.setattr(preparation, "LanceDBConnection", Mock(return_value=connection))
+    dataset = Mock()
+    dataset.validation_set.return_value = [0, 1]
+    monkeypatch.setattr(preparation, "load_dataset", Mock(return_value=dataset))
     return dict(
         name="model",
         model_id="model",
-        max_dimension=768,
         index_summary=str(index),
         validation_table="validation",
-    ), table
+    ), uri
 
 
 @pytest.mark.parametrize(
     "width,expected",
     [
         (768, [128, 256, 512, 768]),
+        (1152, [128, 256, 512, 768, 1024, 1152]),
         (2048, [128, 256, 512, 768, 1024, 1536, 2048]),
         (3072, [128, 256, 512, 768, 1024, 1536, 2048, 3072]),
         (4096, [128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096]),
     ],
 )
 def test_native_grid_preserves_experiment(source, tmp_path, width, expected):
-    settings, table = source
-    settings["max_dimension"] = width
-    table.schema = pa.schema([pa.field("vector", pa.list_(pa.float32(), width))])
+    settings, uri = source
+    write_tables(uri, width)
     config = preparation.prepare(settings, tmp_path / "output")
     assert config.sweep_dimensions == expected
     assert config.embedding.device == "cpu"
@@ -66,25 +75,62 @@ def test_native_grid_preserves_experiment(source, tmp_path, width, expected):
 
 
 def test_missing_cache_and_wrong_width_rejected(source, tmp_path):
-    settings, table = source
+    settings, uri = source
     settings["validation_table"] = None
-    with pytest.raises(ValueError, match="No distinct validation"):
+    with pytest.raises(ValueError, match="validation_table must be nonempty"):
         preparation.prepare(settings, tmp_path)
-    preparation.LanceDBConnection.assert_not_called()
     settings["validation_table"] = "validation"
-    table.schema = pa.schema([pa.field("vector", pa.list_(pa.float32(), 512))])
-    with pytest.raises(ValueError, match="expected full width"):
+    with pytest.raises(FileNotFoundError):
+        preparation.prepare(settings, tmp_path)
+    write_tables(uri, 512)
+    settings["max_dimension"] = 768
+    with pytest.raises(ValueError, match="expected width 768, stored width 512"):
+        preparation.prepare(settings, tmp_path)
+
+
+def test_partial_validation_cache_rejected(source, tmp_path):
+    settings, uri = source
+    write_tables(uri, 128, validation_rows=1)
+    with pytest.raises(ValueError, match="1 rows, validation split has 2"):
         preparation.prepare(settings, tmp_path)
 
 
 def test_wrong_model_metadata_rejected(source, tmp_path):
-    settings, table = source
-    table.schema = pa.schema(
-        [pa.field("vector", pa.list_(pa.float32(), 768))],
-        metadata={"classification.build": json.dumps({"embedding": {"model_id": "other"}})},
-    )
+    settings, uri = source
+    snapshot = json.dumps({"embedding": {"model_id": "other"}})
+    write_tables(uri, 768, metadata={"classification.build": snapshot})
     with pytest.raises(ValueError, match="stored model differs"):
         preparation.prepare(settings, tmp_path)
+
+
+def test_unusable_and_shared_sources_skipped(source, tmp_path, capsys):
+    settings, uri = source
+    write_tables(uri, 128)
+    write_tables(uri, 128, prefix="other_")
+    sources = [
+        settings,
+        dict(settings, name="shared"),
+        dict(settings, name="string_width", max_dimension="128"),
+        dict(settings, name="other", validation_table="other_validation"),
+    ]
+    manifest = tmp_path / "sources.json"
+    manifest.write_text(json.dumps(sources))
+    output = tmp_path / "output"
+    preparation.main(["--sources", str(manifest), "--output-dir", str(output)])
+    printed = capsys.readouterr().out
+    assert "SKIP shared: ValueError: shares a source table with model" in printed
+    assert "SKIP string_width: ValueError" in printed
+    jobs = (output / "jobs.tsv").read_text().splitlines()
+    # "other" reuses the reference table, so only the first source is ready.
+    assert [line.split("\t")[0] for line in jobs] == ["model"]
+
+
+def test_unnamed_source_is_a_usage_error(source, tmp_path):
+    settings, _ = source
+    manifest = tmp_path / "sources.json"
+    manifest.write_text(json.dumps([{k: v for k, v in settings.items() if k != "name"}]))
+    with pytest.raises(SystemExit, match="2"):
+        preparation.main(["--sources", str(manifest), "--output-dir", str(tmp_path / "out")])
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
