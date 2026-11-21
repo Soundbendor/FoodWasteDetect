@@ -1,6 +1,8 @@
 """Evaluate cached embeddings at stored and shorter prefix dimensions."""
 
 import contextlib
+import json
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +40,38 @@ def validate_config(config: ExperimentConfig, dimensions: list[int], source_widt
         raise ValueError("Sweep source and destination table names must be distinct")
 
 
+def open_sources(config: ExperimentConfig) -> tuple[LanceDBIndex, LanceDBIndex]:
+    """Open the reference and validation tables and check width and stored provenance."""
+    uri = config.lancedb.uri
+    validation_table = config.lancedb.require_validation_table()
+    reference = LanceDBIndex.open(uri, config.lancedb.table)
+    validation = LanceDBIndex.open(uri, validation_table)
+    if reference.dimension != validation.dimension:
+        raise ValueError("Source vector widths must match")
+    if reference.table.count_rows() == 0:
+        raise ValueError(f"Empty reference table: {reference.name}")
+    embedding = config.embedding
+    for index in (reference, validation):
+        encoded = (index.table.schema.metadata or {}).get(b"classification.build")
+        if encoded is None:
+            logging.warning("%s: no build metadata; relying on explicit selection", index.name)
+            continue
+        built = json.loads(encoded)["embedding"]
+        if built["model_id"] != embedding.model_id:
+            raise ValueError(f"{index.name}: stored model differs from configured model")
+        prompt = built.get("vertex", {}).get("classification_prompt", False)
+        if prompt != embedding.vertex.classification_prompt:
+            raise ValueError(f"{index.name}: stored Vertex prompt differs from config")
+    return reference, validation
+
+
+def check_validation_rows(validation: LanceDBIndex, dataset: FoodImageDataset) -> None:
+    """Require one cached vector per validation image."""
+    rows, expected = validation.table.count_rows(), len(dataset.validation_set())
+    if rows != expected:
+        raise ValueError(f"{validation.name}: {rows} rows, validation split has {expected}")
+
+
 def _evaluate_cached(
     dataset: FoodImageDataset,
 ) -> Callable[[ExperimentConfig, Tracker], EvaluationReport]:
@@ -56,15 +90,12 @@ def run_sweep(config: ExperimentConfig) -> dict[str, list[dict[str, Any]]]:
     dimensions = config.sweep_dimensions
     if dimensions is None:
         raise ValueError("sweep_dimensions is required for sweeps")
-    uri = config.lancedb.uri
-    validation_source = config.lancedb.require_validation_table()
-    reference_index = LanceDBIndex.open(uri, config.lancedb.table)
-    validation_index = LanceDBIndex.open(uri, validation_source)
-    if reference_index.dimension != validation_index.dimension:
-        raise ValueError("Source vector widths must match")
+    reference_index, validation_index = open_sources(config)
     source_width = reference_index.dimension
     validate_config(config, dimensions, source_width)
-    execute = _evaluate_cached(load_dataset(config.dataset))
+    dataset = load_dataset(config.dataset)
+    check_validation_rows(validation_index, dataset)
+    execute = _evaluate_cached(dataset)
     output = Path(config.output_dir).expanduser().resolve() / datetime.now(UTC).strftime(
         "matroyshka_sweep_%Y%m%dT%H%M%S_%fZ"
     )

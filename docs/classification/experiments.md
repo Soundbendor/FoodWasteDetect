@@ -176,8 +176,11 @@ sweep; other stages and historical snapshots may omit it. The shipped Gemini
 configuration uses 768, 1536, and 3072. The source reference and validation
 vector fields must be fixed-size lists of the same positive width; all targets
 must fit that stored width, including when the sources are already truncated.
-The sweep makes no embedding requests and performs no completeness validation. Missing cached
-vectors fail instead of being regenerated. Evaluation uses the configured `k` and
+The sweep makes no embedding requests. Before any write it requires a nonempty
+reference table and stored model ID and Vertex prompt that match the config, when a
+`classification.build` snapshot exists; legacy tables without one log a warning.
+After loading dataset metadata, it requires one validation row per validation
+image. Missing cached vectors fail instead of being regenerated. Evaluation uses the configured `k` and
 batch size.
 
 Both source names and all derived names must be distinct, even if the stored
