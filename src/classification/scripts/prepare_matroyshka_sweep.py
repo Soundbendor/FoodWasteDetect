@@ -33,6 +33,8 @@ def prepare(source: dict, output: Path) -> ExperimentConfig:
     config.sweep_dimensions = [d for d in DIMENSIONS if d < width] + [width]
     config.cache_validation_embeddings = True
     config.output_dir = str(output / source["name"])
+    # The sweep writes results/<name>_d<dimension>.json beside this stem.
+    config.result_file = str(output / "results" / f"{source['name']}.json")
     return ExperimentConfig.model_validate(config.model_dump())
 
 
@@ -49,7 +51,7 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("Source names must be unique lowercase letters, digits, or underscores")
     output = Path(args.output_dir).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=False)
-    jobs = []
+    jobs, runs = [], []
     # Concurrent jobs sharing a source table would race on its derived prefix tables.
     owners: dict[tuple[str, str], str] = {}
     for source in sources:
@@ -69,6 +71,15 @@ def main(argv: list[str] | None = None) -> None:
         path = output / f"{name}.json"
         write_json(path, config.model_dump(mode="json"))
         jobs.append(f"{name}\t{path}\n")
+        runs += [
+            dict(
+                run=f"{name}_d{dimension}",
+                source=name,
+                model_id=config.embedding.model_id,
+                dimension=dimension,
+            )
+            for dimension in config.sweep_dimensions or []
+        ]
         print(
             f"READY {name}: {config.lancedb.table}, dimensions={config.sweep_dimensions}",
             flush=True,
@@ -78,6 +89,8 @@ def main(argv: list[str] | None = None) -> None:
             f"descriptions={config.embed_descriptions}, cap={config.n_imgs_per_class}, k={config.k}"
         )
     (output / "jobs.tsv").write_text("".join(jobs))
+    # Expected runs; scripts/collect_results.py reads results/<run>.json for each.
+    write_json(output / "manifest.json", {"runs": runs})
     if not jobs:
         parser.exit(1, "No models have usable full-width reference and validation tables.\n")
 

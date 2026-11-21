@@ -72,6 +72,7 @@ def test_native_grid_preserves_experiment(source, tmp_path, width, expected):
     assert config.embedding.truncate_dim is None
     assert config.embed_class_labels and config.n_imgs_per_class == 20
     assert config.k == 10 and config.cache_validation_embeddings
+    assert config.result_file == str(tmp_path / "output/results/model.json")
 
 
 def test_missing_cache_and_wrong_width_rejected(source, tmp_path):
@@ -123,6 +124,8 @@ def test_unusable_and_shared_sources_skipped(source, tmp_path, capsys):
     jobs = (output / "jobs.tsv").read_text().splitlines()
     # "other" reuses the reference table, so only the first source is ready.
     assert [line.split("\t")[0] for line in jobs] == ["model"]
+    runs = json.loads((output / "manifest.json").read_text())["runs"]
+    assert runs == [dict(run="model_d128", source="model", model_id="model", dimension=128)]
 
 
 def test_unnamed_source_is_a_usage_error(source, tmp_path):
@@ -175,7 +178,14 @@ echo 12345
     assert "Resolved configs" in result.stdout
     if dry_run:
         assert not calls.exists()
+        assert "--dependency=afterany:<job ids> sbatch/plot_matroyshka_sweep.sbatch" in result.stdout
     else:
         recorded = calls.read_text()
         assert recorded.count("sbatch/run_matroyshka_sweep.sbatch") == 2
         assert "/a path/qwen.json" in recorded and "/a path/gemini.json" in recorded
+        # One finalizer runs after both sweeps end, pointed at the submission directory.
+        finalizer = recorded.splitlines()[-3:]
+        assert finalizer[:2] == ["--dependency=afterany:12345:12345", "sbatch/plot_matroyshka_sweep.sbatch"]
+        assert Path(finalizer[2]).parent == tmp_path / "output"
+        submitted = (Path(finalizer[2]) / "submitted.tsv").read_text().splitlines()
+        assert [line.split("\t")[0] for line in submitted] == ["qwen", "gemini_v2", "plot"]

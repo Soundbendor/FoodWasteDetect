@@ -234,7 +234,15 @@ class Experiment:
         run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
         run_dir.mkdir(parents=True)
         report_path = run_dir / "report.json"
-        write_json(report_path, report.model_dump(mode="json"))
+        payload = report.model_dump(mode="json")
+        write_json(report_path, payload)
+        if self.config.result_file:
+            # A fixed path, so a rerun replaces its record instead of adding another.
+            result_path = Path(self.config.result_file).expanduser().resolve()
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            record = {key: value for key, value in payload.items() if key != "predictions"}
+            record["metrics"] = {k: v for k, v in payload["metrics"].items() if k != "per_class"}
+            write_json(result_path, record | {"report": str(report_path)})
         if self.tracker:
             self.tracker.evaluation(report, report_path)
         return report

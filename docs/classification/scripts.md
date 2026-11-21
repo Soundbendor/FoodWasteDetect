@@ -88,8 +88,14 @@ and validation tables. From the repository root run
 `bash scripts/submit_matroyshka_sweep.sh --dry-run SOURCES.json` to prepare the
 configs and preview the commands. Omit `--dry-run` to submit one CPU job per
 usable model. Set `SBATCH_ACCOUNT` and `SBATCH_PARTITION` as needed. Both modes
-save resolved configs and a job manifest under `assets/matroyshka`, configurable
-via `MATROYSHKA_OUTPUT_ROOT`. Submission records job IDs in `submitted.tsv`.
+save resolved configs, `jobs.tsv`, and `manifest.json` under `assets/matroyshka`,
+configurable via `MATROYSHKA_OUTPUT_ROOT`. The manifest lists every expected run
+with its `run`, `source`, `model_id`, and `dimension`; each prepared config's
+`result_file` sends that run's record to `results/<run>.json` in the same
+directory. Submission records job IDs in `submitted.tsv`, then submits
+`plot_matroyshka_sweep.sbatch` with `--dependency=afterany:` on all of them, so
+collection and plotting run once every sweep has ended. Prepare the plotting
+environment before submitting.
 Preparation reads the stored width from the reference table and sweeps the grid
 widths below it plus that width. `max_dimension` is an optional assertion. It
 runs the sweep's source checks (see [experiments](experiments.md#cached-matryoshka-sweep))
@@ -117,3 +123,26 @@ Shared saved descriptions keep model comparisons on the same vocabulary; concurr
 jobs that generate descriptions need distinct Ollama endpoints. Wrapper checks in
 [`tests/test_classification_cli.py`](../../tests/test_classification_cli.py) use fake executables and do
 not submit jobs or validate HPC execution.
+
+## Collecting and plotting results
+
+`scripts/collect_results.py` and `scripts/plot_matroyshka_sweep.py` run in the
+plotting environment and import nothing from the package. A group directory holds
+`manifest.json` and `results/<run>.json` records ([format](experiments.md#artifact-and-failure-contract)).
+
+Run `pixi run --manifest-path scripts/plotting/pixi.toml --as-is collect GROUP_DIR`
+from the repository root. It writes `results.csv` with one row per manifest run:
+the manifest fields, `status` (`done` or `missing`), aggregate metrics, and the
+report path. It exits nonzero when runs are missing unless `--allow-partial` is
+given, and always when none are done. Dataset, `k`, reference switches, image cap,
+and evaluated count must match across runs; a setting named as a manifest field is
+a declared axis and may vary.
+
+Run `pixi run --manifest-path scripts/plotting/pixi.toml --as-is plot GROUP_DIR/results.csv --output accuracy.png`
+to draw majority-vote accuracy against dimension, one curve per `model_id`. Missing
+runs are omitted and the title is marked partial. `sbatch sbatch/plot_matroyshka_sweep.sbatch GROUP_DIR`
+runs both steps with `--allow-partial` and writes `GROUP_DIR/plots/matroyshka_accuracy.png`;
+the dimension submitter queues it automatically.
+
+To add another sweep type, have its submitter write a manifest and pass each run
+`--set result_file=GROUP_DIR/results/<run>.json`.
