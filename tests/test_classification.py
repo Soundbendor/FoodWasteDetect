@@ -770,6 +770,21 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(fresh.build_vector_database().model_dump(mode="json"), artifact)
         self.embedder_constructor.assert_not_called()
 
+    def test_result_file_holds_latest_compact_record(self):
+        exp = self.experiment()
+        exp.config.result_file = str(self.root / 'group/results/run.json')
+        exp.build_vector_database()
+        for _ in range(2):
+            report = exp.evaluate().model_dump(mode="json")
+            record = json.loads((self.root / 'group/results/run.json').read_text())
+            latest = max(exp.output.glob('evaluation_*/report.json'))
+            self.assertEqual(record['report'], str(latest))
+        self.assertEqual([p.name for p in (self.root / 'group/results').iterdir()], ['run.json'])
+        self.assertNotIn('predictions', record)
+        self.assertNotIn('per_class', record['metrics'])
+        self.assertEqual(record['metrics']['majority_vote_accuracy'], report['metrics']['majority_vote_accuracy'])
+        self.assertEqual(record['config'], report['config'])
+
     def test_evaluation_uses_configured_table_with_stale_summary(self):
         exp = self.experiment()
         exp.build_vector_database()

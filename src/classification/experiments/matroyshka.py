@@ -109,6 +109,9 @@ def run_sweep(config: ExperimentConfig) -> dict[str, list[dict[str, Any]]]:
         settings["lancedb"].update(table=reference, validation_table=validation)
         settings["cache_validation_embeddings"] = True
         settings["output_dir"] = str(output / f"d{dimension}")
+        if config.result_file:
+            base = Path(config.result_file)
+            settings["result_file"] = str(base.with_name(f"{base.stem}_d{dimension}.json"))
         effective = ExperimentConfig.model_validate(settings)
         if dimension != source_width:
             for source, destination in zip(sources, (reference, validation), strict=True):

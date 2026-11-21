@@ -13,5 +13,7 @@ export CUDA_VISIBLE_DEVICES=""
 export MPLBACKEND=Agg
 export MPLCONFIGDIR="${SLURM_TMPDIR:-/tmp}/matroyshka-mpl-${SLURM_JOB_ID}"
 export OMP_NUM_THREADS=1
+# Failed sweeps still yield a table naming the missing runs and a partial figure.
+pixi run --manifest-path scripts/plotting/pixi.toml --as-is collect "$run_dir" --allow-partial
 exec pixi run --manifest-path scripts/plotting/pixi.toml --as-is plot \
-  "$run_dir" --output "$run_dir/plots/matroyshka_accuracy.png"
+  "$run_dir/results.csv" --output "$run_dir/plots/matroyshka_accuracy.png"

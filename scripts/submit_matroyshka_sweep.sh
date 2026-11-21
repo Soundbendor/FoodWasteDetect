@@ -27,6 +27,7 @@ pixi run --manifest-path src/classification/pyproject.toml --as-is -e default \
   python -m classification.scripts.prepare_matroyshka_sweep \
   --sources "$sources" --output-dir "$output"
 
+ids=()
 while IFS=$'\t' read -r name config; do
   command=(sbatch --parsable --job-name="matroyshka-$name"
     sbatch/run_matroyshka_sweep.sbatch "$config")
@@ -36,6 +37,15 @@ while IFS=$'\t' read -r name config; do
   else
     job_id=$("${command[@]}")
     printf '%s\t%s\t%s\n' "$name" "$job_id" "$config" | tee -a "$output/submitted.tsv"
+    ids+=("${job_id%%;*}")
   fi
 done < "$output/jobs.tsv"
+# Collect results and plot once every sweep has ended, whether or not it succeeded.
+if "$dry_run"; then
+  printf 'sbatch --parsable --dependency=afterany:<job ids> sbatch/plot_matroyshka_sweep.sbatch %q\n' "$output"
+else
+  plot_id=$(sbatch --parsable --dependency="afterany:$(IFS=:; echo "${ids[*]}")" \
+    sbatch/plot_matroyshka_sweep.sbatch "$output")
+  printf 'plot\t%s\t%s\n' "$plot_id" "$output" | tee -a "$output/submitted.tsv"
+fi
 echo "Resolved configs and job manifest: $output"

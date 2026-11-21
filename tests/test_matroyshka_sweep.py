@@ -264,8 +264,9 @@ def test_mismatched_snapshot_fails_before_dataset_or_writes(sources, tracked, mo
     assert tracked == []
 
 
-def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
+def test_later_failure_preserves_completed_report(sources, runs, monkeypatch, tmp_path):
     config, _, _, _ = sources
+    config['result_file'] = str(tmp_path / 'group/results/gemini.json')
     class FailingExperiment(Experiment):
         def evaluate_cached(self):
             if self.config.embedding.truncate_dim == 1536:
@@ -275,9 +276,17 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     monkeypatch.setattr(sweep, 'Experiment', FailingExperiment)
     with pytest.raises(RuntimeError, match='later failure'):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
-    assert len(list(Path(config['output_dir']).rglob('report.json'))) == 1
+    report_path, = Path(config['output_dir']).rglob('report.json')
     assert not list(Path(config['output_dir']).rglob('summary.json'))
     assert len(runs) == 2
+    record_path, = (tmp_path / 'group/results').iterdir()
+    assert record_path.name == 'gemini_d768.json'
+    record = json.loads(record_path.read_text())
+    report = json.loads(report_path.read_text())
+    assert set(record) == {'config', 'table', 'reference_source_counts', 'metrics', 'report'}
+    assert record['report'] == str(report_path)
+    assert record['config'] == report['config'] and record['config']['vector_dimension'] == 768
+    assert record['metrics'] == {k: v for k, v in report['metrics'].items() if k != 'per_class'}
     assert runs[1][0].__exit__.call_args.args[0] is RuntimeError
 
 

@@ -9,6 +9,7 @@ matplotlib-base = ">=3.10,<4"
 pytest = ">=8,<10"
 
 [tasks]
+collect = { cmd = "python scripts/collect_results.py", cwd = "../.." }
 plot = { cmd = "python scripts/plot_matroyshka_sweep.py", cwd = "../.." }
-test = { cmd = "pytest -q -o addopts='' tests/test_plot_matroyshka_sweep.py tests/test_plot_image_count_sweep.py", cwd = "../.." }
+test = { cmd = "pytest -q -o addopts='' tests/test_collect_results.py tests/test_plot_matroyshka_sweep.py tests/test_plot_image_count_sweep.py", cwd = "../.." }
 plot-image-count = { cmd = "python scripts/plot_image_count_sweep.py", cwd = "../.." }

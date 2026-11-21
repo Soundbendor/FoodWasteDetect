@@ -99,6 +99,8 @@ class ExperimentConfig(ConfigModel):
     n_imgs_per_class: PositiveInt | None = None
     descriptions_file: str | None = None
     cache_validation_embeddings: bool = False
+    # Compact per-run record (settings and aggregate metrics) for group collection.
+    result_file: NonemptyString | None = None
     ollama: OllamaConfig | None = None
     description_count: PositiveInt | None = None
 
