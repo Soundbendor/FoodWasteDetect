@@ -166,6 +166,33 @@ tables are reused by identity without verifying compatibility; changing models,
 dimensions, prompts, descriptions, source inputs, or caps requires fresh tables
 and output directories.
 
+## Cached image-count sweep
+
+From the repository root, use the classification CPU Pixi environment to run
+`python scripts/run_cached_image_count_sweep.py --manifest INPUT.json --output-dir NEW_DIR`.
+Each source selects an uncapped image-only index summary, its declared full width
+and distinct positive training caps. Manifest paths resolve relative to the manifest.
+Paths inside saved experiment configs retain their original working-directory semantics.
+
+```json
+{
+  "sources": [{
+    "model": "google/embeddinggemma-2",
+    "index_summary": "embeddinggemma2/index.json",
+    "width": 768,
+    "caps": [1, 5]
+  }],
+  "reports": []
+}
+```
+
+Supply existing points as `{"model": "...", "cap": 20, "report": "prior/report.json"}`
+in `reports`. To verify a replay, include that cap in the source's caps and add
+`"replay": {"cap": 20, "selection": "prior/selection.json"}` to that source.
+A replay checks ordered reference IDs and per-image predictions. The output
+manifest lists historical and newly evaluated points with relative report paths.
+Use a fresh output directory for each attempt. Source tables are read-only.
+
 ## Cached Matryoshka sweep
 
 `experiment matroyshka-sweep` evaluates cached vector prefixes for any model ID.
