@@ -8,38 +8,6 @@ cloud requests requires authorization under the root guide.
 
 ## Package scripts
 
-For a VegFru-only download/install retry, submit
-`sbatch sbatch/download_vegfru.sbatch` from the repository root. It uses
-`soundbendor` for both partition and account, two AVX2 CPUs, 20 GB RAM,
-and the prepared Pixi `default` environment. It runs only `download_dataset`
-with `cfg/classification_vegfru.yml`; completed archives are reused.
-
-`classification.scripts.check_dataset --config-file FILE --report-file FILE`
-checks the configured dataset's complete train/evaluation metadata against raw
-annotation counts and an image-file inventory. It never decodes images. Reports
-include class coverage, missing files, unused images, and filename/identity digests
-for comparison across repeated downloads. UEC counts are additionally compared
-with the recorded upstream inventory. Errors produce a failed JSON report and a
-nonzero exit status.
-
-Submit `sbatch sbatch/check_datasets.sbatch logs/dataset-acceptance/RUN_ID` from
-the repository root for authorized real downloads. It uses the prepared Pixi
-`default` CPU environment, the `soundbendor` partition and account, an AVX2-capable CPU, two CPUs,
-20 GB memory, and 48 hours. The first real run on Ivy Bridge failed with an
-illegal instruction during CLI startup; the wrapper excludes those older CPUs
-and disables core dumps.
-It processes all five datasets sequentially, checks free disk headroom before
-each download, and probes ISIA metadata before its large image payload. Each
-successful installation is checked, downloaded again, and checked for unchanged
-counts and filename/identity digests. `summary.tsv` records download, validation,
-and repeat outcomes; a failure does not prevent subsequent datasets from running.
-Free filesystem capacity does not establish user quota. Partial transfers restart;
-completed archives are reused. Failed artifacts remain for diagnosis.
-
-These checks establish metadata and referenced-file completeness, not image-content
-integrity. Download logs and reports stay under ignored `logs/`; configured dataset
-roots stay under ignored `data/`. No models or services are started.
-
 [`src/classification/scripts/smoke_jina.py`](../../src/classification/scripts/smoke_jina.py) is an
 explicit real-checkpoint CPU check invoked as
 `python -m classification.scripts.smoke_jina`. It constructs Jina CLIP v2, encodes one
@@ -102,9 +70,16 @@ for evaluation jobs and follow the writer/reader contract in
 
 From the repository root, submit `sbatch sbatch/download_datasets.sbatch LOG_DIR`
 with the account, partition and CPU architecture appropriate to the installed Pixi
-environment. This job downloads five datasets and checks each installation. Use a
-new log directory for each run. Read `summary.tsv` for per-dataset outcomes and
-`<dataset>.download.log` or `<dataset>.check.log` for failures. This workflow requires authorization for real downloads and storage.
+environment. Use a new log directory for each run. The job downloads five datasets
+and checks each installation. Read `summary.tsv` for per-dataset outcomes and
+`<dataset>.download.log` or `<dataset>.check.log` for failures.
+
+To retry VegFru alone, run this command from the repository root.
+
+```sh
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default \
+  classification download_dataset --config_file cfg/classification_vegfru.yml
+```
 
 ## Sweep submitters
 
