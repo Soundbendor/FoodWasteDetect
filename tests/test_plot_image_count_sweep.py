@@ -7,8 +7,8 @@ import pytest
 
 pytest.importorskip("matplotlib")
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from plot_image_count_sweep import CAPS, COUNTS, MODELS, read_reports, render
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.plotting.plot_image_count_sweep import CAPS, COUNTS, MODELS, read_reports, render
 
 
 def test_shuffled_grid_and_invalid_reports(tmp_path):

@@ -126,8 +126,8 @@ not submit jobs or validate HPC execution.
 
 ## Collecting and plotting results
 
-`scripts/collect_results.py` and `scripts/plot_matroyshka_sweep.py` run in the
-plotting environment and import nothing from the package. A group directory holds
+`scripts/collect_results.py` and both plotters in `scripts/plotting/` run in the
+plotting environment independently of the classification package. A group directory holds
 `manifest.json` and `results/<run>.json` records ([format](experiments.md#artifact-and-failure-contract)).
 
 Run `pixi run --manifest-path scripts/plotting/pixi.toml --as-is collect GROUP_DIR`

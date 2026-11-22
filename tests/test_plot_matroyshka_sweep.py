@@ -1,17 +1,15 @@
 """Synthetic result tables; no models, datasets, databases, or network calls."""
 
 import csv
-import runpy
+import sys
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("matplotlib")
 
-script = runpy.run_path(
-    str(Path(__file__).resolve().parents[1] / "scripts/plot_matroyshka_sweep.py")
-)
-read_rows, plot = script["read_rows"], script["plot"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.plotting.plot_matroyshka_sweep import LABELS, plot, read_rows
 
 
 def write_results(path, rows):
@@ -26,7 +24,7 @@ def write_results(path, rows):
 
 
 def test_curves_come_from_the_table(tmp_path):
-    models = [*script["LABELS"], "example/unlabeled"]
+    models = [*LABELS, "example/unlabeled"]
     results = write_results(
         tmp_path / "results.csv",
         [(model, dimension, 0.75) for model in models for dimension in (256, 128)],
@@ -37,7 +35,7 @@ def test_curves_come_from_the_table(tmp_path):
     plot(rows, output)
     content = output.read_text()
     assert "Majority-vote validation accuracy (%)" in content
-    assert all(label in content for label in [*script["LABELS"].values(), "example/unlabeled"])
+    assert all(label in content for label in [*LABELS.values(), "example/unlabeled"])
     assert "partial results" not in content
 
 
