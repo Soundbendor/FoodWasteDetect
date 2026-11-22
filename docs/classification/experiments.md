@@ -148,11 +148,19 @@ a nonempty split and exactly one prediction per image required before saving.
 This is validation accuracy, not official test accuracy. Strict metadata/vector
 pairing is retained.
 
-A successful evaluation writes only `evaluation_<UTC timestamp>/report.json`,
+A successful evaluation writes `evaluation_<UTC timestamp>/report.json`,
 containing `config`, `table`, `reference_source_counts`, `predictions`, and
 `metrics`. Predictions contain image metadata, majority-vote label, vote
 fraction, nearest label, first-k neighbors, and per-query retrieval metrics.
 [Retrieval](retrieval.md) defines the denominators and abstention behavior.
+
+When `result_file` is set, the evaluation then writes a compact record to that
+exact path: the report without `predictions` or `metrics.per_class`, plus the
+`report` path. The path has no timestamp, so a rerun replaces its record.
+Submitters point related runs at one `results/` directory, list the expected
+runs in `manifest.json`, and [collect them](scripts.md#collecting-and-plotting-results)
+into one table. The record is written after the report and before tracker
+publication.
 
 `write_json()` serializes finite JSON with a trailing newline to a sibling
 `.tmp` file and replaces the destination. Tracking uploads reports only after
@@ -166,6 +174,33 @@ tables are reused by identity without verifying compatibility; changing models,
 dimensions, prompts, descriptions, source inputs, or caps requires fresh tables
 and output directories.
 
+## Cached image-count sweep
+
+From the repository root, use the classification CPU Pixi environment to run
+`python scripts/run_cached_image_count_sweep.py --manifest INPUT.json --output-dir NEW_DIR`.
+Each source selects an uncapped image-only index summary, its declared full width
+and distinct positive training caps. Manifest paths resolve relative to the manifest.
+Paths inside saved experiment configs retain their original working-directory semantics.
+
+```json
+{
+  "sources": [{
+    "model": "google/embeddinggemma-2",
+    "index_summary": "embeddinggemma2/index.json",
+    "width": 768,
+    "caps": [1, 5]
+  }],
+  "reports": []
+}
+```
+
+Supply existing points as `{"model": "...", "cap": 20, "report": "prior/report.json"}`
+in `reports`. To verify a replay, include that cap in the source's caps and add
+`"replay": {"cap": 20, "selection": "prior/selection.json"}` to that source.
+A replay checks ordered reference IDs and per-image predictions. The output
+manifest lists historical and newly evaluated points with relative report paths.
+Use a fresh output directory for each attempt. Source tables are read-only.
+
 ## Cached Matryoshka sweep
 
 `experiment matroyshka-sweep` evaluates cached vector prefixes for any model ID.
@@ -176,8 +211,11 @@ sweep; other stages and historical snapshots may omit it. The shipped Gemini
 configuration uses 768, 1536, and 3072. The source reference and validation
 vector fields must be fixed-size lists of the same positive width; all targets
 must fit that stored width, including when the sources are already truncated.
-The sweep makes no embedding requests and performs no completeness validation. Missing cached
-vectors fail instead of being regenerated. Evaluation uses the configured `k` and
+The sweep makes no embedding requests. Before any write it requires a nonempty
+reference table and stored model ID and Vertex prompt that match the config, when a
+`classification.build` snapshot exists; legacy tables without one log a warning.
+After loading dataset metadata, it requires one validation row per validation
+image. Missing cached vectors fail instead of being regenerated. Evaluation uses the configured `k` and
 batch size.
 
 Both source names and all derived names must be distinct, even if the stored
@@ -203,9 +241,12 @@ by the sweep folder name and tagged `d<dimension>` ([tracking](tracking.md#run-l
 with no outer run, explicit identity settings, or resume checks. Standard reports have null reference counts unless a matching
 index summary exists in their output directory.
 
+With `result_file` set to `<dir>/<name>.json`, each dimension writes its record to
+`<dir>/<name>_d<dimension>.json`.
+
 Only complete success writes `summary.json`, with dimensions, tables, output
-directories, aggregate metrics, and returned W&B run IDs. Reports from earlier
-dimensions survive later failures. Production sweeps require separate compute
+directories, aggregate metrics, and returned W&B run IDs. Reports and result
+records from earlier dimensions survive later failures. Production sweeps require separate compute
 authorization; routine checks use synthetic CPU tables and mocked tracking.
 
 ## Verification

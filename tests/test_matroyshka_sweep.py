@@ -236,19 +236,37 @@ def test_open_and_create_errors_propagate(sources, exists, monkeypatch):
     wrapper.drop_table.assert_not_called()
 
 
-def test_missing_vector_has_no_embedding_or_summary(sources, runs):
+def test_partial_validation_cache_fails_before_writes(sources, runs, monkeypatch):
     config, connection, _, _ = sources
     connection.open_table('validation').delete("source_identity = 'first'")
-    with pytest.raises(KeyError, match='first'):
+    prepare = Mock()
+    monkeypatch.setattr(LanceDBIndex, 'create_prefix_table', prepare)
+    with pytest.raises(ValueError, match='1 rows, validation split has 2'):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
-    assert len(runs) == 1
+    assert runs == []
+    prepare.assert_not_called()
     Experiment._create_embedder.assert_not_called()
-    assert not list(Path(config['output_dir']).rglob('report.json'))
     assert not list(Path(config['output_dir']).rglob('summary.json'))
 
 
-def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
+def test_mismatched_snapshot_fails_before_dataset_or_writes(sources, tracked, monkeypatch):
     config, _, _, _ = sources
+    snapshot = json.dumps({'embedding': {'model_id': 'other/model'}})
+    LanceDBIndex.create(config['lancedb']['uri'], 'foreign', 3072,
+                        metadata={'classification.build': snapshot})
+    config['lancedb']['validation_table'] = 'foreign'
+    prepare = Mock()
+    monkeypatch.setattr(LanceDBIndex, 'create_prefix_table', prepare)
+    with pytest.raises(ValueError, match='stored model differs'):
+        sweep.run_sweep(ExperimentConfig.model_validate(config))
+    prepare.assert_not_called()
+    sweep.load_dataset.assert_not_called()
+    assert tracked == []
+
+
+def test_later_failure_preserves_completed_report(sources, runs, monkeypatch, tmp_path):
+    config, _, _, _ = sources
+    config['result_file'] = str(tmp_path / 'group/results/gemini.json')
     class FailingExperiment(Experiment):
         def evaluate_cached(self):
             if self.config.embedding.truncate_dim == 1536:
@@ -258,9 +276,17 @@ def test_later_failure_preserves_completed_report(sources, runs, monkeypatch):
     monkeypatch.setattr(sweep, 'Experiment', FailingExperiment)
     with pytest.raises(RuntimeError, match='later failure'):
         cli._run_experiment(ExperimentConfig.model_validate(config), 'matroyshka-sweep')
-    assert len(list(Path(config['output_dir']).rglob('report.json'))) == 1
+    report_path, = Path(config['output_dir']).rglob('report.json')
     assert not list(Path(config['output_dir']).rglob('summary.json'))
     assert len(runs) == 2
+    record_path, = (tmp_path / 'group/results').iterdir()
+    assert record_path.name == 'gemini_d768.json'
+    record = json.loads(record_path.read_text())
+    report = json.loads(report_path.read_text())
+    assert set(record) == {'config', 'table', 'reference_source_counts', 'metrics', 'report'}
+    assert record['report'] == str(report_path)
+    assert record['config'] == report['config'] and record['config']['vector_dimension'] == 768
+    assert record['metrics'] == {k: v for k, v in report['metrics'].items() if k != 'per_class'}
     assert runs[1][0].__exit__.call_args.args[0] is RuntimeError
 
 

@@ -10,8 +10,8 @@ The manifest and lockfile are authoritative for exact dependency versions.
 
 | Environment | Model family | Runtime |
 | --- | --- | --- |
-| `default` | EmbeddingGemma2, OpenAI CLIP, Qwen | CPU, modern dependencies |
-| `cu126` | EmbeddingGemma2, OpenAI CLIP, Qwen | CUDA, modern dependencies |
+| `default` | EmbeddingGemma2, OpenAI CLIP, SigLIP 2, Qwen | CPU, modern dependencies |
+| `cu126` | EmbeddingGemma2, OpenAI CLIP, SigLIP 2, Qwen | CUDA, modern dependencies |
 | `jina-cpu` | Jina CLIP v2, Jina Embeddings v4 | CPU, Jina dependencies |
 | `jina-cu126` | Jina CLIP v2, Jina Embeddings v4 | CUDA, Jina dependencies |
 
@@ -21,6 +21,8 @@ explicitly. CPU and CUDA features remain separate. The current stack uses CPytho
 wheels. Its separate native Ollama package bundles CUDA 12.9. Qdrant remains
 installed for the legacy CLIP pipeline; whole-image retrieval uses embedded LanceDB.
 The Ollama Python SDK is a separate dependency from the native binary.
+Every environment includes conda-forge `p7zip` 16.02, whose `7z` unpacks the ISIA
+Food-500 split zip; run dataset downloads inside a Pixi environment.
 
 Slurm wrappers use `--as-is`, so prepare the selected environment before submission.
 Their defaults and model-family selection are described in
@@ -48,6 +50,12 @@ The scoped ty task uses `$CONDA_PREFIX` to avoid resolving an old `.venv`.
 Use the `build` task for packaging changes; it writes distributions under
 `src/classification/dist`. Run focused checks appropriate to the change and
 report failures against the unchanged baseline.
+
+## Report plotting
+
+Install the locked plotting environment with
+`pixi install --manifest-path scripts/plotting/pixi.toml --locked`.
+Run its synthetic checks with `pixi run --manifest-path scripts/plotting/pixi.toml --as-is test`.
 
 ## Evidence and acceptance
 

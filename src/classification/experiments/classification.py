@@ -9,7 +9,7 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from classification.datasets.image_dataset import FoodX251ImageDataset, load_dataset
+from classification.datasets.base import FoodImageDataset
 from classification.encoders.base import Embedder
 from classification.encoders.sentence_transformers import EmbeddingModel
 from classification.encoders.vertex import VertexEmbeddingModel
@@ -28,6 +28,7 @@ from classification.retrieval.lancedb import LanceDBIndex
 from classification.retrieval.metrics import metrics
 from classification.schemas import EmbeddingBatch
 from classification.tracking import Tracker
+from classification.util import load_dataset
 
 
 class Experiment:
@@ -45,7 +46,7 @@ class Experiment:
         config: ExperimentConfig,
         *,
         tracker: Tracker | None = None,
-        dataset: FoodX251ImageDataset | None = None,
+        dataset: FoodImageDataset | None = None,
     ) -> None:
         self.tracker = tracker
         # Load dataset metadata and settings
@@ -233,7 +234,15 @@ class Experiment:
         run_dir = self.output / datetime.now(UTC).strftime("evaluation_%Y%m%dT%H%M%S_%fZ")
         run_dir.mkdir(parents=True)
         report_path = run_dir / "report.json"
-        write_json(report_path, report.model_dump(mode="json"))
+        payload = report.model_dump(mode="json")
+        write_json(report_path, payload)
+        if self.config.result_file:
+            # A fixed path, so a rerun replaces its record instead of adding another.
+            result_path = Path(self.config.result_file).expanduser().resolve()
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            record = {key: value for key, value in payload.items() if key != "predictions"}
+            record["metrics"] = {k: v for k, v in payload["metrics"].items() if k != "per_class"}
+            write_json(result_path, record | {"report": str(report_path)})
         if self.tracker:
             self.tracker.evaluation(report, report_path)
         return report

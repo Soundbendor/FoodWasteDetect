@@ -4,6 +4,8 @@ assets/
 *__pycache__*
 logs/
 /data/
+/slurm-*.out
+/slurm-*.err
 
 .venv*/
 build/

@@ -1,0 +1,28 @@
+dataset:
+  name: foodx251
+  root: data/FoodX-251
+embed_class_labels: false
+embed_descriptions: false
+embed_images: true
+embedding:
+  batch_size: 1
+  device: cuda
+  model_id: jinaai/jina-embeddings-v4
+  truncate_dim: null
+k: 10
+lancedb:
+  table: foodx251_jina_v4_images_all_full
+  uri: assets/lancedb
+  validation_table: foodx251_jina_v4_validation_all_full
+n_imgs_per_class: null
+output_dir: assets/classification/jina_v4_images_all_full
+cache_validation_embeddings: true
+vector_dimension: 2048
+sweep_dimensions:
+- 128
+- 256
+- 512
+- 768
+- 1024
+- 1536
+- 2048

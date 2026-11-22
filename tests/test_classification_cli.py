@@ -27,7 +27,7 @@ def config_path(tmp_path):
 
 @pytest.mark.parametrize(
     "command",
-    [[], ["experiment"], ["experiment", "matroyshka-sweep"], ["download_model"]],
+    [[], ["experiment"], ["experiment", "matroyshka-sweep"], ["download_model"], ["download_dataset"]],
 )
 def test_help_before_loading(command):
     with patch("builtins.open", side_effect=AssertionError("file load")), pytest.raises(SystemExit) as error:
@@ -144,7 +144,7 @@ def test_download_validates_only_ollama_section(failure):
         session.return_value.__exit__.assert_called_once()
 
 
-@pytest.mark.parametrize("args", [[], ["unknown"], ["evaluate"], ["experiment"], ["experiment", "unknown"], ["download_model"], ["experiment", "run"]])
+@pytest.mark.parametrize("args", [[], ["unknown"], ["evaluate"], ["experiment"], ["experiment", "unknown"], ["download_model"], ["download_dataset"], ["experiment", "run"]])
 def test_invalid_commands(args):
     with pytest.raises(SystemExit) as error:
         main(args)
@@ -173,15 +173,16 @@ class SlurmOverrideTests(unittest.TestCase):
                 "jinaai/jina-clip-v2",
                 "jinaai/jina-embeddings-v4",
                 "google/embeddinggemma-2",
-                "openai/clip-vit-base-patch32",
+                "openai/clip-vit-large-patch14",
                 "Qwen/Qwen3-VL-Embedding-8B",
+                "google/siglip2-so400m-patch14-384",
             ]
             tables, outputs = [], []
             for extra in ([], [str(custom_config)]):
                 capture.write_bytes(b"")
                 subprocess.run(["bash", str(script), *extra], cwd=root, env=env, check=True)
                 submissions = capture.read_bytes().decode().removesuffix("\0\0").split("\0\0")
-                self.assertEqual(len(submissions), 5)
+                self.assertEqual(len(submissions), 6)
                 for model, submission in zip(models, submissions, strict=True):
                     args = submission.split("\0")
                     table = next(a.removeprefix("lancedb.table=") for a in args if a.startswith("lancedb.table="))
@@ -204,8 +205,8 @@ class SlurmOverrideTests(unittest.TestCase):
                     self.assertEqual(args, expected)
                     tables.append(table)
                     outputs.append(output)
-            self.assertEqual(len(set(tables)), 10)
-            self.assertEqual(len(set(outputs)), 10)
+            self.assertEqual(len(set(tables)), 12)
+            self.assertEqual(len(set(outputs)), 12)
 
     def test_wrappers_forward_arguments_and_keep_defaults(self):
         root = Path(__file__).resolve().parents[1]

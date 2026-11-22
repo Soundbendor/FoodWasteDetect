@@ -11,7 +11,7 @@ from datasets import Dataset
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-from classification.datasets.image_dataset import FoodX251ImageDataset
+from classification.datasets.base import FoodImageDataset
 from classification.encoders.base import Embedder
 from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions, text_references
@@ -31,7 +31,7 @@ class IndexBuilder:
         self,
         config: ExperimentConfig,
         *,
-        dataset: FoodX251ImageDataset,
+        dataset: FoodImageDataset,
         descriptions_path: Path,
         get_embedder: Callable[[], Embedder],
     ) -> None:
