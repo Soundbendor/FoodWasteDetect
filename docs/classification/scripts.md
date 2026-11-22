@@ -68,8 +68,9 @@ uses [the owned CLI lifecycle](data.md#class-descriptions-and-ollama).
 
 ## Full-width training and validation caches
 
-From the repository root, submit `sbatch sbatch/cache_full_width_images.sbatch MODEL`
-with a suitable GPU partition and account. Choose `qwen`, `jina_v4`, or
+From the repository root, submit `sbatch sbatch/cache_full_width_images.sbatch MODEL [CONFIG]`
+with a suitable GPU partition and account. Omit `CONFIG` to use
+`cfg/classification_${model}_images_all_full.yml`. Choose `qwen`, `jina_v4`, or
 `embeddinggemma2`. Prepare model weights and the CUDA Pixi environment first.
 The recipes embed all FoodX251 training images at native width, cache validation
 images and evaluate. Each model uses distinct reference and validation tables.

@@ -22,4 +22,4 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 # Model allowlist above excludes the paid Vertex backend.
 exec pixi run --manifest-path src/classification/pyproject.toml --as-is -e "$pixi_env" \
   classification experiment run \
-  --config_file "cfg/classification_${model}_images_all_full.yml"
+  --config_file "${2:-cfg/classification_${model}_images_all_full.yml}"
