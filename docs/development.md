@@ -51,6 +51,12 @@ report failures against the unchanged baseline.
 
 ## Evidence and acceptance
 
+The report plotting script has a small standalone environment in
+`scripts/plotting/pixi.toml` with its own committed lockfile. Install it with
+`pixi install --manifest-path scripts/plotting/pixi.toml --locked`; its `plot`
+and `test` tasks run from the repository root. This keeps Matplotlib separate
+from the model environments. See [script operations](classification/scripts.md#plotting-accuracy-against-dimension).
+
 [Experiment notes](experiments.md) retain environment constraints and cluster
 acceptance procedures, including the V100 kernel check. Synthetic tests establish
 contracts for their fixtures; they do not establish model accuracy, GPU support,

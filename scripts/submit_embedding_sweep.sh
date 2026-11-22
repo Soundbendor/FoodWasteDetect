@@ -18,10 +18,10 @@ sweep_id="embedding_$(date -u +%Y%m%dT%H%M%SZ)_$$"
 
 models=(
   "jinaai/jina-clip-v2"
-  "jinaai/jina-embeddings-v4"
+  # "jinaai/jina-embeddings-v4"
+  # "Qwen/Qwen3-VL-Embedding-8B"
   "google/embeddinggemma-2"
   "openai/clip-vit-base-patch32"
-  "Qwen/Qwen3-VL-Embedding-8B"
 )
 
 for i in "${!models[@]}"; do
@@ -33,7 +33,7 @@ for i in "${!models[@]}"; do
   fi
   overrides=()
   if [[ "$model" == "jinaai/jina-embeddings-v4" ]]; then
-    overrides+=(--set "embedding.batch_size=1")
+    overrides+=(--set "embedding.batch_size=16")
   elif [[ "$model" == "Qwen/Qwen3-VL-Embedding-8B" ]]; then
     overrides+=(--set "embedding.batch_size=8")
   fi

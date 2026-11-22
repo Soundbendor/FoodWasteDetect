@@ -8,6 +8,38 @@ cloud requests requires authorization under the root guide.
 
 ## Package scripts
 
+For a VegFru-only download/install retry, submit
+`sbatch sbatch/download_vegfru.sbatch` from the repository root. It uses
+`soundbendor` for both partition and account, two AVX2 CPUs, 20 GB RAM,
+and the prepared Pixi `default` environment. It runs only `download_dataset`
+with `cfg/classification_vegfru.yml`; completed archives are reused.
+
+`classification.scripts.check_dataset --config-file FILE --report-file FILE`
+checks the configured dataset's complete train/evaluation metadata against raw
+annotation counts and an image-file inventory. It never decodes images. Reports
+include class coverage, missing files, unused images, and filename/identity digests
+for comparison across repeated downloads. UEC counts are additionally compared
+with the recorded upstream inventory. Errors produce a failed JSON report and a
+nonzero exit status.
+
+Submit `sbatch sbatch/check_datasets.sbatch logs/dataset-acceptance/RUN_ID` from
+the repository root for authorized real downloads. It uses the prepared Pixi
+`default` CPU environment, the `soundbendor` partition and account, an AVX2-capable CPU, two CPUs,
+20 GB memory, and 48 hours. The first real run on Ivy Bridge failed with an
+illegal instruction during CLI startup; the wrapper excludes those older CPUs
+and disables core dumps.
+It processes all five datasets sequentially, checks free disk headroom before
+each download, and probes ISIA metadata before its large image payload. Each
+successful installation is checked, downloaded again, and checked for unchanged
+counts and filename/identity digests. `summary.tsv` records download, validation,
+and repeat outcomes; a failure does not prevent subsequent datasets from running.
+Free filesystem capacity does not establish user quota. Partial transfers restart;
+completed archives are reused. Failed artifacts remain for diagnosis.
+
+These checks establish metadata and referenced-file completeness, not image-content
+integrity. Download logs and reports stay under ignored `logs/`; configured dataset
+roots stay under ignored `data/`. No models or services are started.
+
 [`src/classification/scripts/smoke_jina.py`](../../src/classification/scripts/smoke_jina.py) is an
 explicit real-checkpoint CPU check invoked as
 `python -m classification.scripts.smoke_jina`. It constructs Jina CLIP v2, encodes one
@@ -74,3 +106,102 @@ Shared saved descriptions keep model comparisons on the same vocabulary; concurr
 jobs that generate descriptions need distinct Ollama endpoints. Wrapper checks in
 [`tests/test_classification_cli.py`](../../tests/test_classification_cli.py) use fake executables and do
 not submit jobs or validate HPC execution.
+
+### Cached dimension sweep submission
+
+Run `bash scripts/submit_matroyshka_sweep.sh --dry-run` to inspect ready jobs,
+or omit `--dry-run` to submit one CPU job per ready model. An optional final JSON
+path replaces `cfg/matroyshka_sources.json`. Both modes write resolved JSON configs
+and `jobs.tsv` below `assets/matroyshka/<timestamp>_<pid>`; set
+`MATROYSHKA_OUTPUT_ROOT` to change that parent. Submission also saves job IDs in
+`submitted.tsv`. If submission fails partway through, earlier jobs remain submitted.
+
+The sources file selects each model's saved `index.json` and validation table.
+`classification.scripts.prepare_matroyshka_sweep` preserves the saved dataset,
+reference strategy, prompt, and retrieval settings. It checks table existence,
+nonzero row counts, full vector widths, and available model/prompt build metadata.
+Legacy tables without build metadata rely on the explicitly selected index report
+and cache; provenance and cache completeness are not established by these checks.
+Missing or invalid pairs are skipped with a reason; no ready pairs exits nonzero.
+No embeddings, caches, or source tables are created by preparation.
+
+The checked-in selection points Qwen, Jina v4, and EmbeddingGemma2 to new
+`*_images_all_full` reference runs and `*_validation_all_full` validation tables.
+These use full-width vectors, all training images, and no text references. Run
+the GPU jobs described below to populate them before submitting cached sweeps.
+Gemini retains its existing compact reference and validation tables; neither
+of the GPU preparation jobs nor their configs selects the paid Vertex backend.
+
+Each job evaluates `[128,256,512,768,1024,1536,2048,3072,4096]` filtered to the
+model's declared maximum. The CPU wrapper uses `soundbendor` partition/account,
+AVX2, eight CPUs, 32 GB RAM, 24 hours, and the prepared Pixi `default` environment.
+Standard `SBATCH_*` variables can override submission resources. It hides GPUs,
+sets Hugging Face offline mode, and defaults W&B to offline (override with
+`WANDB_MODE`). Cached sweeps never construct an encoder, including for Jina.
+Jobs create normalized prefix tables and evaluation reports, but do not generate
+the combined plot. Avoid overlapping sweeps using the same source tables because
+they share derived table names; readable existing derived tables are reused.
+
+Synthetic preparation and fake-submission checks live in
+`tests/test_matroyshka_submission.py`.
+
+### Full-width local image cache generation
+
+Submit `sbatch sbatch/cache_full_width_images.sbatch MODEL`, where MODEL is
+`qwen`, `jina_v4`, or `embeddinggemma2`. The wrapper selects
+`cfg/classification_MODEL_images_all_full.yml` and runs `experiment run`:
+build all training-image embeddings, cache all validation-image embeddings, and
+evaluate. Configs disable class-name/description references and set
+`n_imgs_per_class: null`, `truncate_dim: null`, and validation caching enabled.
+All six tables have fresh names; prior mixed text/image and capped tables are
+unused. Rerunning resumes these new tables from completed batches.
+
+Jobs request one A40 GPU on `ampere`, account `eecs`, four CPUs, 48 GB host RAM,
+and 48 hours. Qwen uses batch size 2, Jina v4 uses 1, and Gemma uses 16.
+Prepare locked Pixi `cu126` and `jina-cu126` environments before submission;
+the wrapper uses `--as-is`, with `jina-cu126` for Jina and `cu126` otherwise.
+Cached model weights must be available because Hugging Face offline mode is
+enabled. W&B defaults to offline. Gemini is excluded from the wrapper's model
+allowlist; its existing embeddings remain selected for subsequent CPU sweeps.
+
+### Plotting accuracy against dimension
+
+`scripts/plot_matroyshka_sweep.py` reads `report.json` files recursively from
+one submission directory or several explicitly selected sweep directories.
+It plots `metrics.majority_vote_accuracy` as a percentage, using
+`config.vector_dimension` (or `embedding.truncate_dim`) for the x coordinate.
+It does not use nearest-neighbor accuracy. Model IDs select the four curves.
+
+The plotting environment is independent of the model environments:
+
+```sh
+pixi install --manifest-path scripts/plotting/pixi.toml --locked
+pixi run --manifest-path scripts/plotting/pixi.toml --as-is plot \
+  assets/matroyshka/RUN_ID --output assets/plots/matroyshka_accuracy.png
+```
+
+Replace `RUN_ID` with the directory printed by the sweep submitter. To combine
+jobs from different submissions, pass their specific model sweep directories as
+multiple positional arguments. Avoid passing all historical experiments together:
+duplicate model/dimension points are rejected rather than silently selecting or
+averaging runs. Dataset settings, reference switches, image cap, `k`, and evaluated
+image count must match across reports. These checks do not establish cache provenance.
+
+By default, all 28 points in the requested grid across Qwen, Jina v4, Gemma, and
+Gemini are required. `--allow-partial` permits unfinished sweeps, warns about missing
+dimensions, and labels the graph as partial. Available points are sorted numerically;
+each curve ends at that model's largest available dimension. Output may be PNG,
+SVG, or PDF. A sibling CSV records raw accuracy fractions and source report paths.
+The script reads reports only and performs no model inference or cloud requests.
+
+Run its synthetic checks with
+`pixi run --manifest-path scripts/plotting/pixi.toml --as-is test`.
+
+To queue the graph after all four CPU sweeps succeed, use
+`sbatch --dependency=afterok:QWEN_JOB:JINA_JOB:GEMMA_JOB:GEMINI_JOB sbatch/plot_matroyshka_sweep.sbatch assets/matroyshka/RUN_ID`,
+replacing the job IDs and run directory. The wrapper requests one CPU, 4 GB RAM,
+and 30 minutes on `soundbendor`, using the installed plotting Pixi environment.
+It writes `plots/matroyshka_accuracy.png` and a sibling CSV inside that submission
+directory. It requires all 28 sweep points, including the native-width points;
+standalone full-width experiment reports are not included again. No GPU or model
+inference is involved.
