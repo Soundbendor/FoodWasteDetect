@@ -73,9 +73,13 @@ unique, so no IDs merge. Training references come from
 `<relative path> <label id>` under `root`; the label is the path's class
 directory, the ID is ignored, and a class missing from the CSV is rejected.
 Identities are `vegfru:<train|test>:<veg200_images|fru92_images>/<class>/<file>`.
-The outer archive supplies the official split lists and an `images/` directory.
-Installation maps class directories into the official vegetable and fruit paths
-before loading the training and test splits.
+Verified on the first real download (2026-11-12): the outer Hugging Face
+`xedwin23x/VegFru` archive contains `images/<class>/<file>` and the official
+`vegfru_list/` text lists. All 160,731 paths across train (29,200), val (14,600),
+and test (116,931) map uniquely to this image tree, covering all 292 classes.
+The redundant nested `archive.zip` has a reproducible CRC error; the local outer
+archive SHA-256 matches the mirror's published hash. The accompanying CSV splits
+are not used: they move 5,840 official validation examples into training.
 `cfg/classification_vegfru.yml` mirrors the other configs with its own
 `output_dir`, table, and null `descriptions_file`.
 
@@ -128,10 +132,15 @@ installs the `UECFOOD256/` entries with `category.txt` last.
 `VegFruImageDataset.download()` returns early when `classid_classname.csv`
 exists. Otherwise it fetches
 `https://huggingface.co/datasets/xedwin23x/VegFru/resolve/main/vegfru.tar.gz`
-through `fetch_archive`. The installer checks the official train, validation and
-test paths against the staged image tree and moves each class directory into its
-listed group. It discards the redundant nested ZIP without unpacking it and
-installs the class CSV last as the completion marker.
+through `fetch_archive` and extracts the outer tar into fresh staging (clearing
+partial extraction from previous attempts). A preparation step checks every
+train/val/test list path against `images/`, rejects invalid paths or conflicting
+class groups, and moves class directories into `veg200_images/` or `fru92_images/`
+as specified by the official lists. This preserves loader paths and source IDs.
+The redundant `archive.zip` is deleted without opening it. The class CSV moves
+last as the completion marker; preparation failure retains the archive for retry
+and does not mark the installation complete. Retries reuse the completed download
+but re-extract the outer tar. No image decoding or content checks are performed.
 
 `ISIAFood500ImageDataset.download()` returns early when
 `metadata_ISIAFood_500/ISIAFood500_classLabel.txt` exists. It requires `7z` on

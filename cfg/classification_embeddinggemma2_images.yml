@@ -2,12 +2,12 @@ cache_validation_embeddings: false
 # Image-only references; all paths resolve from the working directory.
 dataset:
   name: foodx251
-  root: data/FoodX-251
+  root: ../food_datasets/food_cap_datasets/FoodX-251
 embed_images: true
-n_imgs_per_class: 1
+n_imgs_per_class: null
 embed_class_labels: false
 embed_descriptions: false
-descriptions_file: null
+descriptions_file: assets/classification/descriptions_qwen_5/descriptions.json
 embedding:
   model_id: google/embeddinggemma-2
   device: cuda
@@ -24,7 +24,7 @@ ollama:
 lancedb:
   validation_table: null
   uri: assets/lancedb
-  table: foodx251_embeddinggemma2_images
+  table: foodx251_embeddinggemma2_images_all
 k: 10
 description_count: 5
 output_dir: assets/classification/embeddinggemma2_images

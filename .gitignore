@@ -4,6 +4,7 @@ assets/
 *__pycache__*
 logs/
 /data/
+/hpc-local/
 /slurm-*.out
 /slurm-*.err
 

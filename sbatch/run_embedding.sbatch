@@ -4,7 +4,7 @@
 #SBATCH --job-name=embedding-run
 #SBATCH -t 1-00:00:00
 #SBATCH -c 2
-#SBATCH --mem=40G
+#SBATCH --mem=20G
 #SBATCH --gres=gpu:1
 #SBATCH --export=ALL
 #SBATCH --output=slurm-%x-%j.out

@@ -8,12 +8,6 @@ cloud requests requires authorization under the root guide.
 
 ## Package scripts
 
-From the classification Pixi environment, run
-`python -m classification.scripts.check_dataset --config-file CONFIG`
-to compare the loader's class count, label coverage and referenced paths against
-recorded upstream counts and the installed file inventory. It prints each error and
-exits nonzero on failure. Image files are inventoried without decoding their contents.
-
 [`src/classification/scripts/smoke_jina.py`](../../src/classification/scripts/smoke_jina.py) is an
 explicit real-checkpoint CPU check invoked as
 `python -m classification.scripts.smoke_jina`. It constructs Jina CLIP v2, encodes one
@@ -42,8 +36,9 @@ uses [the owned CLI lifecycle](data.md#class-descriptions-and-ollama).
 
 ## Full-width training and validation caches
 
-From the repository root, submit `sbatch sbatch/cache_full_width_images.sbatch MODEL`
-with a suitable GPU partition and account. Choose `qwen`, `jina_v4`, or
+From the repository root, submit `sbatch sbatch/cache_full_width_images.sbatch MODEL [CONFIG]`
+with a suitable GPU partition and account. Omit `CONFIG` to use
+`cfg/classification_${model}_images_all_full.yml`. Choose `qwen`, `jina_v4`, or
 `embeddinggemma2`. Prepare model weights and the CUDA Pixi environment first.
 The recipes embed all FoodX251 training images at native width, cache validation
 images and evaluate. Each model uses distinct reference and validation tables.
@@ -75,9 +70,16 @@ for evaluation jobs and follow the writer/reader contract in
 
 From the repository root, submit `sbatch sbatch/download_datasets.sbatch LOG_DIR`
 with the account, partition and CPU architecture appropriate to the installed Pixi
-environment. This job downloads five datasets and checks each installation. Use a
-new log directory for each run. Read `summary.tsv` for per-dataset outcomes and
-`<dataset>.download.log` or `<dataset>.check.log` for failures. This workflow requires authorization for real downloads and storage.
+environment. Use a new log directory for each run. The job downloads five datasets
+and checks each installation. Read `summary.tsv` for per-dataset outcomes and
+`<dataset>.download.log` or `<dataset>.check.log` for failures.
+
+To retry VegFru alone, run this command from the repository root.
+
+```sh
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e default \
+  classification download_dataset --config_file cfg/classification_vegfru.yml
+```
 
 ## Sweep submitters
 
