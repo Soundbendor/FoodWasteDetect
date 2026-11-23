@@ -140,7 +140,8 @@ a declared axis and may vary.
 
 Run `pixi run --manifest-path scripts/plotting/pixi.toml --as-is plot GROUP_DIR/results.csv --output accuracy.png`
 to draw majority-vote accuracy against dimension, one curve per `model_id`. Missing
-runs are omitted and the title is marked partial. `sbatch sbatch/plot_matroyshka_sweep.sbatch GROUP_DIR`
+scheduled runs leave gaps in the curve and mark the title as partial.
+`sbatch sbatch/plot_matroyshka_sweep.sbatch GROUP_DIR`
 runs both steps with `--allow-partial` and writes `GROUP_DIR/plots/matroyshka_accuracy.png`;
 the dimension submitter queues it automatically.
 
@@ -157,3 +158,7 @@ of EmbeddingGemma2, Gemini Embedding 2 and SigLIP2-giant with per-class image ca
 from the saved configurations. The plotter checks full width, k=10, image-only
 reference counts and predictions against the 11,994 validation annotations,
 then writes `accuracy.csv`, `accuracy.png` and `accuracy.pdf`.
+
+For the figure caption, the comparison uses exact cosine retrieval with a
+majority vote among the 10 nearest neighbors. At the `All` cap, classes
+contribute between 34 and 656 training images each.

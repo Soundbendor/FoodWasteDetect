@@ -7,18 +7,17 @@ import math
 import os
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.ticker import PercentFormatter
+if __package__:
+    from . import style
+else:  # Direct script invocation
+    import style
 
 CAPS = (1, 5, 10, 20, 50, 100, None)
 COUNTS = dict(zip(CAPS, (251, 1255, 2510, 5020, 12534, 25034, 118475), strict=True))
 MODELS = {
-    "google/embeddinggemma-2": ("EmbeddingGemma2", 768, "#0072B2", "o"),
-    "google/ge-v2": ("Gemini Embedding 2", 3072, "#D55E00", "s"),
-    "google/siglip2-giant-opt-patch16-384": ("SigLIP2-giant", 1536, "#009E73", "^"),
+    "google/embeddinggemma-2": 768,
+    "google/ge-v2": 3072,
+    "google/siglip2-giant-opt-patch16-384": 1536,
 }
 
 
@@ -47,7 +46,7 @@ def read_reports(manifest, truth):
         report = json.loads(path.read_text())
         config = report["config"]
         embedding = config["embedding"]
-        width = MODELS[model][1]
+        width = MODELS[model]
         if not (
             config["dataset"]["name"].lower() == "foodx251"
             and config["k"] == 10
@@ -86,9 +85,10 @@ def read_reports(manifest, truth):
     return points
 
 
+@style.dissertation_style()
 def render(points, output, validation_count):
     output.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8.3, 5.1))
+    fig, ax = style.accuracy_figure()
     with (output / "accuracy.csv").open("w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
@@ -102,14 +102,15 @@ def render(points, output, validation_count):
                 "report",
             )
         )
-        for model, (label, _, color, marker) in MODELS.items():
+        for model in MODELS:
+            series_style = style.model_style(model)
             values = []
             for cap in CAPS:
                 accuracy, path = points[model, cap]
                 values.append(accuracy * 100)
                 writer.writerow(
                     (
-                        label,
+                        series_style["label"],
                         model,
                         cap or "All",
                         COUNTS[cap],
@@ -118,36 +119,17 @@ def render(points, output, validation_count):
                         os.path.relpath(path, output),
                     )
                 )
-            ax.plot(
-                range(len(CAPS)),
-                values,
-                color=color,
-                marker=marker,
-                label=label,
-                linewidth=2,
-            )
+            ax.plot(range(len(CAPS)), values, **series_style)
     ax.set(
         xticks=range(len(CAPS)),
         xticklabels=[str(cap or "All") for cap in CAPS],
         xlabel="Training images per class (cap)",
-        ylabel="Validation accuracy (%)",
         ylim=(0, 100),
         title="FoodX251 recognition by training images per class",
     )
-    ax.yaxis.set_major_formatter(PercentFormatter(100, decimals=0))
-    ax.grid(axis="y", alpha=0.25)
-    ax.set_axisbelow(True)
-    ax.legend(frameon=False, loc="lower right")
-    fig.text(
-        0.10,
-        0.035,
-        "Exact cosine retrieval, k = 10.  All uses 34–656 training images per class.",
-        fontsize=9,
-    )
-    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    style.add_model_legend(fig)
     for extension in ("png", "pdf"):
-        fig.savefig(output / f"accuracy.{extension}", dpi=200)
-    plt.close(fig)
+        fig.savefig(output / f"accuracy.{extension}")
 
 
 def main():

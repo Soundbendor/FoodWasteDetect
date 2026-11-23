@@ -6,18 +6,15 @@ submission. Runs marked missing are left out and the title says so.
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
-from matplotlib.figure import Figure
+from matplotlib.ticker import MultipleLocator
 
-LABELS = {
-    "Qwen/Qwen3-VL-Embedding-8B": "Qwen3-VL-Embedding-8B",
-    "jinaai/jina-embeddings-v4": "Jina Embeddings v4",
-    "google/embeddinggemma-2": "EmbeddingGemma2",
-    "google/ge-v2": "Gemini Embedding 2",
-}
-COLORS = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#000000")
-MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*")
+if __package__:
+    from . import style
+else:  # Direct script invocation
+    import style
 
 
 def read_rows(path: Path) -> list[dict]:
@@ -33,36 +30,35 @@ def read_rows(path: Path) -> list[dict]:
     return rows
 
 
+@style.dissertation_style()
 def plot(rows: list[dict], output: Path) -> None:
-    """Save one curve per model; colors follow manifest order, including missing models."""
-    figure = Figure(figsize=(12, 6), layout="constrained")
-    axes = figure.subplots()
-    models = list(dict.fromkeys(row["model_id"] for row in rows))
-    for index, model in enumerate(models):
+    """Save one curve per model, with gaps at missing scheduled dimensions."""
+    figure, axes = style.accuracy_figure()
+    models = {row["model_id"] for row in rows}
+    for model in sorted(models, key=lambda model: style.model_style(model)["label"]):
         series = sorted(
-            (row["dimension"], 100 * row["accuracy"])
+            (row["dimension"], 100 * row["accuracy"] if row["status"] == "done" else math.nan)
             for row in rows
-            if row["model_id"] == model and row["status"] == "done"
+            if row["model_id"] == model
         )
-        if series:
-            axes.plot(
-                *zip(*series, strict=True),
-                label=LABELS.get(model, model),
-                color=COLORS[index % len(COLORS)],
-                marker=MARKERS[index % len(MARKERS)],
-                linewidth=2,
-            )
+        dimensions, accuracies = zip(*series, strict=True)
+        if any(math.isfinite(value) for value in accuracies):
+            axes.plot(dimensions, accuracies, **style.model_style(model))
+
+    completed = [100 * row["accuracy"] for row in rows if row["status"] == "done"]
+    lower = max(0, 5 * math.floor((min(completed) - 2) / 5))
+    upper = min(100, 5 * math.ceil((max(completed) + 2) / 5))
+    axes.set_ylim(lower, upper)
+    # Keep wide ranges readable with ticks at multiples of five percentage points.
+    axes.yaxis.set_major_locator(MultipleLocator(5 * math.ceil((upper - lower) / 30)))
     partial = any(row["status"] != "done" for row in rows)
     axes.set_xlabel("Embedding dimension")
-    axes.set_ylabel("Majority-vote validation accuracy (%)")
     axes.set_title("Accuracy vs. embedding dimension" + (" (partial results)" if partial else ""))
     axes.set_xticks(sorted({row["dimension"] for row in rows}))
-    axes.tick_params(axis="x", labelrotation=45)
-    axes.set_ylim(65, 85)
-    axes.grid(alpha=0.25)
-    axes.legend()
+    axes.tick_params(axis="x", labelrotation=60)
+    style.add_model_legend(figure)
     output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, dpi=200)
+    figure.savefig(output)
 
 
 def main() -> None:

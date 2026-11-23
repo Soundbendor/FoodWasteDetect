@@ -64,6 +64,8 @@ its guide: [encoders](src/classification/encoders/AGENTS.md),
 [retrieval](src/classification/retrieval/AGENTS.md), or
 [scripts](src/classification/scripts/AGENTS.md).
 
+For experiment figures, read the [plotting guide](scripts/plotting/AGENTS.md).
+
 ## Documentation index
 
 Read the matching reference before working on its task. Current contracts live
