@@ -18,6 +18,7 @@ class ConfigModel(BaseModel):
 
 # Registered dataset names; must equal the keys of classification.util.DATASETS.
 DatasetName = Literal["foodx251", "food101", "uecfood256", "vegfru", "isia500"]
+ClassLabelPrompt = Literal["bare", "food_photo"]
 
 
 class DatasetConfig(ConfigModel):
@@ -93,6 +94,7 @@ class ExperimentConfig(ConfigModel):
     k: PositiveInt
     embed_images: bool
     embed_class_labels: bool
+    class_label_prompt: ClassLabelPrompt = "bare"
     embed_descriptions: bool
     vector_dimension: PositiveInt | None = None
     sweep_dimensions: list[PositiveInt] | None = None

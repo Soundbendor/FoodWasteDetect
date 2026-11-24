@@ -30,6 +30,7 @@ def test_defaults_spelling_and_mutable_nested_attributes():
     }
     assert config.n_imgs_per_class is config.descriptions_file is config.ollama is None
     assert config.description_count is None
+    assert config.class_label_prompt == "bare"
     assert config.vector_dimension is None
     assert config.cache_validation_embeddings is False
     assert ExperimentConfig.model_validate_json(config.model_dump_json()) == config
@@ -64,6 +65,11 @@ def test_required_fields(key):
     del data[key]
     with pytest.raises(ValidationError, match=key):
         ExperimentConfig.model_validate(data)
+
+
+def test_unknown_class_label_prompt():
+    with pytest.raises(ValidationError, match="class_label_prompt"):
+        ExperimentConfig.model_validate(config_data(class_label_prompt="other"))
 
 
 @pytest.mark.parametrize("section", [None, "dataset", "embedding", "lancedb", "vertex"])

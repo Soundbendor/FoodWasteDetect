@@ -737,6 +737,34 @@ class ExperimentTests(unittest.TestCase):
             artifact = exp.build_vector_database().model_dump(mode="json")
         self.assertEqual(artifact['source_counts'], {'class_name': 2, 'generated_description': 10})
 
+    def test_class_label_prompt_indexes_one_text_per_class(self):
+        self.dataset.classes.append("Apple pie")
+        for preset, expected in [
+            ("bare", ["Apple", "Pear", "Apple pie"]),
+            ("food_photo", [
+                "a photo of apple, a type of food.",
+                "a photo of pear, a type of food.",
+                "a photo of apple pie, a type of food.",
+            ]),
+        ]:
+            with self.subTest(preset=preset):
+                exp = self.experiment(name=preset)
+                exp.config = updated(exp.config, "class_label_prompt", preset)
+                exp.config.k = 1
+                embedder = exp.embedder
+                with patch.object(embedder, "encode_text", wraps=embedder.encode_text) as encode:
+                    report = exp.run()
+                inputs = [text for call in encode.call_args_list for text in call.args[0]]
+                self.assertEqual(inputs, expected)
+                self.assertEqual(report.config.class_label_prompt, preset)
+                self.assertEqual(report.reference_source_counts, {"class_name": len(expected)})
+                rows = self.client.open_table(report.table).to_arrow().to_pylist()
+                self.assertCountEqual(
+                    [(row["class"], row["source_identity"], row["value"]) for row in rows],
+                    [(label, label, text)
+                     for label, text in zip(self.dataset.classes, expected, strict=True)],
+                )
+
     def test_combinations_and_table_reuse(self):
         for flags in itertools.product([False, True], repeat=3):
             if not any(flags): continue

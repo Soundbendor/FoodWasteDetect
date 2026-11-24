@@ -4,6 +4,7 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from classification.experiments.config import ClassLabelPrompt
 from classification.schemas import PointRecord
 
 
@@ -17,13 +18,16 @@ def text_references(
     *,
     include_class_labels: bool,
     descriptions: Mapping[str, Sequence[str]] | None,
+    class_label_prompt: ClassLabelPrompt = "bare",
 ) -> list[PointRecord]:
     """Keep class names first, followed by descriptions in class and sentence order."""
-    records = (
-        [PointRecord(label, "class_name", label, label) for label in classes]
-        if include_class_labels
-        else []
-    )
+    records = []
+    if include_class_labels:
+        for label in classes:
+            text = label
+            if class_label_prompt == "food_photo":
+                text = f"a photo of {label.lower()}, a type of food."
+            records.append(PointRecord(label, "class_name", label, text))
     if descriptions is not None:
         records.extend(
             PointRecord(label, "generated_description", f"{label}:{index}", text)

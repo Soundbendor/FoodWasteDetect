@@ -67,6 +67,7 @@ class IndexBuilder:
         return text_references(
             self.classes,
             include_class_labels=self.config.embed_class_labels,
+            class_label_prompt=self.config.class_label_prompt,
             descriptions=descriptions,
         )
 

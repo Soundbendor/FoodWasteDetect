@@ -62,8 +62,8 @@ defined in [class descriptions and Ollama](data.md#class-descriptions-and-ollama
 Reference switches select any nonempty combination of class names, generated
 descriptions, and training images. Text identities are the class name for
 `class_name` and `<class>:<description index>` for `generated_description`.
-Training records use `training_image` and the dataset source ID. Values retain
-the class name, description text, or image filename respectively. Per-class
+Training records use `training_image` and the dataset source ID. Values hold
+the rendered class-label text, description text, or image filename respectively. Per-class
 training image caps and before-exclusion selection order are defined in
 [data](data.md#foodx251-metadata-and-image-batches).
 
@@ -97,6 +97,32 @@ summary; a rerun retries finalization without re-encoding saved inputs. Use one
 writer and finish building/optimization before concurrent readers. Shared jobs
 need a filesystem path visible to all nodes and separate evaluation output
 directories.
+
+### Comparing bare labels with food-photo prompts
+
+When `embed_class_labels=true`, `class_label_prompt` controls the text sent to the
+encoder. The default `bare` passes the canonical label verbatim, such as `Apple`.
+The `food_photo` preset produces `a photo of apple, a type of food.` Each preset
+creates one reference per class with the canonical label as its stored class and
+source identity. Use a fresh reference table and output directory for each preset
+because resumption matches on identity and skips previously embedded labels.
+
+Run both presets from the repository root with the same FoodX251 validation split
+and the default Jina CLIP v2 encoder. These overrides enable only label references.
+
+```sh
+for preset in bare food_photo; do
+  pixi run --manifest-path src/classification/pyproject.toml --as-is -e jina-cpu \
+    classification experiment run --config_file cfg/classification.yml \
+    --set embed_class_labels=true --set embed_descriptions=false --set embed_images=false \
+    --set k=1 --set "class_label_prompt=$preset" \
+    --set "lancedb.table=foodx251_jina_clip_v2_labels_$preset" \
+    --set "output_dir=assets/classification/foodx251_jina_clip_v2_labels_$preset"
+done
+```
+
+Compare `metrics.nearest_neighbor_accuracy` in the two evaluation reports and
+`metrics.per_class` recall to see which foods changed.
 
 ### Table creation metadata
 
