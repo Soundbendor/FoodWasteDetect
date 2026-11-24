@@ -1,6 +1,7 @@
 """Lifecycle and description checks with fake clients and processes."""
 
 import errno
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -32,14 +33,29 @@ class DescriptionTests(unittest.TestCase):
         self.assertEqual(result, {'Apple': ['Apple one', 'Apple two'],
                                   'Pear': ['Pear one', 'Pear two']})
         self.assertEqual([call.args for call in describe.call_args_list],
-                         [('Apple',), ('Apple',), ('Pear',), ('Pear',)])
+                         [(label, template, False) for label in ('Apple', 'Pear') for template in ('overall', 'shape')])
+
+    def test_cycles_templates_and_replaces_duplicate_or_missing_label(self):
+        captions = ['Red apple', 'Red apple', 'Cut apple', 'Pineapple', 'Golden apple',
+                    'Small apple', 'Green apple', 'Large apple']
+        self.client.chat.side_effect = [
+            types.SimpleNamespace(message=types.SimpleNamespace(
+                content=json.dumps({'description': text, 'food_class': 'apple'})))
+            for text in captions
+        ]
+        result = self.llm.generate_descriptions(['Apple'], 6)
+        self.assertEqual(result['Apple'], [captions[i] for i in (0, 2, 4, 5, 6, 7)])
+        ids = ['overall', 'shape', 'shape', 'surface', 'surface', 'distinguishing', 'variation', 'overall']
+        for call, template_id in zip(self.client.chat.call_args_list, ids, strict=True):
+            message, = call.kwargs['messages']
+            self.assertIn(descriptors.TEMPLATES[template_id].format(label='Apple'), message['content'])
 
     def test_generate_descriptions_rejects_empty_output(self):
         for count, text in [(0, 'unused'), (1, ''), (1, '   ')]:
             with self.subTest(count=count, text=text), patch.object(
                 self.llm, 'describe_class', return_value=types.SimpleNamespace(description=text)
             ):
-                with self.assertRaisesRegex(ValueError, 'Empty generated description for Apple'):
+                with self.assertRaisesRegex(ValueError, 'description_count|Invalid generated description for Apple'):
                     self.llm.generate_descriptions(['Apple'], count)
 
     def test_generate_descriptions_propagates_errors_without_retry(self):
@@ -50,7 +66,7 @@ class DescriptionTests(unittest.TestCase):
                 with self.assertRaises(type(error)) as raised:
                     self.llm.generate_descriptions(['Apple', 'Pear'], 2)
                 self.assertIs(raised.exception, error)
-                describe.assert_called_once_with('Apple')
+                describe.assert_called_once_with('Apple', 'overall', False)
 
     def test_missing_or_empty_response_content_fails_validation(self):
         for content in (None, ""):

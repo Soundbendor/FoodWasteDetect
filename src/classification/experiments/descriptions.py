@@ -10,7 +10,10 @@ from classification.schemas import PointRecord
 
 def load_descriptions(path: Path) -> dict[str, list[str]]:
     """Read the vocabulary at the experiment's resolved path without modifying it."""
-    return json.loads(path.read_text(encoding="utf-8"))["descriptions"]
+    descriptions = json.loads(path.read_text(encoding="utf-8"))["descriptions"]
+    if not isinstance(descriptions, dict):
+        raise ValueError(f"Expected a descriptions mapping in {path}")
+    return descriptions
 
 
 def text_references(
@@ -31,9 +34,13 @@ def text_references(
                 text = f"This is a photo of {label}"
             records.append(PointRecord(label, "class_name", label, text))
     if descriptions is not None:
-        records.extend(
-            PointRecord(label, "generated_description", f"{label}:{index}", text)
-            for label in classes
-            for index, text in enumerate(descriptions[label])
-        )
+        for label in classes:
+            captions = descriptions[label]
+            if (
+                not isinstance(captions, (list, tuple))
+                or not captions
+                or any(not isinstance(text, str) or not text.strip() for text in captions)
+            ):
+                raise ValueError(f"Expected a nonempty list of nonblank captions for {label}")
+            records.append(PointRecord(label, "description_prototype", label, json.dumps(captions)))
     return records

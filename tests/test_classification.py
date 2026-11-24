@@ -214,11 +214,11 @@ class ExperimentTests(unittest.TestCase):
             cfg['descriptions_file'] = str(path)
             exp = Experiment(ExperimentConfig.model_validate(cfg))
             report = exp.run().model_dump(mode="json")
-            self.assertEqual(report['reference_source_counts'], {'generated_description': 2})
+            self.assertEqual(report['reference_source_counts'], {'description_prototype': 2})
             self.assertEqual(report['metrics']['evaluated'], 2)
             self.assertFalse((exp.output / 'descriptions.json').exists())
             table = self.client.open_table(cfg['lancedb']['table']).to_arrow().to_pylist()
-            self.assertEqual({row['value'] for row in table}, {'Apple stored', 'Pear stored'})
+            self.assertEqual({json.loads(row['value'])[0] for row in table}, {'Apple stored', 'Pear stored'})
         self.assertEqual(path.read_text(), content)
         self.describer_constructor.assert_not_called()
 
@@ -236,6 +236,72 @@ class ExperimentTests(unittest.TestCase):
         self.embedder_constructor.assert_not_called()
         self.client_constructor.assert_not_called()
 
+    def test_prototypes_span_batches_and_resume_by_ordered_captions(self):
+        import numpy as np
+
+        exp = self.experiment((False, False, True))
+        exp.output.mkdir()
+        exp.config = updated(exp.config, 'embedding.batch_size', 2)
+        exp.config = updated(exp.config, 'lancedb.write_batch_rows', 1)
+        vocabulary = {'Apple': ['a'], 'Pear': ['b', 'c']}
+        exp.descriptions_path.write_text(json.dumps({'descriptions': vocabulary}))
+        with patch.object(exp.embedder, 'encode_text', side_effect=[
+            np.array([[0., -3.], [10., 0.]]), RuntimeError("interrupted"),
+        ]) as encode:
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                exp.build_vector_database()
+            self.assertEqual([call.args[0] for call in encode.call_args_list], [['a', 'b'], ['c']])
+
+        with patch.object(exp.embedder, 'encode_text', return_value=np.array([[10., 0.], [0., 1.]])) as encode:
+            self.assertEqual(exp.build_vector_database().source_counts, {'description_prototype': 2})
+            encode.assert_called_once_with(['b', 'c'])
+        index = LanceDBIndex.open(exp.config.lancedb.uri, exp.config.lancedb.table)
+        vectors = index.fetch_vectors([('description_prototype', label) for label in vocabulary])
+        np.testing.assert_allclose(vectors, [[0, -1], [2**-0.5, 2**-0.5]])
+        vocabulary['Pear'].reverse()
+        exp.descriptions_path.write_text(json.dumps({'descriptions': vocabulary}))
+        with self.assertRaisesRegex(ValueError, 'Pear.*fresh reference table'):
+            Experiment(exp.config).build_vector_database()
+
+    def test_cancelling_captions_and_legacy_table(self):
+        import numpy as np
+
+        exp = self.experiment((False, False, True))
+        exp.output.mkdir()
+        exp.descriptions_path.write_text(json.dumps({'descriptions': {'Apple': ['one', 'two'], 'Pear': ['three']}}))
+        with patch.object(exp.embedder, 'encode_text', return_value=np.array([[2, 0], [-3, 0]])):
+            with self.assertRaisesRegex(ValueError, 'prototype for Apple'):
+                exp.build_vector_database()
+        index = LanceDBIndex.open(exp.config.lancedb.uri, exp.config.lancedb.table)
+        self.assertEqual(index.get_record_ids(), [])
+        index.append([PointRecord('Apple', 'generated_description', 'Apple:0', 'one')], np.array([[1., 0.]]))
+        with self.assertRaisesRegex(ValueError, 'legacy.*fresh reference table'):
+            Experiment(exp.config).build_vector_database()
+        self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
+
+    def test_generation_resumes_only_matching_checkpoints(self):
+        exp = self.experiment((False, False, True))
+        exp.config.description_count = 1
+        with patch.object(self.Describer, 'describe_class', side_effect=[
+            SimpleNamespace(description='Red Apple'), RuntimeError('interrupted')
+        ]):
+            with self.assertRaisesRegex(RuntimeError, 'interrupted'):
+                exp.generate_descriptions()
+        checkpoint = exp.output / 'descriptions.partial.json'
+        self.assertEqual(json.loads(checkpoint.read_text())['descriptions'], {'Apple': ['Red Apple']})
+        exp.config.description_count = 2
+        with self.assertRaisesRegex(ValueError, 'fresh output_dir'):
+            exp.generate_descriptions()
+        exp.config.description_count = 1
+        with patch.object(self.Describer, 'describe_class', return_value=SimpleNamespace(description='Green Pear')) as describe:
+            self.assertEqual(exp.generate_descriptions(), {'Apple': ['Red Apple'], 'Pear': ['Green Pear']})
+            describe.assert_called_once_with('Pear', 'overall', False)
+        self.assertFalse(checkpoint.exists())
+        generation = json.loads(exp.descriptions_path.read_text())['generation']
+        self.assertEqual(generation['template_ids'], ['overall'])
+        self.assertIn('{label}', generation['templates']['overall'])
+        self.assertEqual(generation['model'], exp.config.ollama.llm)
+
     def test_null_descriptions_file_keeps_generation_in_output(self):
         cfg = self.experiment((False, False, True)).config.model_dump()
         cfg['descriptions_file'] = None
@@ -247,7 +313,7 @@ class ExperimentTests(unittest.TestCase):
         )
         self.describer_constructor.assert_called_once()
         summary = exp.build_vector_database().model_dump(mode="json")
-        self.assertEqual(summary['source_counts'], {'generated_description': 10})
+        self.assertEqual(summary['source_counts'], {'description_prototype': 2})
         self.assertEqual(exp.build_vector_database().model_dump(mode="json")['source_counts'], summary['source_counts'])
         self.describer_constructor.assert_called_once()
         self.session_constructor.assert_called_once()
@@ -291,7 +357,7 @@ class ExperimentTests(unittest.TestCase):
         (exp.output / 'descriptions.json').write_text(json.dumps({
             'descriptions': {'Apple': [], 'Pear': []}
         }))
-        with self.assertRaisesRegex(ValueError, 'No records inserted into LanceDB'):
+        with self.assertRaisesRegex(ValueError, 'nonblank captions for Apple'):
             exp.build_vector_database()
         self.assertFalse((exp.output / 'index.json').exists())
 
@@ -517,7 +583,8 @@ class ExperimentTests(unittest.TestCase):
         class Describer:
             generate_descriptions = DescriberLLM.generate_descriptions
             def __init__(self, client, model): pass
-            def describe_class(self, label): return SimpleNamespace(description=label + ' description')
+            def describe_class(self, label, template, replacement):
+                return SimpleNamespace(description=f'{label} {template}')
         class Session:
             def __init__(self, config): self.client = object()
             def __enter__(self): return self
@@ -651,7 +718,7 @@ class ExperimentTests(unittest.TestCase):
                     artifact = exp.build_vector_database().model_dump(mode="json")
                 self.assertEqual(seen, [selected[start:start + 3] for start in range(0, len(selected), 3)])
                 self.assertEqual(artifact['source_counts'], {
-                    'training_image': len(selected), 'class_name': 2, 'generated_description': 10,
+                    'training_image': len(selected), 'class_name': 2, 'description_prototype': 2,
                 })
                 stored = self.client.open_table(artifact['table']).to_arrow().to_pylist()
                 images = [r for r in stored if r['source_kind'] == 'training_image']
@@ -735,7 +802,7 @@ class ExperimentTests(unittest.TestCase):
         with patch.object(self.dataset, 'train_set', side_effect=AssertionError('Read images')), \
              patch.object(self.dataset, 'iter_dataset_batches', side_effect=AssertionError('Batch images')):
             artifact = exp.build_vector_database().model_dump(mode="json")
-        self.assertEqual(artifact['source_counts'], {'class_name': 2, 'generated_description': 10})
+        self.assertEqual(artifact['source_counts'], {'class_name': 2, 'description_prototype': 2})
 
     def test_class_label_prompt_indexes_one_text_per_class(self):
         self.dataset.classes.append("Apple pie")
@@ -777,7 +844,7 @@ class ExperimentTests(unittest.TestCase):
             exp.config = updated(exp.config, 'embedding.batch_size', 3)
             report = exp.run().model_dump(mode="json")
             expected = {kind: count for enabled, kind, count in zip(
-                flags, ('training_image', 'class_name', 'generated_description'), (2, 2, 10)
+                flags, ('training_image', 'class_name', 'description_prototype'), (2, 2, 2)
             ) if enabled}
             self.assertEqual(report['reference_source_counts'], expected)
             self.assertEqual(report['metrics']['majority_vote_accuracy'], 1)
@@ -963,7 +1030,7 @@ class ExperimentTests(unittest.TestCase):
                 descriptions = {'Apple': ['stored'], 'Pear': ['stored']}
                 (exp.output / 'descriptions.json').write_text(json.dumps({'descriptions': descriptions}))
                 self.assertEqual(exp.generate_descriptions(), descriptions)
-                self.assertEqual(exp.build_vector_database().source_counts, {'generated_description': 2})
+                self.assertEqual(exp.build_vector_database().source_counts, {'description_prototype': 2})
                 self.session_constructor.assert_not_called()
 
 

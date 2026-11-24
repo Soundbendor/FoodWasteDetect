@@ -423,23 +423,23 @@ def test_description_bar_counts_requests_and_closes_on_failure(progress_bars):
     llm = DescriberLLM.__new__(DescriberLLM)
     failure = RuntimeError("request failed")
     with (
-        patch.object(llm, "describe_class", side_effect=[Mock(description="one"), failure]),
+        patch.object(llm, "describe_class", side_effect=[Mock(description="A one"), failure]),
         pytest.raises(RuntimeError, match="request failed"),
     ):
         llm.generate_descriptions(["A"], 3)
     assert (progress_bars[-1].total, progress_bars[-1].n) == (3, 1)
     assert progress_bars[-1].disable
-    with patch.object(llm, "describe_class", return_value=Mock(description="one")):
+    with patch.object(llm, "describe_class", side_effect=[Mock(description=text) for text in ("A one", "A two", "B one", "B two")]):
         assert llm.generate_descriptions(["A", "B"], 2) == {
-            "A": ["one", "one"], "B": ["one", "one"],
+            "A": ["A one", "A two"], "B": ["B one", "B two"],
         }
     assert (progress_bars[-1].total, progress_bars[-1].n) == (4, 4)
     with (
         patch.object(llm, "describe_class", return_value=Mock(description=" ")),
-        pytest.raises(ValueError, match="Empty generated description for A"),
+        pytest.raises(ValueError, match="Invalid generated description for A"),
     ):
         llm.generate_descriptions(["A", "B"], 2)
-    assert progress_bars[-1].n == 2
+    assert progress_bars[-1].n == 0
     assert progress_bars[-1].disable
 
 
@@ -457,7 +457,7 @@ def test_capped_reference_bars_match_inserted_records(
     artifact = exp.build_vector_database().model_dump(mode="json")
     bars = {bar.desc: bar for bar in progress_bars}
     expected_images = {None: 5, 1: 2, 2: 4, 20: 5}[limit] if images_enabled else 0
-    assert sum(artifact["source_counts"].values()) == 12 + expected_images
+    assert sum(artifact["source_counts"].values()) == 4 + expected_images
     assert bars["Text references"].n == 12
     if images_enabled:
         assert bars["Image references"].n == expected_images
@@ -492,7 +492,7 @@ def test_description_failure_keeps_partial_progress(experiment_case, sdk, progre
     exp = experiment_case.experiment((False, False, True))
     exp.tracker = Tracker(sdk)
     with patch.object(experiment_case.Describer, "describe_class") as request:
-        request.side_effect = [Mock(description="one"), failure]
+        request.side_effect = [Mock(description="Apple one"), failure]
         with pytest.raises(type(failure)) as caught:
             exp.generate_descriptions()
     assert caught.value is failure
@@ -528,7 +528,7 @@ def test_truncated_v4_cli_build_and_evaluation(experiment_case, sdk, tmp_path):
     )
     table = experiment_case.client.open_table(exp.config.lancedb.table)
     assert table.schema.field('vector').type.list_size == 1024
-    assert table.count_rows() == 14
+    assert table.count_rows() == 6
     report = json.loads(next(exp.output.glob('evaluation_*/report.json')).read_text())
     assert report['metrics']['evaluated'] == 2
     assert report['config']['embedding']['truncate_dim'] == 1024

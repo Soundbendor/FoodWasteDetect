@@ -60,10 +60,14 @@ defined in [class descriptions and Ollama](data.md#class-descriptions-and-ollama
 ## Reference builds and resumption
 
 Reference switches select any nonempty combination of class names, generated
-descriptions, and training images. Text identities are the class name for
-`class_name` and `<class>:<description index>` for `generated_description`.
-Training records use `training_image` and the dataset source ID. Values hold
-the rendered class-label text, description text, or image filename respectively. Per-class
+descriptions, and training images. Class names and description prototypes use the canonical label as
+their source identity. Each `description_prototype` stores its ordered caption
+list as JSON in `value`. The builder validates all requested classes and captions
+before loading the encoder. It encodes each caption separately in ordinary text
+batches, L2-normalizes each vector, and normalizes their equal-weight mean.
+Accumulation uses float64 and stored vectors use float32. A zero or nonfinite
+prototype fails with the class name. Training records use `training_image` and
+the dataset source ID. Per-class
 training image caps and before-exclusion selection order are defined in
 [data](data.md#foodx251-metadata-and-image-batches).
 
@@ -73,12 +77,15 @@ loading the encoder. Existing builds follow this sequence:
 1. Prepare the capped unbatched training selection, check class coverage,
    prepare text references, and open the table.
 2. Scan all `(source_kind, source_identity)` metadata, without a result limit,
-   and use the identity set to exclude saved inputs.
+   and use the identity set to exclude saved inputs. For prototype builds,
+   reject legacy `generated_description` rows and compare each saved prototype's
+   caption list with the requested list before encoding. Changed captions or ordering
+   require a fresh reference table.
 3. Batch and decode only remaining images, preserving the original dataset
    splits and order. Caps apply before saved-identity exclusion.
 4. Encode each text/image batch, advance progress, and buffer its strictly paired
    records/vectors. Append in exact `lancedb.write_batch_rows` chunks, plus the
-   final remainder. Progress therefore counts encoded rows, not persisted ones.
+   final remainder. Text progress counts individual class names and captions. Source counts report stored rows.
 5. Rescan the table to count every stored row by source kind, including
    duplicates and extra rows. Optimize the reference table, including a no-work
    resume, then return the index and counts to `Experiment` for summary
@@ -97,6 +104,36 @@ summary; a rerun retries finalization without re-encoding saved inputs. Use one
 writer and finish building/optimization before concurrent readers. Shared jobs
 need a filesystem path visible to all nodes and separate evaluation output
 directories.
+
+### Comparing FoodX251 description prototypes
+
+Use the same FoodX251 validation split, model, dimension, and image preprocessing
+for every run. The following commands assume the legacy defaults identify the
+original per-caption table and its saved vocabulary. Evaluate that table with
+its original `k`. Use separate tables and output directories for the two builds.
+
+```sh
+foodx() {
+  stage=$1
+  shift
+  pixi run --manifest-path src/classification/pyproject.toml --as-is -e jina-cpu \
+    classification experiment "$stage" --config_file cfg/classification.yml "$@"
+}
+foodx evaluate
+foodx run --set k=1 --set lancedb.table=foodx251_prototypes_v1 \
+  --set output_dir=assets/classification/prototypes_v1
+foodx run --set k=1 --set lancedb.table=foodx251_prototypes_v2 \
+  --set descriptions_file=assets/classification/descriptions_v2/descriptions.json \
+  --set output_dir=assets/classification/prototypes_v2
+```
+
+Generate the v2 file using the [vocabulary command](data.md#class-descriptions-and-ollama).
+With five captions for each of 251 classes, each prototype run embeds 1,255 captions
+and stores 251 rows. Compare `metrics.nearest_neighbor_accuracy` across runs and
+retain the legacy `metrics.majority_vote_accuracy` at its original vote depth.
+Report `metrics.per_class` recall with its vote depth. For legacy **top-1**
+per-class recall, also run `foodx evaluate --set k=1`. Include the `bare` and
+`food_photo` label-only baselines below.
 
 ### Comparing class-label prompts
 
@@ -196,7 +233,7 @@ propagate without partial evaluation reports, exclusions, application-level
 retries, or cleanup of partial reference tables.
 
 Artifact compatibility checks, content hashes, automatic table naming, migrations,
-and Git/model/dependency provenance metadata are intentionally omitted. Existing
+and Git/model/dependency provenance metadata are intentionally omitted. Apart from the prototype caption checks, existing
 tables are reused by identity without verifying compatibility; changing models,
 dimensions, prompts, descriptions, source inputs, or caps requires fresh tables
 and output directories.

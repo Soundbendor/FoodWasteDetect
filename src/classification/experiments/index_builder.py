@@ -1,5 +1,6 @@
 """Build training and validation embedding LanceDB tables."""
 
+import json
 import logging
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 from datasets import Dataset
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from tqdm import tqdm
 
 from classification.datasets.base import FoodImageDataset
@@ -17,6 +18,27 @@ from classification.experiments.config import ExperimentConfig
 from classification.experiments.descriptions import load_descriptions, text_references
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.schemas import PointRecord
+
+
+def _accumulate_prototype(
+    total: NDArray[np.float64], vector: ArrayLike, label: str, *, last: bool
+) -> NDArray[np.float32] | None:
+    """Add one unit caption vector. On the last caption, return the prototype and reset total."""
+    caption = np.asarray(vector, dtype=np.float64)
+    norm = np.linalg.norm(caption)
+    if not np.isfinite(norm) or norm == 0:
+        raise ValueError(f"Invalid caption vector for {label}")
+    total += caption / norm
+    if not last:
+        return None
+
+    # The sum and the equal-weight mean have the same unit direction.
+    norm = np.linalg.norm(total)
+    if not np.isfinite(norm) or norm == 0:
+        raise ValueError(f"Invalid description prototype for {label}")
+    prototype = (total / norm).astype(np.float32)
+    total.fill(0)
+    return prototype
 
 
 class IndexBuilder:
@@ -77,13 +99,36 @@ class IndexBuilder:
         records: list[PointRecord],
     ) -> None:
         """Embed and save text references."""
+        inputs = []
+        for record in records:
+            texts = (
+                json.loads(record.value)
+                if record.source_kind == "description_prototype"
+                else [record.value]
+            )
+            inputs.extend((record, text, i == len(texts) - 1) for i, text in enumerate(texts))
         with tqdm(
-            total=len(records), desc="Text references", unit="record", mininterval=5
+            total=len(inputs), desc="Text references", unit="text", mininterval=5
         ) as progress:
 
             def encoded() -> Iterator[tuple[Sequence[PointRecord], NDArray[np.float32]]]:
-                for batch in batched(records, self.batch_size, strict=False):
-                    yield batch, self.embedder.encode_text([record.value for record in batch])
+                total = np.zeros(index.dimension, dtype=np.float64)
+                for batch in batched(inputs, self.batch_size, strict=False):
+                    vectors = self.embedder.encode_text([text for _, text, _ in batch])
+                    completed = []
+                    output = []
+                    for (record, _, last), vector in zip(batch, vectors, strict=True):
+                        if record.source_kind == "description_prototype":
+                            prototype = _accumulate_prototype(
+                                total, vector, record.label, last=last
+                            )
+                            if prototype is None:
+                                continue
+                            vector = prototype
+                        completed.append(record)
+                        output.append(vector)
+                    if completed:
+                        yield completed, np.stack(output)
                     progress.update(len(batch))
 
             index.append_batches(encoded(), self.write_batch_rows)
@@ -131,6 +176,21 @@ class IndexBuilder:
             logging.info("Loading existing table...")
             index = LanceDBIndex.open(self.uri, self.table)
             existing_ids = frozenset(index.get_record_ids())
+            if self.config.embed_descriptions:
+                if any(kind == "generated_description" for kind, _ in existing_ids):
+                    raise ValueError(
+                        "Table contains legacy generated_description rows. Use a fresh reference table."
+                    )
+                requested = {
+                    r.label: json.loads(r.value)
+                    for r in records
+                    if r.source_kind == "description_prototype"
+                }
+                for label, value in index.prototype_values():
+                    if label in requested and json.loads(value) != requested[label]:
+                        raise ValueError(
+                            f"Captions changed for {label}. Use a fresh reference table."
+                        )
             # filter existing records from incoming data
             records = [r for r in records if (r.source_kind, r.source_identity) not in existing_ids]
             if images is not None:

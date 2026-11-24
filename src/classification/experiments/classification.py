@@ -22,7 +22,12 @@ from classification.experiments.report_types import (
     EvaluationReport,
     IndexSummary,
 )
-from classification.llm.generate_descriptors import DescriberLLM
+from classification.llm.generate_descriptors import (
+    TEMPLATE_VERSION,
+    TEMPLATES,
+    DescriberLLM,
+    template_order,
+)
 from classification.llm.ollama import OllamaSession
 from classification.retrieval.lancedb import LanceDBIndex
 from classification.retrieval.metrics import metrics
@@ -122,13 +127,34 @@ class Experiment:
         if settings is None or settings.llm is None or self.config.description_count is None:
             raise ValueError("Generating descriptions requires ollama.llm and description_count")
         self.output.mkdir(parents=True, exist_ok=True)
-        with OllamaSession(settings) as session:
-            llm = DescriberLLM(session.client, settings.llm)
-            descriptions = llm.generate_descriptions(
-                self.classes,
-                self.config.description_count,
-            )
-        write_json(path, dict(descriptions=descriptions))
+        count = self.config.description_count
+        generation = {
+            "classes": list(self.classes),
+            "model": settings.llm,
+            "description_count": count,
+            "template_version": TEMPLATE_VERSION,
+            "template_ids": template_order(count),
+            "templates": TEMPLATES,
+        }
+        checkpoint = self.output / "descriptions.partial.json"
+        descriptions: dict[str, list[str]] = {}
+        if checkpoint.exists():
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            if saved["generation"] != generation:
+                raise ValueError("Description checkpoint settings changed. Use a fresh output_dir.")
+            descriptions = saved["descriptions"]
+
+        def save_class(label: str, captions: list[str]) -> None:
+            descriptions[label] = captions
+            write_json(checkpoint, {"generation": generation, "descriptions": descriptions})
+
+        pending = [label for label in self.classes if label not in descriptions]
+        if pending:
+            with OllamaSession(settings) as session:
+                llm = DescriberLLM(session.client, settings.llm)
+                llm.generate_descriptions(pending, count, on_class=save_class)
+        write_json(path, {"generation": generation, "descriptions": descriptions})
+        checkpoint.unlink(missing_ok=True)
         return descriptions
 
     def _index_builder(self) -> IndexBuilder:

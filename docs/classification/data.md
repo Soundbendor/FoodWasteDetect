@@ -207,18 +207,29 @@ Omitted/null selects `output_dir/descriptions.json` for generation or reuse.
 Indexing reads the same resolved path through `experiments.descriptions.load_descriptions`;
 it never generates missing descriptions. The JSON has a `descriptions` mapping
 from labels to lists of sentences. The default classification YAML shares the existing vocabulary under
-`assets/classification/descriptions_v1/`. Generation followed by indexing can use
-the default vocabulary path without an explicit `descriptions_file`.
+`assets/classification/descriptions_v1/`. Use a fresh output directory and set
+`descriptions_file=null` to generate a multi-template vocabulary.
 
-[`generate_descriptors.py`](../../src/classification/llm/generate_descriptors.py) owns the
-prompt and model requests. `DescriberLLM(client, model)` receives its client and
-model explicitly. `DescriberLLM.generate_descriptions(classes, count)`
-loops through classes and requests; `describe_class(label)` uses the shared visual
-prompt. Pydantic validates the `FoodDescriptor` response, the requested class label
-replaces the model's returned label, and asterisks are stripped from the sentence.
-Empty or whitespace-only descriptions fail the stage. Errors and interrupts
-propagate without retries or partial description files. Progress semantics are in
-[tracking](tracking.md).
+```sh
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e jina-cpu \
+  classification experiment describe --config_file cfg/classification.yml \
+  --set descriptions_file=null --set output_dir=assets/classification/descriptions_v2
+```
+
+Each call requests one short sentence naming the food. Five shared templates cover
+overall appearance, shape, surface, distinguishing features, and common variations.
+`description_count` selects that many templates in order, cycling for counts over five.
+The final JSON retains the `descriptions` mapping. Its `generation` object stores the
+ordered classes, model, count, template version, ordered template IDs (one per caption),
+and prompt templates. Older vocabularies still load.
+
+The generator strips asterisks, checks the food name as a whole phrase, and checks
+for duplicates within a class ignoring case and whitespace. A missing name or
+duplicate gets one replacement request for that template. A second invalid caption
+raises an error naming the class and template. Service and schema errors propagate.
+Each completed class is saved atomically to `descriptions.partial.json` in the output
+directory. Rerunning the command resumes with the first unfinished class when
+the generation settings match. Successful final publication removes the checkpoint.
 
 `llm/ollama.py` owns the `OllamaSession` context manager. Callers pass an
 `OllamaConfig`, which validates `binary_path`, `host`, and positive finite

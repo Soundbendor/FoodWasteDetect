@@ -44,8 +44,8 @@ They close on errors or interruption and do not count unfinished work as complet
 
 | Loop | Total and advancement |
 | --- | --- |
-| Descriptions | Known class-count × descriptions-per-class total; advance after each returned request. |
-| Text references | Known pending-record total; advance after a successful append. |
+| Descriptions | Pending classes × captions per class. Advance after each accepted caption. |
+| Text references | Pending class names and individual captions. Advance after each completed encoding batch and any resulting append. |
 | Image references and validation embeddings | Running image count without an extra total scan or percentage/ETA; advance after a successful append. |
 | Evaluation | Full validation count; advance after all predictions in a batch succeed. |
 

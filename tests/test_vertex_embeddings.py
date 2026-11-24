@@ -369,6 +369,7 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
         output_dir=str(tmp_path / "output"),
         embed_images=True,
         embed_class_labels=True,
+        embed_descriptions=True,
         descriptions_file=str(descriptions),
     )
     config["embedding"].update(batch_size=2, truncate_dim=128)
@@ -379,7 +380,7 @@ def test_experiment_references_cache_and_failed_evaluation(transport, tmp_path):
     summary = experiment.build_vector_database().model_dump(mode="json")
     assert summary["source_counts"] == {
         "class_name": 1,
-        "generated_description": 3,
+        "description_prototype": 1,
         "training_image": 3,
     }
     assert len(requests) == 7
@@ -437,9 +438,9 @@ def resume_config(tmp_path):
     config = yaml.safe_load(Path("cfg/ge_v2.yml").read_text())
     config.update(dataset={"name": "foodx251", "root": str(root)},
                   output_dir=str(tmp_path / "output"), embed_images=True,
-                  embed_class_labels=True, descriptions_file=str(descriptions))
+                  embed_class_labels=True, embed_descriptions=True, descriptions_file=str(descriptions))
     config["embedding"].update(batch_size=20, truncate_dim=128)
-    config["embedding"]["vertex"].update(project="fixture", max_attempts=1)
+    config["embedding"]["vertex"].update(project="fixture", max_attempts=1, classification_prompt=False)
     config["lancedb"]["uri"] = str(tmp_path / "db")
     return config
 
@@ -453,7 +454,7 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     config["n_imgs_per_class"] = 12
     index = LanceDBIndex.create(config["lancedb"]["uri"], config["lancedb"]["table"], 128)
     initial = [PointRecord("Apple", "class_name", "Apple", "Apple"),
-               PointRecord("Apple", "generated_description", "Apple:1", "round")]
+               PointRecord("Apple", "description_prototype", "Apple", json.dumps(["red", "round"]))]
     initial += [PointRecord("Apple", "training_image", f"foodx251:train:{i}.png", "old")
                 for i in range(11)]
     index.append(initial, np.ones((13, 128), dtype=np.float32))
@@ -463,18 +464,18 @@ def test_resume_all_sources_and_complete_validation(transport, resume_config, mo
     experiment = Experiment(ExperimentConfig.model_validate(config), tracker=tracker)
     summary = experiment.build_vector_database().model_dump(mode="json")
     tracker.progress.assert_not_called()
-    assert len(requests) == 2  # one description and the twelfth capped image
+    assert len(requests) == 1  # only the twelfth capped image
     assert summary["source_counts"] == {
-        "class_name": 1, "generated_description": 2, "training_image": 12}
+        "class_name": 1, "description_prototype": 1, "training_image": 12}
     index = LanceDBIndex.open(index.uri, index.name)
-    assert len(index.get_record_ids()) == 15
+    assert len(index.get_record_ids()) == 14
     assert set(old_ids) <= {r["id"] for r in index.table.search().limit(None).to_list()}
     report = experiment.evaluate().model_dump(mode="json")
-    assert len(requests) == 15
+    assert len(requests) == 14
     assert [r["source_id"] for r in report["predictions"]] == [
         f"foodx251:val:{i}.png" for i in range(13)]
     assert {kind for kind, _ in index.get_record_ids()} == {
-        "class_name", "generated_description", "training_image"}
+        "class_name", "description_prototype", "training_image"}
     (experiment.output / "index.json").unlink()
     # Cached runs must work even when all image files are missing.
     for path in Path(config["dataset"]["root"]).glob("*/*_set/*.png"):
@@ -506,7 +507,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
     def fail(request):
         nonlocal calls
         calls += 1
-        if calls == (3 if committed else 2):
+        if calls == (4 if committed and stage == "reference" else 3 if committed else 2):
             return httpx.Response(400, json={"error": {"code": 400, "message": "failed"}})
         return response()
 
@@ -523,8 +524,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
     expected = {}
     if stage == "reference":
         expected.update({("class_name", "Apple"): "Apple",
-                         ("generated_description", "Apple:0"): "red",
-                         ("generated_description", "Apple:1"): "round"})
+                         ("description_prototype", "Apple"): ["red", "round"]})
     split = "val" if stage == "validation" else "train"
     kind = "validation_image" if stage == "validation" else "training_image"
     expected.update({(kind, f"foodx251:{split}:{i}.png"): i + 1 for i in range(13)})
@@ -536,7 +536,7 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
         total = 13
     else:
         restarted.build_vector_database()
-        total = 16
+        total = 15
     submitted = []
     for request in requests:
         part = json.loads(request.content)["content"]["parts"][0]
@@ -545,7 +545,8 @@ def test_failed_batch_restart_only_unsaved(transport, resume_config, stage, batc
         else:
             with Image.open(BytesIO(base64.urlsafe_b64decode(part["inlineData"]["data"]))) as image:
                 submitted.append(image.getpixel((0, 0))[0])
-    assert Counter(submitted) == Counter(value for key, value in expected.items() if key not in saved)
+    assert Counter(submitted) == Counter(item for key, value in expected.items() if key not in saved
+                                         for item in (value if isinstance(value, list) else [value]))
     index = LanceDBIndex.open(index.uri, index.name)
     assert len(index.get_record_ids()) == total
 

@@ -179,6 +179,16 @@ class LanceDBIndex:
         table = self.table.to_lance().to_table(columns=["source_kind", "source_identity"])
         return list(zip(*(table[name].to_pylist() for name in table.column_names), strict=True))
 
+    def prototype_values(self) -> list[tuple[str, str]]:
+        """Read saved caption lists without loading vectors or image metadata."""
+        rows = self.table.to_lance().to_table(
+            columns=["source_identity", "value"],
+            filter=pc.field("source_kind") == "description_prototype",
+        )
+        return list(
+            zip(rows["source_identity"].to_pylist(), rows["value"].to_pylist(), strict=True)
+        )
+
     def fetch_vectors(self, identities: Sequence[SourceIdentity]) -> NDArray[np.float32]:
         """Fetch vectors in the requested identity order, including repeats.
 
