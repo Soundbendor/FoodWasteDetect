@@ -746,6 +746,11 @@ class ExperimentTests(unittest.TestCase):
                 "a photo of pear, a type of food.",
                 "a photo of apple pie, a type of food.",
             ]),
+            ("siglip2_photo", [
+                "This is a photo of Apple",
+                "This is a photo of Pear",
+                "This is a photo of Apple pie",
+            ]),
         ]:
             with self.subTest(preset=preset):
                 exp = self.experiment(name=preset)

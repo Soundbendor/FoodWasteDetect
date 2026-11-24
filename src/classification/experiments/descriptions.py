@@ -27,6 +27,8 @@ def text_references(
             text = label
             if class_label_prompt == "food_photo":
                 text = f"a photo of {label.lower()}, a type of food."
+            elif class_label_prompt == "siglip2_photo":
+                text = f"This is a photo of {label}"
             records.append(PointRecord(label, "class_name", label, text))
     if descriptions is not None:
         records.extend(

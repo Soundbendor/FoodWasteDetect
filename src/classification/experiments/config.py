@@ -18,7 +18,7 @@ class ConfigModel(BaseModel):
 
 # Registered dataset names; must equal the keys of classification.util.DATASETS.
 DatasetName = Literal["foodx251", "food101", "uecfood256", "vegfru", "isia500"]
-ClassLabelPrompt = Literal["bare", "food_photo"]
+ClassLabelPrompt = Literal["bare", "food_photo", "siglip2_photo"]
 
 
 class DatasetConfig(ConfigModel):
