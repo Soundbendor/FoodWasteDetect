@@ -1,8 +1,11 @@
-"""Generate visual food descriptions through a supplied Ollama client."""
+"""Generate visual food descriptions through Ollama or Gemini on Vertex AI."""
 
 import re
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 
+from google import genai
+from google.genai import types
 from ollama import ChatResponse, Client
 from pydantic import BaseModel
 from tqdm import tqdm
@@ -38,12 +41,12 @@ class FoodDescriptor(BaseModel):
     description: str
 
 
-class DescriberLLM:
-    """Generate food descriptions through a caller-owned Ollama client."""
+class CaptionGenerator(ABC):
+    """Apply the shared caption prompts, validation and replacement policy."""
 
-    def __init__(self, client: Client, model: str) -> None:
-        self.client = client
-        self.model = model
+    @abstractmethod
+    def _request(self, message: dict[str, str]) -> str:
+        """Return a structured descriptor as JSON."""
 
     def describe_class(
         self, label: str, template_id: str = "overall", replacement: bool = False
@@ -51,12 +54,7 @@ class DescriberLLM:
         message = descriptor_prompt(label, template_id)
         if replacement:
             message["content"] += " Write a different caption and include the exact food name."
-        response: ChatResponse = self.client.chat(
-            model=self.model,
-            messages=[message],
-            format=FoodDescriptor.model_json_schema(),
-        )
-        output = FoodDescriptor.model_validate_json(response.message.content or "")
+        output = FoodDescriptor.model_validate_json(self._request(message))
         output.food_class = label
         output.description = output.description.replace("*", "").strip()
         return output
@@ -96,3 +94,35 @@ class DescriberLLM:
                     on_class(label, captions)
                 descriptions[label] = captions
         return descriptions
+
+
+class DescriberLLM(CaptionGenerator):
+    """Generate food descriptions through a caller-owned Ollama client."""
+
+    def __init__(self, client: Client, model: str) -> None:
+        self.client = client
+        self.model = model
+
+    def _request(self, message: dict[str, str]) -> str:
+        response: ChatResponse = self.client.chat(
+            model=self.model, messages=[message], format=FoodDescriptor.model_json_schema()
+        )
+        return response.message.content or ""
+
+
+class GeminiDescriber(CaptionGenerator):
+    """Generate food descriptions through a caller-owned Google Gen AI client."""
+
+    def __init__(self, client: genai.Client, model: str) -> None:
+        self.client = client
+        self.model = model
+
+    def _request(self, message: dict[str, str]) -> str:
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=message["content"],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json", response_schema=FoodDescriptor
+            ),
+        )
+        return response.text or ""

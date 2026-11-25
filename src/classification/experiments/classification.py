@@ -6,8 +6,11 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Iterable, Iterator
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
+
+from google import genai
 
 from classification.datasets.base import FoodImageDataset
 from classification.encoders.base import Embedder
@@ -26,6 +29,7 @@ from classification.llm.generate_descriptors import (
     TEMPLATE_VERSION,
     TEMPLATES,
     DescriberLLM,
+    GeminiDescriber,
     template_order,
 )
 from classification.llm.ollama import OllamaSession
@@ -41,7 +45,7 @@ class Experiment:
 
     Primary entry-point for image classification experiments. Uses LanceDB to
     build vector databases from image and text embeddings. Breaks experiments
-    into three stages: (optionally) generating description captions via Ollama,
+    into three stages: (optionally) generating class captions via Ollama or Gemini,
     building the vector database with the configured embedding model, and
     running classification evaluation.
     """
@@ -110,7 +114,7 @@ class Experiment:
 
         An explicit descriptions file is read-only; a missing file fails without
         generation. Otherwise, reuse the output vocabulary or generate it through
-        an owned Ollama session. File and generation errors propagate.
+        the selected caption provider. File and generation errors propagate.
 
         Returns:
             A mapping from class labels to description lists, or None when
@@ -124,13 +128,17 @@ class Experiment:
             logging.info(f"Loading existing descriptions at {path}")
             return load_descriptions(path)
         settings = self.config.ollama
-        if settings is None or settings.llm is None or self.config.description_count is None:
-            raise ValueError("Generating descriptions requires ollama.llm and description_count")
-        self.output.mkdir(parents=True, exist_ok=True)
+        gemini_model = self.config.gemini_caption_model
+        model = gemini_model or (settings.llm if settings else None)
         count = self.config.description_count
+        if model is None or count is None:
+            required = "gemini_caption_model" if gemini_model else "ollama.llm"
+            raise ValueError(f"Generating descriptions requires {required} and description_count")
+        self.output.mkdir(parents=True, exist_ok=True)
         generation = {
             "classes": list(self.classes),
-            "model": settings.llm,
+            "provider": "vertex" if gemini_model else "ollama",
+            "model": model,
             "description_count": count,
             "template_version": TEMPLATE_VERSION,
             "template_ids": template_order(count),
@@ -140,6 +148,8 @@ class Experiment:
         descriptions: dict[str, list[str]] = {}
         if checkpoint.exists():
             saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            # Checkpoints written before provider selection always used Ollama.
+            saved["generation"].setdefault("provider", "ollama")
             if saved["generation"] != generation:
                 raise ValueError("Description checkpoint settings changed. Use a fresh output_dir.")
             descriptions = saved["descriptions"]
@@ -150,8 +160,21 @@ class Experiment:
 
         pending = [label for label in self.classes if label not in descriptions]
         if pending:
-            with OllamaSession(settings) as session:
-                llm = DescriberLLM(session.client, settings.llm)
+            with ExitStack() as stack:
+                if gemini_model:
+                    vertex = self.config.embedding.vertex
+                    if not vertex.project:
+                        raise ValueError("Gemini captions require embedding.vertex.project")
+                    client = stack.enter_context(
+                        genai.Client(
+                            vertexai=True, project=vertex.project, location=vertex.location
+                        )
+                    )
+                    llm = GeminiDescriber(client, model)
+                else:
+                    assert settings is not None  # Validated above when selecting the model.
+                    session = stack.enter_context(OllamaSession(settings))
+                    llm = DescriberLLM(session.client, model)
                 llm.generate_descriptions(pending, count, on_class=save_class)
         write_json(path, {"generation": generation, "descriptions": descriptions})
         checkpoint.unlink(missing_ok=True)
@@ -274,7 +297,7 @@ class Experiment:
         return report
 
     def run(self) -> EvaluationReport:
-        """Describe, index, and evaluate, closing Ollama before loading the embedder."""
-        self.generate_descriptions()  # Owned Ollama context exits before embedder construction.
+        """Describe, index, and evaluate, closing the caption provider before loading the embedder."""
+        self.generate_descriptions()
         self.build_vector_database()
         return self.evaluate()

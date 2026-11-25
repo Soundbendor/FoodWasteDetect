@@ -49,7 +49,7 @@ backend checks remain separate; service requirements belong to
 [descriptions](data.md#class-descriptions-and-ollama) and [Vertex](encoders.md#vertex).
 
 `run()` calls `generate_descriptions()`, `build_vector_database()`, then
-`evaluate()`. The owned Ollama context closes before embedding begins. The
+`evaluate()`. The caption provider closes before embedding begins. The
 `describe` and `index` CLI stages use those named methods directly.
 
 Vocabulary path resolution, generation/cache behavior, and Ollama lifecycle are

@@ -104,6 +104,7 @@ class ExperimentConfig(ConfigModel):
     # Compact per-run record (settings and aggregate metrics) for group collection.
     result_file: NonemptyString | None = None
     ollama: OllamaConfig | None = None
+    gemini_caption_model: NonemptyString | None = None
     description_count: PositiveInt | None = None
 
     @field_validator("sweep_dimensions")

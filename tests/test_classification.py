@@ -279,6 +279,59 @@ class ExperimentTests(unittest.TestCase):
             Experiment(exp.config).build_vector_database()
         self.assertEqual(exp.evaluate().metrics['evaluated'], 2)
 
+    def test_gemini_generates_structured_captions_and_reuses_vocabulary(self):
+        import httpx
+        from google import genai
+        from google.genai import types
+        from google.auth.credentials import AnonymousCredentials
+
+        exp = self.experiment((False, False, True))
+        exp.config.gemini_caption_model = 'fixture-model'
+        exp.config.description_count = 1
+        exp.config.ollama = None
+        with self.assertRaisesRegex(ValueError, 'embedding.vertex.project'):
+            exp.generate_descriptions()
+        exp.config.embedding.vertex.project = 'fixture-project'
+        exp.config.embedding.vertex.location = 'us-central1'
+        replies = iter(['missing name', '*Red Apple*', 'Green Pear'])
+        prompts = []
+
+        def respond(request):
+            body = json.loads(request.content)
+            prompts.append(body['contents'][0]['parts'][0]['text'])
+            self.assertEqual(request.url.host, 'us-central1-aiplatform.googleapis.com')
+            self.assertIn('/projects/fixture-project/locations/us-central1/publishers/google/'
+                          'models/fixture-model:generateContent', request.url.path)
+            self.assertEqual(request.headers['authorization'], 'Bearer synthetic-test-token')
+            config = body['generationConfig']
+            self.assertEqual(config['responseMimeType'], 'application/json')
+            self.assertEqual(set(config['responseSchema']['required']), {'description', 'food_class'})
+            text = json.dumps({'food_class': 'ignored', 'description': next(replies)})
+            return httpx.Response(200, json={'candidates': [{'content': {'role': 'model', 'parts': [{'text': text}]}}]})
+
+        real_client = genai.Client
+        def create_client(**kwargs):
+            return real_client(**kwargs, http_options=types.HttpOptions(
+                client_args={'transport': httpx.MockTransport(respond)},
+            ))
+
+        credentials = AnonymousCredentials()
+        credentials.token = 'synthetic-test-token'
+        with patch('google.auth.default', return_value=(credentials, 'fixture-project')), patch(
+            'classification.experiments.classification.genai.Client', side_effect=create_client
+        ) as constructor:
+            expected = {'Apple': ['Red Apple'], 'Pear': ['Green Pear']}
+            self.assertEqual(exp.generate_descriptions(), expected)
+            exp.config.embedding.vertex.project = None
+            self.assertEqual(exp.generate_descriptions(), expected)
+            constructor.assert_called_once_with(vertexai=True, project='fixture-project', location='us-central1')
+        self.assertIn('Apple', prompts[0])
+        self.assertIn('different caption', prompts[1])
+        self.assertIn('Pear', prompts[2])
+        metadata = json.loads(exp.descriptions_path.read_text())['generation']
+        self.assertEqual((metadata['provider'], metadata['model']), ('vertex', 'fixture-model'))
+        self.session_constructor.assert_not_called()
+
     def test_generation_resumes_only_matching_checkpoints(self):
         exp = self.experiment((False, False, True))
         exp.config.description_count = 1
@@ -289,6 +342,13 @@ class ExperimentTests(unittest.TestCase):
                 exp.generate_descriptions()
         checkpoint = exp.output / 'descriptions.partial.json'
         self.assertEqual(json.loads(checkpoint.read_text())['descriptions'], {'Apple': ['Red Apple']})
+        legacy = json.loads(checkpoint.read_text())
+        del legacy['generation']['provider']
+        checkpoint.write_text(json.dumps(legacy))
+        exp.config.gemini_caption_model = exp.config.ollama.llm
+        with self.assertRaisesRegex(ValueError, 'fresh output_dir'):
+            exp.generate_descriptions()
+        exp.config.gemini_caption_model = None
         exp.config.description_count = 2
         with self.assertRaisesRegex(ValueError, 'fresh output_dir'):
             exp.generate_descriptions()

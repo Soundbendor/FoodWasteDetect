@@ -216,11 +216,31 @@ pixi run --manifest-path src/classification/pyproject.toml --as-is -e jina-cpu \
   --set descriptions_file=null --set output_dir=assets/classification/descriptions_v2
 ```
 
+Gemini captions use Vertex AI with the same Application Default Credentials,
+`embedding.vertex.project`, and `embedding.vertex.location` as the Vertex
+embedding workflow, including when the image encoder is local. For local
+development, an existing `gcloud auth application-default login` works for
+both stages. Set `GEMINI_MODEL` to a Vertex model ID that supports structured
+output in your configured location.
+A non-null `gemini_caption_model` selects Gemini. Omit it to use Ollama.
+
+```sh
+pixi run --manifest-path src/classification/pyproject.toml --as-is -e jina-cpu \
+  classification experiment describe --config_file cfg/classification.yml \
+  --set "embedding.vertex.project=${GOOGLE_CLOUD_PROJECT:?set your Vertex project}" \
+  --set "gemini_caption_model=${GEMINI_MODEL:?set GEMINI_MODEL}" \
+  --set descriptions_file=null --set output_dir=assets/classification/descriptions_gemini
+```
+
+Gemini receives the rendered text prompt for each caption. Both providers use the
+same response schema, validation, and per-class checkpoints. The model and provider
+must match on resume. Checkpoints from before provider selection belong to Ollama.
+
 Each call requests one short sentence naming the food. Five shared templates cover
 overall appearance, shape, surface, distinguishing features, and common variations.
 `description_count` selects that many templates in order, cycling for counts over five.
 The final JSON retains the `descriptions` mapping. Its `generation` object stores the
-ordered classes, model, count, template version, ordered template IDs (one per caption),
+ordered classes, provider, model, count, template version, ordered template IDs (one per caption),
 and prompt templates. Older vocabularies still load.
 
 The generator strips asterisks, checks the food name as a whole phrase, and checks
@@ -234,7 +254,7 @@ the generation settings match. Successful final publication removes the checkpoi
 `llm/ollama.py` owns the `OllamaSession` context manager. Callers pass an
 `OllamaConfig`, which validates `binary_path`, `host`, and positive finite
 `startup_timeout`/`request_timeout` seconds. These settings have no environment
-fallback. Before generating descriptions, `Experiment.generate_descriptions()`
+fallback. For Ollama generation, `Experiment.generate_descriptions()`
 also requires `ollama.llm` and `description_count`; downloads use the explicit
 requested model name. Cached and disabled description paths need no Ollama settings.
 
